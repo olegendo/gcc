@@ -460,7 +460,7 @@ s390*-*-*)
 sh[123456789lbe]*-*-* | sh-*-*)
 	cpu_type=sh
 	extra_options="${extra_options} fused-madd.opt"
-	extra_objs="${extra_objs} sh_treg_combine.o sh-mem.o sh_optimize_sett_clrt.o"
+	extra_objs="${extra_objs} sh_treg_combine.o sh-mem.o sh_optimize_sett_clrt.o sh_ams.o"
 	;;
 v850*-*-*)
 	cpu_type=v850
