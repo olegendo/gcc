@@ -102,6 +102,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "builtins.h"
 #include "rtl-iter.h"
 
+#include "sh_ams.h"
+
 int code_for_indirect_jump_scratch = CODE_FOR_indirect_jump_scratch;
 
 /* These are some macros to abstract register modes.  */
@@ -815,6 +817,14 @@ extern opt_pass* make_pass_sh_treg_combine (gcc::context* ctx, bool split_insns,
 					    const char* name);
 extern opt_pass* make_pass_sh_optimize_sett_clrt (gcc::context* ctx,
 						  const char* name);
+
+static struct ams_delegate : public sh_ams::delegate
+{
+  virtual void mem_access_alternatives (sh_ams::access& a);
+  virtual int addr_reg_mod_cost (sh_ams::regno_t reg, sh_ams::disp_t disp);
+  virtual int addr_reg_clone_cost (sh_ams::regno_t reg);
+} g_ams_delegate;
+
 static void
 register_sh_passes (void)
 {
@@ -845,6 +855,10 @@ register_sh_passes (void)
      stabilized and won't be changed by further passes.  */
   register_pass (make_pass_sh_optimize_sett_clrt (g, "sh_optimize_sett_clrt"),
 		 PASS_POS_INSERT_BEFORE, "sched2", 1);
+
+  /* Add AMS pass before mode switching.  */
+  register_pass (new sh_ams (g, "sh_ams", &g_ams_delegate),
+		 PASS_POS_INSERT_BEFORE, "mode_sw", 1);
 }
 
 /* Implement TARGET_OPTION_OVERRIDE macro.  Validate and override 
@@ -13660,6 +13674,128 @@ sh_find_equiv_gbr_addr (rtx_insn* insn, rtx mem)
 
   return NULL_RTX;
 }
+
+// ------------------------------------------------------------------------------
+// AMS delegate functions
+
+// similar to sh_address_cost, but for the AMS pass.
+void ams_delegate::mem_access_alternatives (sh_ams::access& a)
+{
+  // FIXME: determine R0 extra cost dynamically, based on what is happening
+  // around the memory access.
+  // if there are insns that are likely to use R0 (tst #imm, and/or/xor #imm)
+  // using it for indexed addresses is more expensive.  using it as load/store
+  // dst/src is not that expensive.
+  // in order to evaluate that, the ams_delegate needs to scan the insns around
+  // the memory access.  to prevent repeated scans in the same areas we could
+  // use some caching, but then the delegate needs to be stateful and the ams
+  // pass needs to 'reset' it whenever a new function starts or something
+  // like that.
+  const int r0_extra_cost = 1;
+
+  int gbr_extra_cost = 0;
+
+  // FIXME: this should actually be the GBR_REGS reg class.
+  // if AMS is done before register allocation most of the stuff should work
+  // on pseudos, unless value tracing ends in a hard-reg.
+  // in this case, GBR_REG should work.
+  // on targets that have dedicated address registers (e.g. 68K) running AMS
+  // on pseudos before RA will work.  but when ran after RA, AMS will have to
+  // deal with hard-regs and do the checking on register classes + reg numbers.
+  // this is some sort of register constraint handling.
+  if (a.address ().base_reg () == GBR_REG)
+  {
+    // A GBR relative address.  Sticking to the GBR base reg is the cheapest
+    // and also allows for the largest displacement.
+    // Everything else is possible, but costs more, as the GBR reg has to be
+    // loaded into a GP reg.  Accessing floating point values via GBR will
+    // ferry the values through FPUL and R0, so avoid it.
+    // FIXME: If it's only one or two SFmode values, it could be still OK.
+
+    //if (REG_P (a.other_operand ()) && FP_REGISTER_P (a.other_operand ()))
+
+    if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
+      {
+	a.add_alternative (1, sh_ams::make_disp_addr (GBR_REG, 0, 255 * a.access_size ()));
+	gbr_extra_cost = 2;
+      }
+  }
+
+  // simple register access and indexed access is available for pretty much
+  // everything.
+  // FIXME: except for a few system register accesses such as SR, GBR, VBR,
+  // MOD, RE, RS, SGR, SSR, SPC, DBR, Rn_Bank, MACH, MACL, PR, DSR, A0, X0, X1,
+  // Y0, Y1, FPSCR, FPUL.
+  // FIXME: also constant pool loads (LABEL_REF?).
+  // FIXME: also mac.w and mac.l insns (post-inc loads only).
+  a.add_alternative (1 + gbr_extra_cost, sh_ams::make_reg_addr ());
+
+  // indexed addressing has to use R0 for either base or index reg.
+  a.add_alternative (1 + gbr_extra_cost + r0_extra_cost,
+		     sh_ams::make_index_addr ());
+
+  // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
+  // everything.
+  if (a.access_mode () == sh_ams::load)
+    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_post_inc_addr (a.mach_mode ()));
+  else if (a.access_mode () == sh_ams::store)
+    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_pre_dec_addr (a.mach_mode ()));
+
+  if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
+    {
+      // SH2A allows pre-dec load to R0 and post-inc store from R0.
+      if (a.access_mode () == sh_ams::load && TARGET_SH2A)
+	a.add_alternative (1 + r0_extra_cost + gbr_extra_cost,
+			   sh_ams::make_pre_dec_addr (a.mach_mode ()));
+
+      if (a.access_mode () == sh_ams::store && TARGET_SH2A)
+	a.add_alternative (1 + r0_extra_cost + gbr_extra_cost,
+			   sh_ams::make_post_inc_addr (a.mach_mode ()));
+
+      // QImode and HImode accesses with displacements work with R0 only,
+      // thus charge extra.
+      a.add_alternative (
+	  1 + (a.access_size () < 4 ? r0_extra_cost : 0) + gbr_extra_cost,
+	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), false)));
+    }
+
+  // On SH2A we can do larger displacements and also do FP modes with
+  // displacements, but those are 32 bit insns, which we generally try to avoid.
+  // FIXME: maybe this is a good alternative for GBR access (i.e. reduce cost
+  // in this case if base reg is GBR)
+  if (TARGET_SH2A)
+    a.add_alternative (
+	  3 + gbr_extra_cost,
+	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), true)));
+}
+
+int ams_delegate::addr_reg_mod_cost (sh_ams::regno_t reg, sh_ams::disp_t disp)
+{
+  // modifying the GBR is impossible.
+  if (reg == GBR_REG)
+    return sh_ams::infinite_costs;
+
+  // the costs for adding small constants should be higher than
+  // QI/HI displacement mode addresses.
+  if (CONST_OK_FOR_I08 (disp))
+    return 2;
+
+  // assume that everything else is even worse.
+  // FIXME: if register pressure is (expected to be) high, reduce the cost
+  // a bit to avoid addr reg cloning.
+  return 5;
+}
+
+int ams_delegate::addr_reg_clone_cost (sh_ams::regno_t reg ATTRIBUTE_UNUSED)
+{
+  // FIXME: maybe cloning the GBR should be cheaper?
+  // FIXME: if register pressure is (expected to be) high, increase the cost
+  // a bit to avoid addr reg cloning.
+  return 4;
+}
+
+// ------------------------------------------------------------------------------
+
 
 /*------------------------------------------------------------------------------
   Manual insn combine support code.
