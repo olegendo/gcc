@@ -45,6 +45,17 @@ public:
     disp_t disp (void) const { return m_disp; }
     disp_t disp_min (void) const { return m_disp_min; }
     disp_t disp_max (void) const { return m_disp_max; }
+    regno_t index_reg (void) const { return m_index_reg; }
+    scale_t scale (void) const { return m_scale; }
+    scale_t scale_min (void) const { return m_scale_min; }
+    scale_t scale_max (void) const { return m_scale_max; }
+
+    // returns true if the original address expression is more complex than
+    // what AMS can handle.
+    bool is_invalid (void) const
+    {
+      return disp_min () > disp_max ();
+    }
 
     // displacement relative to the base reg before the actual memory access.
     // e.g. a pre-dec access will have a pre-disp of -mode_size.
@@ -100,11 +111,6 @@ public:
     }
 
 //   non_mod_addr (regno_t base_reg, disp_t disp, disp_t min_disp, disp_t max_disp)
-
-    regno_t index_reg (void) const { return m_index_reg; }
-    scale_t scale (void) const { return m_scale; }
-    scale_t scale_min (void) const { return m_scale_min; }
-    scale_t scale_max (void) const { return m_scale_max; }
   };
 
   class pre_mod_addr : public addr_expr
@@ -137,6 +143,10 @@ public:
     }
   };
 
+  static void expand_expr (rtx* expr, rtx_insn* insn);
+  static void find_reg_value (rtx* reg, rtx_insn* insn);
+  static addr_expr extract_addr_expr (rtx x);
+
   // helper functions to create a particular type of address expression.
   static addr_expr
   make_reg_addr (regno_t base_reg = any_regno);
@@ -164,6 +174,9 @@ public:
 
   static addr_expr
   make_pre_dec_addr (machine_mode mode, regno_t base_reg = any_regno);
+
+  static addr_expr
+  make_invalid_addr (void);
 
   // a memory access in the insn stream.
   class access
@@ -232,6 +245,8 @@ public:
       alternative (const addr_expr& ae, int costs)
       : m_addr_expr (ae), m_costs (costs) { }
 
+      alternative () {  }
+
       const addr_expr& address (void) const { return m_addr_expr; }
       int costs (void) const { return m_costs; }
 
@@ -240,7 +255,7 @@ public:
       int m_costs;
     };
 
-    access (rtx insn, rtx* mem);
+    access (rtx_insn* insn, rtx* mem, access_mode_t access_mode);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -291,6 +306,10 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
+    // the next/previous access in the access sequence
+    access* m_next;
+    access* m_prev;
+
   private:
     addr_expr m_original_addr_expr;
     addr_expr m_addr_expr;
@@ -308,6 +327,57 @@ public:
 
     int m_alternatives_count;
     alternative m_alternatives[MAX_ALTERNATIVES];
+  };
+
+  // a sequence of accesses in a basic block.
+  class access_sequence
+  {
+  public:
+    access_sequence (basic_block bb)
+      {
+	m_bb = bb;
+	m_begin = m_end = NULL;
+      }
+
+    ~access_sequence (void)
+      {
+	access* curr;
+	while ( (curr = m_begin) != NULL)
+	  {
+	    m_begin = m_begin->m_next;
+	    delete curr;
+	  }
+      }
+
+
+    const access* begin (void) const { return m_begin; }
+    const access* end (void) const { return m_end; }
+
+    access* begin (void) { return m_begin; }
+    access* end (void) { return m_end; }
+
+    void add_access (access* ac)
+    {
+      if (!m_begin)
+	{
+	  m_begin = m_end = ac;
+	  ac->m_next = ac->m_prev = NULL;
+	}
+      else
+	{
+	  m_end->m_next = ac;
+	  ac->m_prev = m_end;
+	  ac->m_next = NULL;
+	  m_end = ac;
+	}
+    }
+
+
+  private:
+    basic_block m_bb;
+
+    access* m_begin;
+    access* m_end;
   };
 
 
@@ -402,5 +472,10 @@ sh_ams::make_pre_dec_addr (machine_mode mode, regno_t base_reg)
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
+inline sh_ams::addr_expr
+sh_ams::make_invalid_addr (void)
+{
+  return make_disp_addr (-1, -2);
+}
 
 #endif // includeguard_gcc_sh_ams_includeguard

@@ -113,6 +113,221 @@ namespace
 } // anonymous namespace
 
 
+sh_ams::access::access (rtx_insn* insn, rtx* mem, access_mode_t access_mode)
+{
+  m_access_mode = access_mode;
+  m_machine_mode = GET_MODE (*mem);
+  m_addr_space = MEM_ADDR_SPACE (*mem);
+  m_insn = insn;
+  m_insn_ref = &XEXP (*mem, 0);
+
+  // Create an ADDR_EXPR struct from the address expression of MEM.
+  rtx expr = copy_rtx (XEXP (*mem, 0));
+  log_msg ("Access rtx:\n");
+  log_rtx (expr);
+  m_original_addr_expr = extract_addr_expr (expr);
+  log_msg ("\nm_original_addr_expr:\n");
+  log_msg ("base: %d, index: %d, scale: %d, disp: %d\n",
+           m_original_addr_expr.base_reg (), m_original_addr_expr.index_reg (),
+           m_original_addr_expr.scale (), m_original_addr_expr.disp ());
+
+  expand_expr (&expr, insn);
+  log_msg ("Expanded access rtx:\n");
+  log_rtx(expr);
+  // FIXME: handle cases where the address expression doesn't
+  // fit the base+index*scale+disp format.
+  m_addr_expr = extract_addr_expr (expr);
+  log_msg ("\nm_addr_expr:\n");
+  log_msg ("base: %d, index: %d, scale: %d, disp: %d\n\n",
+           m_addr_expr.base_reg (), m_addr_expr.index_reg (),
+           m_addr_expr.scale (), m_addr_expr.disp ());
+}
+
+// Expand the MEM's address expression by substituting registers
+// with the expression calculating their values.
+// FIXME: make use of other info such as REG_EQUAL notes.
+void sh_ams::expand_expr (rtx* expr, rtx_insn* insn)
+{
+  enum rtx_code code = GET_CODE (*expr);
+  if (REG_P (*expr))
+    find_reg_value (expr, insn);
+  else if ((ARITHMETIC_P (*expr)))
+    {
+      for (int i = 0; i < GET_RTX_LENGTH (code); i++)
+        expand_expr (&XEXP (*expr, i), insn);
+    }
+}
+
+// Replace the register with the value that it was set to in a previous insn.
+void sh_ams::find_reg_value (rtx* reg, rtx_insn* insn)
+{
+  for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
+    {
+      if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+        continue;
+      // FIXME: parse other side effects beside SET.
+      if (GET_CODE (PATTERN (i)) == SET)
+        {
+          rtx dest = SET_DEST (PATTERN (i));
+          if (!REG_P (dest) || REGNO (dest) != REGNO (*reg))
+            continue;
+          // We're in the last insn that modified REG, so replace REG
+          // with the expression in SET_SRC.
+          *reg = copy_rtx (SET_SRC (PATTERN (i)));
+          expand_expr (reg, i);
+          return;
+        }
+    }
+}
+
+
+// Try to create an ADDR_EXPR struct of the form
+// base_reg + index_reg * scale + disp from the access expression X.
+// FIXME: handle auto-mod accesses.
+sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x)
+{
+  addr_expr op0 = make_invalid_addr ();
+  addr_expr op1 = make_invalid_addr ();
+  disp_t disp, scale;
+  regno_t base_reg, index_reg;
+  enum rtx_code code = GET_CODE (x);
+
+  // If X is an arithmetic operation, first create ADDR_EXPR structs
+  // from its operands. These will later be combined into a single ADDR_EXPR.
+  if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
+    {
+      op0 = extract_addr_expr (XEXP (x, 0));
+      op1 = extract_addr_expr (XEXP (x, 1));
+      if (op0.is_invalid () || op1.is_invalid ())
+        return make_invalid_addr ();
+    }
+  else if (code == NEG)
+    {
+      op1 = extract_addr_expr (XEXP (x, 0));
+      if (op1.is_invalid ())
+        return op1;
+    }
+
+
+  switch (code)
+    {
+
+    // For CONST_INT and REG, the set the base register or the displacement
+    // to the appropriate value.
+    case CONST_INT:
+      disp = INTVAL (x);
+      return non_mod_addr (invalid_regno, invalid_regno,
+                           0, 0, 0, disp, disp, disp);
+    case REG:
+      return make_reg_addr (REGNO (x));
+
+    // Handle MINUS by inverting OP1 and proceeding to PLUS.
+    // NEG is handled similarly, but returns with OP1 after inverting it.
+    case NEG:
+    case MINUS:
+
+      // Only expressions of the form base + index * (-1) + disp
+      // or base + disp are inverted.
+      if (op1.index_reg () != invalid_regno && op1.scale () != -1)
+        break;
+      op1 = non_mod_addr
+        (op1.index_reg (), op1.base_reg (),
+         -op1.scale (), -op1.scale (), -op1.scale (),
+         -op1.disp (), -op1.disp (), -op1.disp ());
+      if (code == NEG) return op1;
+    case PLUS:
+      disp = op0.disp () + op1.disp ();
+      index_reg = invalid_regno;
+      scale = 0;
+
+      // If only one operand has a base register, that will
+      // be the base register of the sum.
+      if (op0.base_reg () == invalid_regno)
+        base_reg = op1.base_reg ();
+      else if (op1.base_reg () == invalid_regno)
+        base_reg = op0.base_reg ();
+
+      // Otherwise, one of the base regs becomes the index reg
+      // (with scale = 1).
+      else if (op0.index_reg () == invalid_regno
+               && op1.index_reg () == invalid_regno)
+        {
+          base_reg = op0.base_reg ();
+          index_reg = op1.base_reg ();
+          scale = 1;
+        }
+
+      // If both operands have a base reg and one of them also has
+      // an index reg, they can't be combined.
+      // FIXME: it might be possible to combine them when the base
+      // and/or index regs are the same.
+      else break;
+
+      // If only one of the operands has a base reg and only one
+      // has an index reg, combine them.
+      if (index_reg == invalid_regno)
+        {
+          if (op0.index_reg () == invalid_regno)
+            {
+              index_reg = op1.index_reg ();
+              scale = op1.scale ();
+            }
+          else if (op1.index_reg () == invalid_regno)
+            {
+              index_reg = op0.index_reg ();
+              scale = op0.scale ();
+            }
+          else break;
+        }
+      return non_mod_addr (base_reg, index_reg,
+                           scale, scale, scale, disp, disp, disp);
+
+    // Change shift into multiply.
+    case ASHIFT:
+
+      // OP1 must be a non-negative constant.
+      if (op1.base_reg () == invalid_regno && op1.index_reg () == invalid_regno
+          && op1.disp () >= 0)
+        {
+          disp_t mul = 1
+            << op1.disp ();
+          op1 = non_mod_addr
+            (invalid_regno, invalid_regno, 0, 0, 0, mul, mul, mul);
+        }
+      else break;
+    case MULT:
+
+      // One of the operands must be a constant term.
+      // Bring it to the right side.
+      if (op0.base_reg () == invalid_regno && op0.index_reg () == invalid_regno)
+        std::swap (op0, op1);
+      if (op1.base_reg () != invalid_regno || op1.index_reg () != invalid_regno)
+        break;
+
+      // Only one register can be scaled, so OP0 can have either a
+      // BASE_REG or an INDEX_REG.
+      if (op0.base_reg () == invalid_regno)
+        {
+          index_reg = op0.index_reg ();
+          scale = op0.scale () * op1.disp ();
+        }
+      else if (op0.index_reg () == invalid_regno)
+        {
+          index_reg = op0.base_reg ();
+          scale = op1.disp ();
+        }
+      else break;
+      return non_mod_addr (invalid_regno, index_reg,
+                           scale, scale, scale,
+                           op0.disp () * op1.disp (),
+                           op0.disp () * op1.disp (),
+                           op0.disp () * op1.disp ());
+    default:
+      break;
+    }
+  return make_invalid_addr ();
+}
+
 unsigned int sh_ams::execute (function* fun)
 {
   log_msg ("sh-ams pass\n");
@@ -125,17 +340,30 @@ unsigned int sh_ams::execute (function* fun)
 
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
-    for (rtx_insn* next_i, *i = NEXT_INSN (BB_HEAD (bb));
-	 i != NULL_RTX && i != BB_END (bb); i = next_i)
     {
-      next_i = NEXT_INSN (i);
+      log_msg ("BB #%d:\n", bb->index);
 
-      if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
-	continue;
-
+      // Construct the access sequence from the access insns.
+      access_sequence as (bb);
+      for (rtx_insn* next_i, *i = NEXT_INSN (BB_HEAD (bb));
+           i != NULL_RTX; i = next_i)
+        {
+          next_i = NEXT_INSN (i);
+          if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+            continue;
+          // Search insn side effect for (SET (MEM) ...)
+          // or (SET ... (MEM))
+          // FIXME: parse other side effects for MEMs.
+          if (GET_CODE (PATTERN (i)) == SET)
+            {
+              rtx* src = &SET_SRC (PATTERN (i));
+              rtx* dest = &SET_DEST (PATTERN (i));
+              if (MEM_P (*src)) as.add_access (new access (i, src, load));
+              if (MEM_P (*dest)) as.add_access (new access (i, dest, store));
+            }
+        }
+      log_msg ("\n\n");
     }
-
 
   log_return (0, "\n\n");
 }
-
