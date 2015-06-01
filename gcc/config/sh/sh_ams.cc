@@ -150,7 +150,17 @@ void sh_ams::expand_expr (rtx* expr, rtx_insn* insn)
 {
   enum rtx_code code = GET_CODE (*expr);
   if (REG_P (*expr))
-    find_reg_value (expr, insn);
+    {
+      // Go back through the insn list until we find the last instruction
+      // that modified the register.
+      for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
+        {
+          if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+            continue;
+          if (replace_reg_value (expr, i, PATTERN (i)))
+            break;
+        }
+    }
   else if ((ARITHMETIC_P (*expr)))
     {
       for (int i = 0; i < GET_RTX_LENGTH (code); i++)
@@ -158,28 +168,39 @@ void sh_ams::expand_expr (rtx* expr, rtx_insn* insn)
     }
 }
 
-// Replace the register with the value that it was set to in a previous insn.
-void sh_ams::find_reg_value (rtx* reg, rtx_insn* insn)
+// If REG is modified in PATTERN, replace it with the expression it is set to.
+// Return false otherwise.
+bool sh_ams::replace_reg_value (rtx* reg, rtx_insn* insn, rtx pattern)
 {
-  for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
+  switch (GET_CODE (pattern))
     {
-      if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
-        continue;
-      // FIXME: parse other side effects beside SET.
-      if (GET_CODE (PATTERN (i)) == SET)
-        {
-          rtx dest = SET_DEST (PATTERN (i));
-          if (!REG_P (dest) || REGNO (dest) != REGNO (*reg))
-            continue;
-          // We're in the last insn that modified REG, so replace REG
-          // with the expression in SET_SRC.
-          *reg = copy_rtx (SET_SRC (PATTERN (i)));
-          expand_expr (reg, i);
-          return;
-        }
+    case SET:
+      {
+        rtx dest = SET_DEST (pattern);
+        if (REG_P (dest) && REGNO (dest) == REGNO (*reg))
+          {
+            // We're in the last insn that modified REG, so replace REG
+            // with the expression in SET_SRC.
+            *reg = copy_rtx (SET_SRC (pattern));
+            expand_expr (reg, insn);
+            return true;
+          }
+      }
+      break;
+    case PARALLEL:
+      {
+        for (int i = 0; i < XVECLEN (pattern, 0); i++)
+          {
+            if (replace_reg_value (reg, insn, XVECEXP (pattern, 0, i)))
+              return true;
+          }
+      }
+      break;
+    default:
+      break;
     }
+  return false;
 }
-
 
 // Try to create an ADDR_EXPR struct of the form
 // base_reg + index_reg * scale + disp from the access expression X.
@@ -328,6 +349,40 @@ sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x)
   return make_invalid_addr ();
 }
 
+// Find the memory accesses in INSN and add them to AS. ACCESS_MODE indicates
+// whether the mem we're looking for is read or written to.
+void sh_ams::find_mem_accesses
+(rtx_insn* insn, rtx* x_ref, access_sequence& as, access_mode_t access_mode = load)
+{
+  int i;
+  rtx x = *x_ref;
+  enum rtx_code code = GET_CODE (x);
+  switch (code)
+    {
+    case MEM:
+      as.add_access (new access (insn, x_ref, access_mode));
+      break;
+    case PARALLEL:
+      for (i = 0; i < XVECLEN (x, 0); i++)
+        find_mem_accesses (insn, &XVECEXP (x, 0, i), as, access_mode);
+      break;
+    case SET:
+      find_mem_accesses (insn, &SET_DEST (x), as, store);
+      find_mem_accesses (insn, &SET_SRC (x), as, load);
+      break;
+    case CALL:
+      find_mem_accesses (insn, &XEXP (x, 0), as, load);
+      break;
+    default:
+      if (ARITHMETIC_P (x))
+        {
+          for (i = 0; i < GET_RTX_LENGTH (code); i++)
+            find_mem_accesses (insn, &XEXP (x, i), as, access_mode);
+        }
+      break;
+    }
+}
+
 unsigned int sh_ams::execute (function* fun)
 {
   log_msg ("sh-ams pass\n");
@@ -351,17 +406,10 @@ unsigned int sh_ams::execute (function* fun)
           next_i = NEXT_INSN (i);
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
             continue;
-          // Search insn side effect for (SET (MEM) ...)
-          // or (SET ... (MEM))
-          // FIXME: parse other side effects for MEMs.
-          if (GET_CODE (PATTERN (i)) == SET)
-            {
-              rtx* src = &SET_SRC (PATTERN (i));
-              rtx* dest = &SET_DEST (PATTERN (i));
-              if (MEM_P (*src)) as.add_access (new access (i, src, load));
-              if (MEM_P (*dest)) as.add_access (new access (i, dest, store));
-            }
-        }
+          // Search for memory accesses inside the current insn
+          // and add them to the address sequence.
+          find_mem_accesses (i, &PATTERN (i), as);
+         }
       log_msg ("\n\n");
     }
 

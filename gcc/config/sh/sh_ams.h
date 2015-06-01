@@ -143,8 +143,12 @@ public:
     }
   };
 
+  class access_sequence;
+
+  static void find_mem_accesses
+    (rtx_insn* insn, rtx* x_ref, access_sequence& as, access_mode_t access_mode);
   static void expand_expr (rtx* expr, rtx_insn* insn);
-  static void find_reg_value (rtx* reg, rtx_insn* insn);
+  static bool replace_reg_value (rtx* reg, rtx_insn* insn, rtx pattern);
   static addr_expr extract_addr_expr (rtx x);
 
   // helper functions to create a particular type of address expression.
