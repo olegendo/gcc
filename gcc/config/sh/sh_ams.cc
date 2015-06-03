@@ -155,7 +155,8 @@ void sh_ams::expand_expr (rtx* expr, rtx_insn* insn)
       // that modified the register.
       for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
         {
-          if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+          if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
+              || BLOCK_FOR_INSN (insn)->index != BLOCK_FOR_INSN (i)->index)
             continue;
           if (replace_reg_value (expr, i, PATTERN (i)))
             break;
@@ -405,7 +406,8 @@ unsigned int sh_ams::execute (function* fun)
            i != NULL_RTX; i = next_i)
         {
           next_i = NEXT_INSN (i);
-          if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+          if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
+              || bb->index != BLOCK_FOR_INSN (i)->index)
             continue;
           // Search for memory accesses inside the current insn
           // and add them to the address sequence.
