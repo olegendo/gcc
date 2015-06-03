@@ -149,9 +149,10 @@ public:
   static void find_mem_accesses
     (rtx_insn* insn, rtx* x_ref, std::list<access*>& as,
      access_mode_t access_mode);
-  static void expand_expr (rtx* expr, rtx_insn* insn);
-  static bool replace_reg_value (rtx* reg, rtx_insn* insn, rtx pattern);
-  static addr_expr extract_addr_expr (rtx x);
+  static void find_reg_value
+    (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
+  static rtx find_reg_value_1 (rtx reg, rtx pattern);
+  static addr_expr extract_addr_expr (rtx x, rtx_insn* insn, bool expand);
 
   // helper functions to create a particular type of address expression.
   static addr_expr

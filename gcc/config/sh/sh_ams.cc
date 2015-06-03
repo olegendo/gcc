@@ -122,91 +122,84 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_mode_t access_mode)
   m_insn_ref = &XEXP (*mem, 0);
 
   // Create an ADDR_EXPR struct from the address expression of MEM.
-  rtx expr = copy_rtx (XEXP (*mem, 0));
-  log_msg ("Access rtx:\n");
-  log_rtx (expr);
-  m_original_addr_expr = extract_addr_expr (expr);
+  m_original_addr_expr = extract_addr_expr ((XEXP (*mem, 0)), insn, false);
   log_msg ("\nm_original_addr_expr:\n");
   log_msg ("base: %d, index: %d, scale: %d, disp: %d\n",
            m_original_addr_expr.base_reg (), m_original_addr_expr.index_reg (),
            m_original_addr_expr.scale (), m_original_addr_expr.disp ());
 
-  expand_expr (&expr, insn);
-  log_msg ("Expanded access rtx:\n");
-  log_rtx(expr);
   // FIXME: handle cases where the address expression doesn't
   // fit the base+index*scale+disp format.
-  m_addr_expr = extract_addr_expr (expr);
+  m_addr_expr = extract_addr_expr ((XEXP (*mem, 0)), insn, true);
   log_msg ("\nm_addr_expr:\n");
   log_msg ("base: %d, index: %d, scale: %d, disp: %d\n\n",
            m_addr_expr.base_reg (), m_addr_expr.index_reg (),
            m_addr_expr.scale (), m_addr_expr.disp ());
 }
 
-// Expand the MEM's address expression by substituting registers
-// with the expression calculating their values.
+// Find the value that REG was last set to. Write the register value
+// into mod_expr and the modifying insn into mod_insn.
 // FIXME: make use of other info such as REG_EQUAL notes.
-void sh_ams::expand_expr (rtx* expr, rtx_insn* insn)
+void sh_ams::find_reg_value
+(rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn)
 {
-  enum rtx_code code = GET_CODE (*expr);
-  if (REG_P (*expr))
+  rtx value;
+  // Go back through the insn list until we find the last instruction
+  // that modified the register.
+  for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
     {
-      // Go back through the insn list until we find the last instruction
-      // that modified the register.
-      for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
+      if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
+          || BLOCK_FOR_INSN (insn)->index != BLOCK_FOR_INSN (i)->index)
+        continue;
+      if ((value = find_reg_value_1 (reg, PATTERN (i))) != NULL_RTX)
         {
-          if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
-              || BLOCK_FOR_INSN (insn)->index != BLOCK_FOR_INSN (i)->index)
-            continue;
-          if (replace_reg_value (expr, i, PATTERN (i)))
-            break;
+          *mod_expr = value;
+          *mod_insn = i;
+          return;
         }
     }
-  else if ((ARITHMETIC_P (*expr)))
-    {
-      for (int i = 0; i < GET_RTX_LENGTH (code); i++)
-        expand_expr (&XEXP (*expr, i), insn);
-    }
+  *mod_expr = reg;
 }
 
-// If REG is modified in PATTERN, replace it with the expression it is set to.
-// Return false otherwise.
-bool sh_ams::replace_reg_value (rtx* reg, rtx_insn* insn, rtx pattern)
+// The recursive part of find_reg_value. If REG is modified in INSN, return
+// the value it is set to. Otherwise, return NULL_RTX.
+rtx sh_ams::find_reg_value_1 (rtx reg, rtx pattern)
 {
   switch (GET_CODE (pattern))
     {
     case SET:
       {
         rtx dest = SET_DEST (pattern);
-        if (REG_P (dest) && REGNO (dest) == REGNO (*reg))
+        if (REG_P (dest) && REGNO (dest) == REGNO (reg))
           {
-            // We're in the last insn that modified REG, so replace REG
-            // with the expression in SET_SRC.
-            *reg = copy_rtx (SET_SRC (pattern));
-            expand_expr (reg, insn);
-            return true;
+            // We're in the last insn that modified REG, so return
+            // the expression in SET_SRC.
+            return SET_SRC (pattern);
           }
       }
       break;
     case PARALLEL:
       {
+        rtx value;
         for (int i = 0; i < XVECLEN (pattern, 0); i++)
           {
-            if (replace_reg_value (reg, insn, XVECEXP (pattern, 0, i)))
-              return true;
+            if ((value = find_reg_value_1 (reg, XVECEXP (pattern, 0, i))) != NULL_RTX)
+              return value;
           }
       }
       break;
     default:
       break;
     }
-  return false;
+  return NULL_RTX;
 }
 
 // Try to create an ADDR_EXPR struct of the form
 // base_reg + index_reg * scale + disp from the access expression X.
+// If EXPAND is true, trace the original value of the registers in X
+// as far back as possible.
 // FIXME: handle auto-mod accesses.
-sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x)
+sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, bool expand)
 {
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -218,14 +211,14 @@ sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x)
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = extract_addr_expr (XEXP (x, 0));
-      op1 = extract_addr_expr (XEXP (x, 1));
+      op0 = extract_addr_expr (XEXP (x, 0), insn, expand);
+      op1 = extract_addr_expr (XEXP (x, 1), insn, expand);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
-      op1 = extract_addr_expr (XEXP (x, 0));
+      op1 = extract_addr_expr (XEXP (x, 0), insn, expand);
       if (op1.is_invalid ())
         return op1;
     }
@@ -241,7 +234,20 @@ sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x)
       return non_mod_addr (invalid_regno, invalid_regno,
                            0, 0, 0, disp, disp, disp);
     case REG:
-      return make_reg_addr (REGNO (x));
+      if (expand)
+        {
+
+          // Find the expression that the register was last set to
+          // and convert it to an addr_expr.
+          rtx reg_value;
+          rtx_insn *reg_mod_insn;
+          find_reg_value (x, insn, &reg_value, &reg_mod_insn);
+          if (GET_CODE (reg_value) == REG && REGNO (reg_value) == REGNO (x))
+            return make_reg_addr (REGNO (reg_value));
+          return extract_addr_expr (reg_value, insn, true);
+        }
+      else
+        return make_reg_addr (REGNO (x));
 
     // Handle MINUS by inverting OP1 and proceeding to PLUS.
     // NEG is handled similarly, but returns with OP1 after inverting it.
