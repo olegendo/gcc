@@ -4,6 +4,7 @@
 
 #include "tree-pass.h"
 #include <limits>
+#include <list>
 
 class sh_ams : public rtl_opt_pass
 {
@@ -143,10 +144,11 @@ public:
     }
   };
 
-  class access_sequence;
+  class access;
 
   static void find_mem_accesses
-    (rtx_insn* insn, rtx* x_ref, access_sequence& as, access_mode_t access_mode);
+    (rtx_insn* insn, rtx* x_ref, std::list<access*>& as,
+     access_mode_t access_mode);
   static void expand_expr (rtx* expr, rtx_insn* insn);
   static bool replace_reg_value (rtx* reg, rtx_insn* insn, rtx pattern);
   static addr_expr extract_addr_expr (rtx x);
@@ -310,10 +312,6 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
-    // the next/previous access in the access sequence
-    access* m_next;
-    access* m_prev;
-
   private:
     addr_expr m_original_addr_expr;
     addr_expr m_addr_expr;
@@ -332,58 +330,6 @@ public:
     int m_alternatives_count;
     alternative m_alternatives[MAX_ALTERNATIVES];
   };
-
-  // a sequence of accesses in a basic block.
-  class access_sequence
-  {
-  public:
-    access_sequence (basic_block bb)
-      {
-	m_bb = bb;
-	m_begin = m_end = NULL;
-      }
-
-    ~access_sequence (void)
-      {
-	access* curr;
-	while ( (curr = m_begin) != NULL)
-	  {
-	    m_begin = m_begin->m_next;
-	    delete curr;
-	  }
-      }
-
-
-    const access* begin (void) const { return m_begin; }
-    const access* end (void) const { return m_end; }
-
-    access* begin (void) { return m_begin; }
-    access* end (void) { return m_end; }
-
-    void add_access (access* ac)
-    {
-      if (!m_begin)
-	{
-	  m_begin = m_end = ac;
-	  ac->m_next = ac->m_prev = NULL;
-	}
-      else
-	{
-	  m_end->m_next = ac;
-	  ac->m_prev = m_end;
-	  ac->m_next = NULL;
-	  m_end = ac;
-	}
-    }
-
-
-  private:
-    basic_block m_bb;
-
-    access* m_begin;
-    access* m_end;
-  };
-
 
   // a delegate for the ams pass.  usually implemented by the target.
   struct delegate

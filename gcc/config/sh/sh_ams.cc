@@ -352,7 +352,8 @@ sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x)
 // Find the memory accesses in INSN and add them to AS. ACCESS_MODE indicates
 // whether the mem we're looking for is read or written to.
 void sh_ams::find_mem_accesses
-(rtx_insn* insn, rtx* x_ref, access_sequence& as, access_mode_t access_mode = load)
+(rtx_insn* insn, rtx* x_ref, std::list<access*>& as,
+ access_mode_t access_mode = load)
 {
   int i;
   rtx x = *x_ref;
@@ -360,7 +361,7 @@ void sh_ams::find_mem_accesses
   switch (code)
     {
     case MEM:
-      as.add_access (new access (insn, x_ref, access_mode));
+      as.push_back (new access (insn, x_ref, access_mode));
       break;
     case PARALLEL:
       for (i = 0; i < XVECLEN (x, 0); i++)
@@ -399,7 +400,7 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("BB #%d:\n", bb->index);
 
       // Construct the access sequence from the access insns.
-      access_sequence as (bb);
+      std::list<access*> as;
       for (rtx_insn* next_i, *i = NEXT_INSN (BB_HEAD (bb));
            i != NULL_RTX; i = next_i)
         {
