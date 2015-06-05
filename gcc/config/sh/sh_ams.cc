@@ -302,7 +302,8 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
           if (reg_value != NULL_RTX && GET_CODE (reg_value) == REG
               && REGNO (reg_value) == REGNO (x))
             return make_reg_addr (REGNO (x));
-          addr_expr reg_addr_expr = extract_addr_expr (reg_value, insn, as, true);
+          addr_expr reg_addr_expr = extract_addr_expr
+            (reg_value, reg_mod_insn, as, true);
 
           // If the expression is something AMS can't handle, use the original
           // reg instead, and add a reg_mod access to the access sequence.
