@@ -20,7 +20,7 @@ public:
   // if abs ('disp') == access mode size it's a {PRE,POST}_{INC_DEC}.
 
   enum addr_type_t { non_mod, pre_mod, post_mod };
-  enum access_mode_t { load, store };
+  enum access_mode_t { load, store, reg_mod };
 
   typedef int regno_t;
   typedef int disp_t;
@@ -146,13 +146,19 @@ public:
 
   class access;
 
+  static void add_new_access
+    (std::list<access*>& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode);
+  static void add_reg_mod_access
+    (std::list<access*>& as, rtx_insn* insn, rtx mod_expr,
+     rtx_insn* mod_insn, regno_t reg);
   static void find_mem_accesses
     (rtx_insn* insn, rtx* x_ref, std::list<access*>& as,
      access_mode_t access_mode);
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
   static rtx find_reg_value_1 (rtx reg, rtx pattern);
-  static addr_expr extract_addr_expr (rtx x, rtx_insn* insn, bool expand);
+  static addr_expr extract_addr_expr
+    (rtx x, rtx_insn* insn, std::list<access*>& as, bool expand);
 
   // helper functions to create a particular type of address expression.
   static addr_expr
@@ -262,7 +268,9 @@ public:
       int m_costs;
     };
 
-    access (rtx_insn* insn, rtx* mem, access_mode_t access_mode);
+    access (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
+	    addr_expr original_addr_expr, addr_expr addr_expr);
+    access (rtx_insn* insn, rtx mod_expr, regno_t reg);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -274,13 +282,20 @@ public:
     // ignore it.
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
 
+    // If m_access_mode is REG_MOD, this access represents the modification
+    // of an address register.
     access_mode_t access_mode (void) const { return m_access_mode; }
+
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
     addr_space_t addr_space (void) const { return m_addr_space; }
 
     // the insn where this access occurs.
     rtx insn (void) const { return m_insn; }
+
+    // if m_access_mode is REG_MOD, this stores the expression
+    // that the register is set to.
+    rtx reg_mod_expr (void) const { return m_reg_mod_expr; }
 
     access& add_alternative (int costs, const addr_expr& ae)
     {
@@ -321,6 +336,7 @@ public:
     addr_space_t m_addr_space;
     rtx m_insn;
     rtx* m_insn_ref;  // reference to the access rtx inside the insn.
+    rtx m_reg_mod_expr;
 
     // all available alternatives for this access as reported by the target.
     enum

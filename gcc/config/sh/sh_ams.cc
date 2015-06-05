@@ -113,28 +113,73 @@ namespace
 } // anonymous namespace
 
 
-sh_ams::access::access (rtx_insn* insn, rtx* mem, access_mode_t access_mode)
+sh_ams::access::access
+(rtx_insn* insn, rtx* mem, access_mode_t access_mode,
+ addr_expr original_addr_expr, addr_expr addr_expr)
 {
   m_access_mode = access_mode;
   m_machine_mode = GET_MODE (*mem);
   m_addr_space = MEM_ADDR_SPACE (*mem);
   m_insn = insn;
   m_insn_ref = &XEXP (*mem, 0);
+  m_original_addr_expr = original_addr_expr;
+  m_addr_expr = addr_expr;
+}
 
+// This constructor creates an access that represents
+// a register modification.
+sh_ams::access::access
+(rtx_insn* insn, rtx mod_expr, regno_t reg)
+{
+  m_access_mode = reg_mod;
+  m_machine_mode = GET_MODE (mod_expr);
+  m_insn = insn;
+  m_reg_mod_expr = mod_expr;
+  m_original_addr_expr = make_invalid_addr ();
+  m_addr_expr = make_reg_addr (reg);
+}
+
+// Add a normal access to the end of the access sequence.
+void sh_ams::add_new_access
+(std::list<access*>& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode)
+{
   // Create an ADDR_EXPR struct from the address expression of MEM.
-  m_original_addr_expr = extract_addr_expr ((XEXP (*mem, 0)), insn, false);
-  log_msg ("\nm_original_addr_expr:\n");
-  log_msg ("base: %d, index: %d, scale: %d, disp: %d\n",
-           m_original_addr_expr.base_reg (), m_original_addr_expr.index_reg (),
-           m_original_addr_expr.scale (), m_original_addr_expr.disp ());
+  addr_expr original_expr = extract_addr_expr ((XEXP (*mem, 0)), insn, as, false);
+  addr_expr expr = extract_addr_expr ((XEXP (*mem, 0)), insn, as, true);
+  as.push_back (new access (insn, mem, access_mode, original_expr, expr));
+}
 
-  // FIXME: handle cases where the address expression doesn't
-  // fit the base+index*scale+disp format.
-  m_addr_expr = extract_addr_expr ((XEXP (*mem, 0)), insn, true);
-  log_msg ("\nm_addr_expr:\n");
-  log_msg ("base: %d, index: %d, scale: %d, disp: %d\n\n",
-           m_addr_expr.base_reg (), m_addr_expr.index_reg (),
-           m_addr_expr.scale (), m_addr_expr.disp ());
+// Create a reg_mod access and add it to the access sequence.
+// This function traverses the insn list backwards starting from INSN to
+// find the correct place inside AS where the access needs to be inserted.
+void sh_ams::add_reg_mod_access
+(std::list<access*>& as, rtx_insn* insn, rtx mod_expr,
+ rtx_insn* mod_insn, regno_t reg)
+{
+  std::list<access*>::reverse_iterator as_it = as.rbegin ();
+  for (rtx_insn* i = insn; i != NULL_RTX; i = PREV_INSN (i))
+    {
+      if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+        continue;
+
+      // Keep track of the current insn in as.
+      if (INSN_UID ((*as_it)->insn ()) == INSN_UID (i))
+        {
+          ++as_it;
+
+          // If the reg_mod access is already inside the access
+          // sequence, don't add it a second time.
+          if (INSN_UID ((*as_it)->insn ()) == INSN_UID (mod_insn))
+            break;
+        }
+      if (INSN_UID (i) == INSN_UID (mod_insn))
+        {
+          // We found mod_insn inside the insn list, so we know where to
+          // insert the access.
+          as.insert (as_it.base (), new access (mod_insn, mod_expr, reg));
+          break;
+        }
+    }
 }
 
 // Find the value that REG was last set to. Write the register value
@@ -199,7 +244,8 @@ rtx sh_ams::find_reg_value_1 (rtx reg, rtx pattern)
 // If EXPAND is true, trace the original value of the registers in X
 // as far back as possible.
 // FIXME: handle auto-mod accesses.
-sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, bool expand)
+sh_ams::addr_expr sh_ams::extract_addr_expr
+(rtx x, rtx_insn* insn, std::list<access*>& as, bool expand)
 {
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -211,14 +257,14 @@ sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, bool expand)
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = extract_addr_expr (XEXP (x, 0), insn, expand);
-      op1 = extract_addr_expr (XEXP (x, 1), insn, expand);
+      op0 = extract_addr_expr (XEXP (x, 0), insn, as, expand);
+      op1 = extract_addr_expr (XEXP (x, 1), insn, as, expand);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
-      op1 = extract_addr_expr (XEXP (x, 0), insn, expand);
+      op1 = extract_addr_expr (XEXP (x, 0), insn, as, expand);
       if (op1.is_invalid ())
         return op1;
     }
@@ -243,8 +289,17 @@ sh_ams::addr_expr sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, bool expand)
           rtx_insn *reg_mod_insn;
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
           if (GET_CODE (reg_value) == REG && REGNO (reg_value) == REGNO (x))
-            return make_reg_addr (REGNO (reg_value));
-          return extract_addr_expr (reg_value, insn, true);
+            return make_reg_addr (REGNO (x));
+          addr_expr reg_addr_expr = extract_addr_expr (reg_value, insn, as, true);
+
+          // If the expression is something AMS can't handle, use the original
+          // reg instead, and add a reg_mod access to the access sequence.
+          if (reg_addr_expr.is_invalid ())
+            {
+              add_reg_mod_access (as, insn, reg_value, reg_mod_insn, REGNO (x));
+              return make_reg_addr (REGNO (x));
+            }
+          return reg_addr_expr;
         }
       else
         return make_reg_addr (REGNO (x));
@@ -368,7 +423,7 @@ void sh_ams::find_mem_accesses
   switch (code)
     {
     case MEM:
-      as.push_back (new access (insn, x_ref, access_mode));
+      add_new_access (as, insn, x_ref, access_mode);
       break;
     case PARALLEL:
       for (i = 0; i < XVECLEN (x, 0); i++)
