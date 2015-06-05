@@ -188,7 +188,6 @@ void sh_ams::add_reg_mod_access
 void sh_ams::find_reg_value
 (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn)
 {
-  rtx value;
   // Go back through the insn list until we find the last instruction
   // that modified the register.
   for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
@@ -196,9 +195,8 @@ void sh_ams::find_reg_value
       if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
           || BLOCK_FOR_INSN (insn)->index != BLOCK_FOR_INSN (i)->index)
         continue;
-      if ((value = find_reg_value_1 (reg, PATTERN (i))) != NULL_RTX)
+      if (find_reg_value_1 (reg, PATTERN (i), mod_expr))
         {
-          *mod_expr = value;
           *mod_insn = i;
           return;
         }
@@ -206,37 +204,47 @@ void sh_ams::find_reg_value
   *mod_expr = reg;
 }
 
-// The recursive part of find_reg_value. If REG is modified in INSN, return
-// the value it is set to. Otherwise, return NULL_RTX.
-rtx sh_ams::find_reg_value_1 (rtx reg, rtx pattern)
+// The recursive part of find_reg_value. If REG is modified in INSN,
+// set VALUE to REG's value and return true. Otherwise, return false.
+bool sh_ams::find_reg_value_1 (rtx reg, rtx pattern, rtx* value)
 {
+  rtx dest;
   switch (GET_CODE (pattern))
     {
     case SET:
       {
-        rtx dest = SET_DEST (pattern);
+        dest = SET_DEST (pattern);
         if (REG_P (dest) && REGNO (dest) == REGNO (reg))
           {
             // We're in the last insn that modified REG, so return
             // the expression in SET_SRC.
-            return SET_SRC (pattern);
+            *value = SET_SRC (pattern);
+            return true;
           }
       }
       break;
+    case CLOBBER:
+      dest = XEXP (pattern, 0);
+      if (REG_P (dest) && REGNO (dest) == REGNO (reg))
+        {
+          // The value of REG is unknown.
+          *value = NULL_RTX;
+          return true;
+        }
+      break;
     case PARALLEL:
       {
-        rtx value;
         for (int i = 0; i < XVECLEN (pattern, 0); i++)
           {
-            if ((value = find_reg_value_1 (reg, XVECEXP (pattern, 0, i))) != NULL_RTX)
-              return value;
+            if (find_reg_value_1 (reg, XVECEXP (pattern, 0, i), value))
+              return true;
           }
       }
       break;
     default:
       break;
     }
-  return NULL_RTX;
+  return false;
 }
 
 // Try to create an ADDR_EXPR struct of the form
@@ -251,6 +259,9 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
   addr_expr op1 = make_invalid_addr ();
   disp_t disp, scale;
   regno_t base_reg, index_reg;
+
+  if (x == NULL_RTX) return make_invalid_addr ();
+
   enum rtx_code code = GET_CODE (x);
 
   // If X is an arithmetic operation, first create ADDR_EXPR structs
@@ -288,7 +299,8 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
           rtx reg_value;
           rtx_insn *reg_mod_insn;
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
-          if (GET_CODE (reg_value) == REG && REGNO (reg_value) == REGNO (x))
+          if (reg_value != NULL_RTX && GET_CODE (reg_value) == REG
+              && REGNO (reg_value) == REGNO (x))
             return make_reg_addr (REGNO (x));
           addr_expr reg_addr_expr = extract_addr_expr (reg_value, insn, as, true);
 

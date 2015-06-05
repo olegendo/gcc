@@ -156,7 +156,7 @@ public:
      access_mode_t access_mode);
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
-  static rtx find_reg_value_1 (rtx reg, rtx pattern);
+  static bool find_reg_value_1 (rtx reg, rtx pattern, rtx* value);
   static addr_expr extract_addr_expr
     (rtx x, rtx_insn* insn, std::list<access*>& as, bool expand);
 
@@ -294,7 +294,8 @@ public:
     rtx insn (void) const { return m_insn; }
 
     // if m_access_mode is REG_MOD, this stores the expression
-    // that the register is set to.
+    // that the register is set to (NULL_RTX if the value is
+    // unknown).
     rtx reg_mod_expr (void) const { return m_reg_mod_expr; }
 
     access& add_alternative (int costs, const addr_expr& ae)
