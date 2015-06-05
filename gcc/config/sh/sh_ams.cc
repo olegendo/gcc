@@ -474,6 +474,32 @@ unsigned int sh_ams::execute (function* fun)
           // and add them to the address sequence.
           find_mem_accesses (i, &PATTERN (i), as);
          }
+      log_msg ("Access sequence contents:\n\n");
+      for (std::list<access*>::const_iterator it = as.begin();
+           it != as.end(); ++it)
+        {
+          if ((*it)->access_mode () == reg_mod)
+            {
+              log_msg ("reg_mod: r%d set to\n", (*it)->address ().base_reg ());
+              log_rtx ((*it)->reg_mod_expr ());
+              log_msg("\n-----\n\n");
+            }
+          else
+            {
+              log_msg ("m_original_addr_expr:\n");
+              log_msg ("base: %d, index: %d, scale: %d, disp: %d\n",
+                       (*it)->original_address ().base_reg (),
+                       (*it)->original_address ().index_reg (),
+                       (*it)->original_address ().scale (),
+                       (*it)->original_address ().disp ());
+              log_msg ("\nm_addr_expr:\n");
+              log_msg ("base: %d, index: %d, scale: %d, disp: %d\n-----\n\n",
+                       (*it)->address ().base_reg (),
+                       (*it)->address ().index_reg (),
+                       (*it)->address ().scale (),
+                       (*it)->address ().disp ());
+            }
+        }
       log_msg ("\n\n");
     }
 
