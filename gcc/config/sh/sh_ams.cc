@@ -144,8 +144,10 @@ void sh_ams::add_new_access
 (std::list<access>& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode)
 {
   // Create an ADDR_EXPR struct from the address expression of MEM.
-  addr_expr original_expr = extract_addr_expr ((XEXP (*mem, 0)), insn, as, false);
-  addr_expr expr = extract_addr_expr ((XEXP (*mem, 0)), insn, as, true);
+  addr_expr original_expr =
+    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, as, false);
+  addr_expr expr =
+    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, as, true);
   as.push_back (access (insn, mem, access_mode, original_expr, expr));
 }
 
@@ -156,6 +158,11 @@ void sh_ams::add_reg_mod_access
 (std::list<access>& as, rtx_insn* insn, rtx mod_expr,
  rtx_insn* mod_insn, regno_t reg)
 {
+  if (as.empty ())
+    {
+      as.push_back (access (mod_insn, mod_expr, reg));
+      return;
+    }
   std::list<access>::reverse_iterator as_it = as.rbegin ();
   for (rtx_insn* i = insn; i != NULL_RTX; i = PREV_INSN (i))
     {
@@ -169,7 +176,8 @@ void sh_ams::add_reg_mod_access
 
           // If the reg_mod access is already inside the access
           // sequence, don't add it a second time.
-          if (INSN_UID ((*as_it).insn ()) == INSN_UID (mod_insn))
+          if ((*as_it).access_mode () == reg_mod
+              && (*as_it).reg_mod_expr () == mod_expr)
             break;
         }
       if (INSN_UID (i) == INSN_UID (mod_insn))
@@ -251,9 +259,12 @@ bool sh_ams::find_reg_value_1 (rtx reg, rtx pattern, rtx* value)
 // base_reg + index_reg * scale + disp from the access expression X.
 // If EXPAND is true, trace the original value of the registers in X
 // as far back as possible.
+// INSN is the insn in which the access happens.  ROOT_INSN is the INSN
+// argument that was passed to the function at the top level of recursion
+// (used as the start insn when calling add_reg_mod_access).
 // FIXME: handle auto-mod accesses.
 sh_ams::addr_expr sh_ams::extract_addr_expr
-(rtx x, rtx_insn* insn, std::list<access>& as, bool expand)
+(rtx x, rtx_insn* insn, rtx_insn *root_insn, std::list<access>& as, bool expand)
 {
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -268,14 +279,14 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = extract_addr_expr (XEXP (x, 0), insn, as, expand);
-      op1 = extract_addr_expr (XEXP (x, 1), insn, as, expand);
+      op0 = extract_addr_expr (XEXP (x, 0), insn, root_insn, as, expand);
+      op1 = extract_addr_expr (XEXP (x, 1), insn, root_insn, as, expand);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
-      op1 = extract_addr_expr (XEXP (x, 0), insn, as, expand);
+      op1 = extract_addr_expr (XEXP (x, 0), insn, root_insn, as, expand);
       if (op1.is_invalid ())
         return op1;
     }
@@ -303,13 +314,14 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
               && REGNO (reg_value) == REGNO (x))
             return make_reg_addr (REGNO (x));
           addr_expr reg_addr_expr = extract_addr_expr
-            (reg_value, reg_mod_insn, as, true);
+            (reg_value, reg_mod_insn, root_insn, as, true);
 
           // If the expression is something AMS can't handle, use the original
           // reg instead, and add a reg_mod access to the access sequence.
           if (reg_addr_expr.is_invalid ())
             {
-              add_reg_mod_access (as, insn, reg_value, reg_mod_insn, REGNO (x));
+              add_reg_mod_access
+                (as, root_insn, reg_value, reg_mod_insn, REGNO (x));
               return make_reg_addr (REGNO (x));
             }
           return reg_addr_expr;

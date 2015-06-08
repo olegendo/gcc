@@ -158,7 +158,7 @@ public:
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
   static bool find_reg_value_1 (rtx reg, rtx pattern, rtx* value);
   static addr_expr extract_addr_expr
-    (rtx x, rtx_insn* insn, std::list<access>& as, bool expand);
+    (rtx x, rtx_insn* insn, rtx_insn* root_insn, std::list<access>& as, bool expand);
 
   // helper functions to create a particular type of address expression.
   static addr_expr
