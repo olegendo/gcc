@@ -310,9 +310,26 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
           rtx reg_value;
           rtx_insn *reg_mod_insn;
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
-          if (reg_value != NULL_RTX && GET_CODE (reg_value) == REG
-              && REGNO (reg_value) == REGNO (x))
-            return make_reg_addr (REGNO (x));
+          if (reg_value != NULL_RTX && REG_P (reg_value))
+            {
+              if (REGNO (reg_value) == REGNO (x))
+                return make_reg_addr (REGNO (x));
+
+              // Don't expand hardreg -> pseudo reg copies.  Instead, add the
+              // copy as a reg_mod access.
+              if (HARD_REGISTER_P (reg_value))
+                {
+                  add_reg_mod_access
+                    (as, root_insn, reg_value, reg_mod_insn, REGNO (x));
+
+                  // The hard reg still needs to be traced back in case it
+                  // is set to some unknown value, like the result of a CALL.
+                  extract_addr_expr
+                    (reg_value, reg_mod_insn, root_insn, as, true);
+                  return make_reg_addr (REGNO (x));
+                }
+            }
+
           addr_expr reg_addr_expr = extract_addr_expr
             (reg_value, reg_mod_insn, root_insn, as, true);
 
