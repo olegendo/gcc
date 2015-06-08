@@ -141,42 +141,42 @@ sh_ams::access::access
 
 // Add a normal access to the end of the access sequence.
 void sh_ams::add_new_access
-(std::list<access*>& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode)
+(std::list<access>& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode)
 {
   // Create an ADDR_EXPR struct from the address expression of MEM.
   addr_expr original_expr = extract_addr_expr ((XEXP (*mem, 0)), insn, as, false);
   addr_expr expr = extract_addr_expr ((XEXP (*mem, 0)), insn, as, true);
-  as.push_back (new access (insn, mem, access_mode, original_expr, expr));
+  as.push_back (access (insn, mem, access_mode, original_expr, expr));
 }
 
 // Create a reg_mod access and add it to the access sequence.
 // This function traverses the insn list backwards starting from INSN to
 // find the correct place inside AS where the access needs to be inserted.
 void sh_ams::add_reg_mod_access
-(std::list<access*>& as, rtx_insn* insn, rtx mod_expr,
+(std::list<access>& as, rtx_insn* insn, rtx mod_expr,
  rtx_insn* mod_insn, regno_t reg)
 {
-  std::list<access*>::reverse_iterator as_it = as.rbegin ();
+  std::list<access>::reverse_iterator as_it = as.rbegin ();
   for (rtx_insn* i = insn; i != NULL_RTX; i = PREV_INSN (i))
     {
       if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
         continue;
 
       // Keep track of the current insn in as.
-      if (INSN_UID ((*as_it)->insn ()) == INSN_UID (i))
+      if (INSN_UID ((*as_it).insn ()) == INSN_UID (i))
         {
           ++as_it;
 
           // If the reg_mod access is already inside the access
           // sequence, don't add it a second time.
-          if (INSN_UID ((*as_it)->insn ()) == INSN_UID (mod_insn))
+          if (INSN_UID ((*as_it).insn ()) == INSN_UID (mod_insn))
             break;
         }
       if (INSN_UID (i) == INSN_UID (mod_insn))
         {
           // We found mod_insn inside the insn list, so we know where to
           // insert the access.
-          as.insert (as_it.base (), new access (mod_insn, mod_expr, reg));
+          as.insert (as_it.base (), access (mod_insn, mod_expr, reg));
           break;
         }
     }
@@ -253,7 +253,7 @@ bool sh_ams::find_reg_value_1 (rtx reg, rtx pattern, rtx* value)
 // as far back as possible.
 // FIXME: handle auto-mod accesses.
 sh_ams::addr_expr sh_ams::extract_addr_expr
-(rtx x, rtx_insn* insn, std::list<access*>& as, bool expand)
+(rtx x, rtx_insn* insn, std::list<access>& as, bool expand)
 {
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -427,7 +427,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
 // Find the memory accesses in INSN and add them to AS. ACCESS_MODE indicates
 // whether the mem we're looking for is read or written to.
 void sh_ams::find_mem_accesses
-(rtx_insn* insn, rtx* x_ref, std::list<access*>& as,
+(rtx_insn* insn, rtx* x_ref, std::list<access>& as,
  access_mode_t access_mode = load)
 {
   int i;
@@ -475,7 +475,7 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("BB #%d:\n", bb->index);
 
       // Construct the access sequence from the access insns.
-      std::list<access*> as;
+      std::list<access> as;
       for (rtx_insn* next_i, *i = NEXT_INSN (BB_HEAD (bb));
            i != NULL_RTX; i = next_i)
         {
@@ -488,29 +488,29 @@ unsigned int sh_ams::execute (function* fun)
           find_mem_accesses (i, &PATTERN (i), as);
          }
       log_msg ("Access sequence contents:\n\n");
-      for (std::list<access*>::const_iterator it = as.begin();
+      for (std::list<access>::const_iterator it = as.begin();
            it != as.end(); ++it)
         {
-          if ((*it)->access_mode () == reg_mod)
+          if ((*it).access_mode () == reg_mod)
             {
-              log_msg ("reg_mod: r%d set to\n", (*it)->address ().base_reg ());
-              log_rtx ((*it)->reg_mod_expr ());
+              log_msg ("reg_mod: r%d set to\n", (*it).address ().base_reg ());
+              log_rtx ((*it).reg_mod_expr ());
               log_msg("\n-----\n\n");
             }
           else
             {
               log_msg ("m_original_addr_expr:\n");
               log_msg ("base: %d, index: %d, scale: %d, disp: %d\n",
-                       (*it)->original_address ().base_reg (),
-                       (*it)->original_address ().index_reg (),
-                       (*it)->original_address ().scale (),
-                       (*it)->original_address ().disp ());
+                       (*it).original_address ().base_reg (),
+                       (*it).original_address ().index_reg (),
+                       (*it).original_address ().scale (),
+                       (*it).original_address ().disp ());
               log_msg ("\nm_addr_expr:\n");
               log_msg ("base: %d, index: %d, scale: %d, disp: %d\n-----\n\n",
-                       (*it)->address ().base_reg (),
-                       (*it)->address ().index_reg (),
-                       (*it)->address ().scale (),
-                       (*it)->address ().disp ());
+                       (*it).address ().base_reg (),
+                       (*it).address ().index_reg (),
+                       (*it).address ().scale (),
+                       (*it).address ().disp ());
             }
         }
       log_msg ("\n\n");
