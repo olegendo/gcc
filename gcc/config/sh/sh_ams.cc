@@ -143,11 +143,12 @@ sh_ams::access::access
 void sh_ams::add_new_access
 (std::list<access>& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode)
 {
+  machine_mode m_mode = GET_MODE (*mem);
   // Create an ADDR_EXPR struct from the address expression of MEM.
   addr_expr original_expr =
-    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, as, false);
+    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, m_mode, as, false);
   addr_expr expr =
-    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, as, true);
+    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, m_mode, as, true);
   as.push_back (access (insn, mem, access_mode, original_expr, expr));
 }
 
@@ -196,6 +197,7 @@ void sh_ams::add_reg_mod_access
 void sh_ams::find_reg_value
 (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn)
 {
+  std::list<std::pair<rtx*, access_mode_t> > mems;
   // Go back through the insn list until we find the last instruction
   // that modified the register.
   for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
@@ -207,6 +209,26 @@ void sh_ams::find_reg_value
         {
           *mod_insn = i;
           return;
+        }
+      else
+        {
+          // Search for auto-mod memory accesses in the current
+          // insn that modify REG.
+          find_mem_accesses (&PATTERN (i), mems);
+          while (!mems.empty ())
+            {
+              rtx mem_addr = XEXP (*(mems.back ().first), 0);
+              enum rtx_code code = GET_CODE (mem_addr);
+              if (GET_RTX_CLASS (code) == RTX_AUTOINC
+                  && REG_P (XEXP (mem_addr, 0))
+                  && REGNO (XEXP (mem_addr, 0)) == REGNO (reg))
+                {
+                  *mod_expr = mem_addr;
+                  *mod_insn = i;
+                  return;
+                }
+              mems.pop_back ();
+            }
         }
     }
   *mod_expr = reg;
@@ -262,9 +284,9 @@ bool sh_ams::find_reg_value_1 (rtx reg, rtx pattern, rtx* value)
 // INSN is the insn in which the access happens.  ROOT_INSN is the INSN
 // argument that was passed to the function at the top level of recursion
 // (used as the start insn when calling add_reg_mod_access).
-// FIXME: handle auto-mod accesses.
 sh_ams::addr_expr sh_ams::extract_addr_expr
-(rtx x, rtx_insn* insn, rtx_insn *root_insn, std::list<access>& as, bool expand)
+(rtx x, rtx_insn* insn, rtx_insn *root_insn, machine_mode mem_mach_mode,
+ std::list<access>& as, bool expand)
 {
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -279,18 +301,66 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = extract_addr_expr (XEXP (x, 0), insn, root_insn, as, expand);
-      op1 = extract_addr_expr (XEXP (x, 1), insn, root_insn, as, expand);
+      op0 = extract_addr_expr
+        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand);
+      op1 = extract_addr_expr
+        (XEXP (x, 1), insn, root_insn, mem_mach_mode, as, expand);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
-      op1 = extract_addr_expr (XEXP (x, 0), insn, root_insn, as, expand);
+      op1 = extract_addr_expr
+        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand);
       if (op1.is_invalid ())
         return op1;
     }
 
+  // Auto-mod accesses found in the original insn list are changed into
+  // non-modifying accesses by offseting their constant displacement, or by
+  // using the modified expression directly in the case of PRE/POST_MODIFY.
+  else if (GET_RTX_CLASS (code) == RTX_AUTOINC)
+    {
+      bool expanding_reg = (INSN_UID (insn) != INSN_UID (root_insn));
+
+      switch (code)
+        {
+
+        // For post-mod accesses, the displacement is offset only when
+        // tracing back the value of a register.  Otherwise, we're interested
+        // in the value that the address reg has during the memory access,
+        // which isn't modified at that point.
+        case POST_DEC:
+          disp = expanding_reg ? -GET_MODE_SIZE (mem_mach_mode) : 0;
+          break;
+        case POST_INC:
+          disp = expanding_reg ? GET_MODE_SIZE (mem_mach_mode) : 0;
+          break;
+        case PRE_DEC:
+          disp = -GET_MODE_SIZE (mem_mach_mode);
+          break;
+        case PRE_INC:
+          disp = GET_MODE_SIZE (mem_mach_mode);
+          break;
+        case POST_MODIFY:
+          return extract_addr_expr
+            (XEXP (x, expanding_reg ? 1 : 0), insn, root_insn,
+             mem_mach_mode, as, expand);
+        case PRE_MODIFY:
+          return extract_addr_expr
+            (XEXP (x, 1), insn, root_insn, mem_mach_mode, as, expand);
+        default:
+          return make_invalid_addr ();
+        }
+
+      op1 = extract_addr_expr
+        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand);
+      disp += op1.disp ();
+      return non_mod_addr
+        (op1.base_reg (), op1.index_reg (),
+         op1.scale (), op1.scale (), op1.scale (),
+         disp, disp, disp);
+    }
 
   switch (code)
     {
@@ -325,13 +395,13 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
                   // The hard reg still needs to be traced back in case it
                   // is set to some unknown value, like the result of a CALL.
                   extract_addr_expr
-                    (reg_value, reg_mod_insn, root_insn, as, true);
+                    (reg_value, reg_mod_insn, root_insn, mem_mach_mode, as, true);
                   return make_reg_addr (REGNO (x));
                 }
             }
 
           addr_expr reg_addr_expr = extract_addr_expr
-            (reg_value, reg_mod_insn, root_insn, as, true);
+            (reg_value, reg_mod_insn, root_insn, mem_mach_mode, as, true);
 
           // If the expression is something AMS can't handle, use the original
           // reg instead, and add a reg_mod access to the access sequence.
@@ -453,11 +523,12 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
   return make_invalid_addr ();
 }
 
-// Find the memory accesses in INSN and add them to AS. ACCESS_MODE indicates
-// whether the mem we're looking for is read or written to.
+// Find the memory accesses in INSN and add them to MEM_LIST, together with their
+// access mode. ACCESS_MODE indicates whether the next mem that we find is read
+// or written to.
 void sh_ams::find_mem_accesses
-(rtx_insn* insn, rtx* x_ref, std::list<access>& as,
- access_mode_t access_mode = load)
+(rtx* x_ref, std::list<std::pair<rtx*, access_mode_t> >& mem_list,
+ access_mode_t access_mode)
 {
   int i;
   rtx x = *x_ref;
@@ -465,24 +536,25 @@ void sh_ams::find_mem_accesses
   switch (code)
     {
     case MEM:
-      add_new_access (as, insn, x_ref, access_mode);
+      mem_list.push_back
+        (std::pair<rtx*, access_mode_t> (x_ref, access_mode));
       break;
     case PARALLEL:
       for (i = 0; i < XVECLEN (x, 0); i++)
-        find_mem_accesses (insn, &XVECEXP (x, 0, i), as, access_mode);
+        find_mem_accesses (&XVECEXP (x, 0, i), mem_list, access_mode);
       break;
     case SET:
-      find_mem_accesses (insn, &SET_DEST (x), as, store);
-      find_mem_accesses (insn, &SET_SRC (x), as, load);
+      find_mem_accesses (&SET_DEST (x), mem_list, store);
+      find_mem_accesses (&SET_SRC (x), mem_list, load);
       break;
     case CALL:
-      find_mem_accesses (insn, &XEXP (x, 0), as, load);
+      find_mem_accesses (&XEXP (x, 0), mem_list, load);
       break;
     default:
       if (ARITHMETIC_P (x))
         {
           for (i = 0; i < GET_RTX_LENGTH (code); i++)
-            find_mem_accesses (insn, &XEXP (x, i), as, access_mode);
+            find_mem_accesses (&XEXP (x, i), mem_list, access_mode);
         }
       break;
     }
@@ -505,6 +577,7 @@ unsigned int sh_ams::execute (function* fun)
 
       // Construct the access sequence from the access insns.
       std::list<access> as;
+      std::list<std::pair<rtx*, access_mode_t> > mems;
       for (rtx_insn* next_i, *i = NEXT_INSN (BB_HEAD (bb));
            i != NULL_RTX; i = next_i)
         {
@@ -514,7 +587,13 @@ unsigned int sh_ams::execute (function* fun)
             continue;
           // Search for memory accesses inside the current insn
           // and add them to the address sequence.
-          find_mem_accesses (i, &PATTERN (i), as);
+          find_mem_accesses (&PATTERN (i), mems);
+          while (!mems.empty ())
+            {
+              add_new_access
+                (as, i, mems.back ().first, mems.back ().second);
+              mems.pop_back ();
+            }
          }
       log_msg ("Access sequence contents:\n\n");
       for (std::list<access>::const_iterator it = as.begin();

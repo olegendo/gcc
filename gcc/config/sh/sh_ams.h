@@ -152,13 +152,14 @@ public:
     (std::list<access>& as, rtx_insn* insn, rtx mod_expr,
      rtx_insn* mod_insn, regno_t reg);
   static void find_mem_accesses
-    (rtx_insn* insn, rtx* x_ref, std::list<access>& as,
-     access_mode_t access_mode);
+    (rtx* x_ref, std::list<std::pair<rtx*, access_mode_t> >& mem_list,
+     access_mode_t access_mode = load);
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
   static bool find_reg_value_1 (rtx reg, rtx pattern, rtx* value);
   static addr_expr extract_addr_expr
-    (rtx x, rtx_insn* insn, rtx_insn* root_insn, std::list<access>& as, bool expand);
+    (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
+     std::list<access>& as, bool expand);
 
   // helper functions to create a particular type of address expression.
   static addr_expr
