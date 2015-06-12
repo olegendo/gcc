@@ -141,14 +141,16 @@ sh_ams::access::access
 
 // Add a normal access to the end of the access sequence.
 void sh_ams::add_new_access
-(std::list<access>& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode)
+(access_sequence& as, rtx_insn* insn, rtx* mem, access_mode_t access_mode,
+ std::list<rtx_insn*>& reg_mod_insns)
 {
   machine_mode m_mode = GET_MODE (*mem);
   // Create an ADDR_EXPR struct from the address expression of MEM.
   addr_expr original_expr =
-    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, m_mode, as, false);
+    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, m_mode, as, false, NULL);
   addr_expr expr =
-    extract_addr_expr ((XEXP (*mem, 0)), insn, insn, m_mode, as, true);
+    extract_addr_expr ((XEXP (*mem, 0)), insn, insn,
+                       m_mode, as, true, &reg_mod_insns);
   as.push_back (access (insn, mem, access_mode, original_expr, expr));
 }
 
@@ -156,7 +158,7 @@ void sh_ams::add_new_access
 // This function traverses the insn list backwards starting from INSN to
 // find the correct place inside AS where the access needs to be inserted.
 void sh_ams::add_reg_mod_access
-(std::list<access>& as, rtx_insn* insn, rtx mod_expr,
+(access_sequence& as, rtx_insn* insn, rtx mod_expr,
  rtx_insn* mod_insn, regno_t reg)
 {
   if (as.empty ())
@@ -164,7 +166,7 @@ void sh_ams::add_reg_mod_access
       as.push_back (access (mod_insn, mod_expr, reg));
       return;
     }
-  std::list<access>::reverse_iterator as_it = as.rbegin ();
+  access_sequence::reverse_iterator as_it = as.rbegin ();
   for (rtx_insn* i = insn; i != NULL_RTX; i = PREV_INSN (i))
     {
       if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
@@ -286,7 +288,7 @@ bool sh_ams::find_reg_value_1 (rtx reg, rtx pattern, rtx* value)
 // (used as the start insn when calling add_reg_mod_access).
 sh_ams::addr_expr sh_ams::extract_addr_expr
 (rtx x, rtx_insn* insn, rtx_insn *root_insn, machine_mode mem_mach_mode,
- std::list<access>& as, bool expand)
+ access_sequence& as, bool expand, std::list<rtx_insn*> *reg_mod_insns)
 {
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -302,16 +304,16 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
       op0 = extract_addr_expr
-        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand);
+        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand, reg_mod_insns);
       op1 = extract_addr_expr
-        (XEXP (x, 1), insn, root_insn, mem_mach_mode, as, expand);
+        (XEXP (x, 1), insn, root_insn, mem_mach_mode, as, expand, reg_mod_insns);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
       op1 = extract_addr_expr
-        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand);
+        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand, reg_mod_insns);
       if (op1.is_invalid ())
         return op1;
     }
@@ -345,16 +347,17 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
         case POST_MODIFY:
           return extract_addr_expr
             (XEXP (x, expanding_reg ? 1 : 0), insn, root_insn,
-             mem_mach_mode, as, expand);
+             mem_mach_mode, as, expand, reg_mod_insns);
         case PRE_MODIFY:
           return extract_addr_expr
-            (XEXP (x, 1), insn, root_insn, mem_mach_mode, as, expand);
+            (XEXP (x, 1), insn, root_insn,
+             mem_mach_mode, as, expand, reg_mod_insns);
         default:
           return make_invalid_addr ();
         }
 
       op1 = extract_addr_expr
-        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand);
+        (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand, reg_mod_insns);
       disp += op1.disp ();
       return non_mod_addr
         (op1.base_reg (), op1.index_reg (),
@@ -379,6 +382,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
           // and convert it to an addr_expr.
           rtx reg_value;
           rtx_insn *reg_mod_insn;
+          std::list<rtx_insn*>::iterator inserted_mod_insn = reg_mod_insns->end ();
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
           if (reg_value != NULL_RTX && REG_P (reg_value))
             {
@@ -395,13 +399,31 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
                   // The hard reg still needs to be traced back in case it
                   // is set to some unknown value, like the result of a CALL.
                   extract_addr_expr
-                    (reg_value, reg_mod_insn, root_insn, mem_mach_mode, as, true);
+                    (reg_value, reg_mod_insn, root_insn,
+                     mem_mach_mode, as, true, NULL);
                   return make_reg_addr (REGNO (x));
                 }
             }
 
+          // Collect all the insns that are used to arrive at the address
+          // into reg_mod_insns.  The content of this list is later used
+          // to remove the original register modifying insns when updating
+          // the insn stream.  Auto-mod insns don't need to be removed
+          // because the mem accesses get changed during the update.
+          if (reg_mod_insns != NULL
+              && !find_reg_note (reg_mod_insn, REG_INC, NULL_RTX))
+            {
+              reg_mod_insns->push_back (reg_mod_insn);
+
+              // Keep track of where we inserted the insn in case
+              // we might have to backtrack later.
+              inserted_mod_insn = reg_mod_insns->end ();
+              --inserted_mod_insn;
+            }
+
           addr_expr reg_addr_expr = extract_addr_expr
-            (reg_value, reg_mod_insn, root_insn, mem_mach_mode, as, true);
+            (reg_value, reg_mod_insn, root_insn,
+             mem_mach_mode, as, true, reg_mod_insns);
 
           // If the expression is something AMS can't handle, use the original
           // reg instead, and add a reg_mod access to the access sequence.
@@ -409,6 +431,11 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
             {
               add_reg_mod_access
                 (as, root_insn, reg_value, reg_mod_insn, REGNO (x));
+
+              // Remove any insn that might have been inserted while
+              // expanding this register.
+              if (reg_mod_insns != NULL)
+                reg_mod_insns->erase (inserted_mod_insn, reg_mod_insns->end ());
               return make_reg_addr (REGNO (x));
             }
           return reg_addr_expr;
@@ -560,6 +587,21 @@ void sh_ams::find_mem_accesses
     }
 }
 
+void sh_ams::access_sequence::update_insn_stream
+(std::list<rtx_insn*>& reg_mod_insns)
+{
+  // Remove all the insns that are originally used to arrive at
+  // the required addresses.
+  for (std::list<rtx_insn*>::iterator it = reg_mod_insns.begin();
+       it != reg_mod_insns.end(); ++it)
+    {
+      SET_INSN_DELETED (*it);
+    }
+
+  // FIXME: Generate new address reg modifying insns from the
+  // access sequence.
+}
+
 unsigned int sh_ams::execute (function* fun)
 {
   log_msg ("sh-ams pass\n");
@@ -574,10 +616,11 @@ unsigned int sh_ams::execute (function* fun)
   FOR_EACH_BB_FN (bb, fun)
     {
       log_msg ("BB #%d:\n", bb->index);
+      std::list<std::pair<rtx*, access_mode_t> > mems;
+      std::list<rtx_insn*> reg_mod_insns;
 
       // Construct the access sequence from the access insns.
-      std::list<access> as;
-      std::list<std::pair<rtx*, access_mode_t> > mems;
+      access_sequence as;
       for (rtx_insn* next_i, *i = NEXT_INSN (BB_HEAD (bb));
            i != NULL_RTX; i = next_i)
         {
@@ -591,12 +634,12 @@ unsigned int sh_ams::execute (function* fun)
           while (!mems.empty ())
             {
               add_new_access
-                (as, i, mems.back ().first, mems.back ().second);
+                (as, i, mems.back ().first, mems.back ().second, reg_mod_insns);
               mems.pop_back ();
             }
          }
       log_msg ("Access sequence contents:\n\n");
-      for (std::list<access>::const_iterator it = as.begin();
+      for (access_sequence::const_iterator it = as.begin();
            it != as.end(); ++it)
         {
           if ((*it).access_mode () == reg_mod)
@@ -622,6 +665,8 @@ unsigned int sh_ams::execute (function* fun)
             }
         }
       log_msg ("\n\n");
+
+      as.update_insn_stream (reg_mod_insns);
     }
 
   log_return (0, "\n\n");
