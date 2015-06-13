@@ -124,6 +124,7 @@ sh_ams::access::access
   m_insn_ref = &XEXP (*mem, 0);
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
+  m_alternatives_count = 0;
 }
 
 // This constructor creates an access that represents
@@ -137,6 +138,7 @@ sh_ams::access::access
   m_reg_mod_expr = mod_expr;
   m_original_addr_expr = make_invalid_addr ();
   m_addr_expr = make_reg_addr (reg);
+  m_alternatives_count = 0;
 }
 
 // Add a normal access to the end of the access sequence.
@@ -588,7 +590,7 @@ void sh_ams::find_mem_accesses
 }
 
 void sh_ams::access_sequence::update_insn_stream
-(std::list<rtx_insn*>& reg_mod_insns)
+(std::list<rtx_insn*>& reg_mod_insns, delegate* dlg)
 {
   // Remove all the insns that are originally used to arrive at
   // the required addresses.
@@ -598,8 +600,106 @@ void sh_ams::access_sequence::update_insn_stream
       SET_INSN_DELETED (*it);
     }
 
-  // FIXME: Generate new address reg modifying insns from the
-  // access sequence.
+  // Generate new address reg modifying insns.
+  std::vector<reg_value> addr_reg_values;
+  for (access_sequence::iterator as_it = begin (); as_it != end (); ++as_it)
+    {
+      if ((*as_it).access_mode () == reg_mod) continue;
+
+      // Add the unmodified base and index reg values to ADDR_REG_VALUES.
+      regno_t base_reg = (*as_it).address ().base_reg ();
+      if (base_reg != invalid_regno
+          && !reg_value::arr_contains_reg (addr_reg_values, base_reg))
+          addr_reg_values.push_back (reg_value (base_reg));
+      regno_t index_reg = (*as_it).address ().index_reg ();
+      if (index_reg != invalid_regno
+          && !reg_value::arr_contains_reg (addr_reg_values, index_reg))
+        addr_reg_values.push_back (reg_value (index_reg));
+
+      int min_cost = infinite_costs;
+      reg_value *min_start_base = NULL, *min_start_index = NULL;
+      addr_expr min_end_base, min_end_index;
+      (*as_it).clear_alternatives ();
+      dlg->mem_access_alternatives (*as_it);
+
+      for (access::alternative* alt = (*as_it).begin_alternatives ();
+           alt != (*as_it).end_alternatives (); ++alt)
+        {
+          const addr_expr ae = (*as_it).address ();
+          const addr_expr alt_ae = alt->address ();
+
+          // Generate only base+index type accesses for now
+          // (other alternatives are skipped).
+          if (alt_ae.base_reg () == invalid_regno
+              || alt_ae.index_reg () == invalid_regno
+              || alt_ae.disp_min () != 0 || alt_ae.disp_max () != 0
+              || alt_ae.scale () != 1)
+            continue;
+
+          // The base register of the generated access will contain the base
+          // of the address in AE.
+          addr_expr end_base = make_reg_addr (ae.base_reg ());
+
+          // The index reg will contain the rest (index*scale+disp).
+          addr_expr end_index =
+            non_mod_addr (invalid_regno, ae.index_reg (),
+                          ae.scale (), ae.scale (), ae.scale (),
+                          ae.disp (), ae.disp (), ae.disp ());
+          reg_value *start_base, *start_index;
+
+          // Get the minimal costs for using this alternative and update
+          // the cheapest alternative so far.
+          int alt_min_cost =
+            find_min_mod_cost (addr_reg_values, &start_base, end_base, dlg)
+            + find_min_mod_cost (addr_reg_values, &start_index, end_index, dlg)
+            + alt->costs ();
+          if (alt_min_cost < min_cost)
+            {
+              min_cost = alt_min_cost;
+              min_start_base = start_base;
+              min_start_index = start_index;
+              min_end_base = end_base;
+              min_end_index = end_index;
+            }
+        }
+
+      // Insert the address reg modifying insns before the access insn
+      // and update the access.
+      if (false) // FIXME: The functions need to be implemented first.
+        {
+      regno_t access_base =
+        insert_reg_mod_insns (min_start_base, min_end_base,
+                              (*as_it).insn (), addr_reg_values, dlg);
+      regno_t access_index =
+        insert_reg_mod_insns (min_start_index, min_end_index,
+                              (*as_it).insn (), addr_reg_values, dlg);
+      *(*as_it).insn_ref () =
+          gen_rtx_PLUS (word_mode,
+                        gen_rtx_REG (word_mode, access_base),
+                        gen_rtx_REG (word_mode, access_index));
+        }
+    }
+}
+
+// Find the cheapest way END_ADDR can be arrived at from one of the values
+// in ADDR_REG_VALUES.  Set MIN_START_ADDR to the reg_value that can be
+// changed into END_ADDR with the least cost and return its cost.
+int sh_ams::access_sequence::find_min_mod_cost
+(std::vector<reg_value>& addr_reg_values,
+ reg_value **min_start_addr, const addr_expr end_addr, delegate* dlg)
+{
+  // FIXME: Needs to be implemented.
+  return infinite_costs;
+}
+
+// Insert insns behind INSN that modify START_ADDR to arrive at END_ADDR.
+// Return the register in which the final address is stored.
+sh_ams::regno_t sh_ams::access_sequence::insert_reg_mod_insns
+(reg_value* start_value, const addr_expr end_addr,
+ rtx_insn* insn, std::vector<reg_value>& addr_reg_values, delegate* dlg)
+{
+  // FIXME: Needs to be implemented.
+  return 0;
 }
 
 unsigned int sh_ams::execute (function* fun)
@@ -666,7 +766,7 @@ unsigned int sh_ams::execute (function* fun)
         }
       log_msg ("\n\n");
 
-      as.update_insn_stream (reg_mod_insns);
+      as.update_insn_stream (reg_mod_insns, m_delegate);
     }
 
   log_return (0, "\n\n");

@@ -294,7 +294,10 @@ public:
     addr_space_t addr_space (void) const { return m_addr_space; }
 
     // the insn where this access occurs.
-    rtx insn (void) const { return m_insn; }
+    rtx_insn* insn (void) const { return m_insn; }
+
+    // reference to the access rtx inside the insn.
+    rtx* insn_ref (void) const { return m_insn_ref; }
 
     // if m_access_mode is REG_MOD, this stores the expression
     // that the register is set to (NULL_RTX if the value is
@@ -338,8 +341,8 @@ public:
     access_mode_t m_access_mode;
     machine_mode m_machine_mode;
     addr_space_t m_addr_space;
-    rtx m_insn;
-    rtx* m_insn_ref;  // reference to the access rtx inside the insn.
+    rtx_insn* m_insn;
+    rtx* m_insn_ref;
     rtx m_reg_mod_expr;
 
     // all available alternatives for this access as reported by the target.
@@ -352,11 +355,62 @@ public:
     alternative m_alternatives[MAX_ALTERNATIVES];
   };
 
+  struct delegate;
+
   class access_sequence : public std::list<access>
   {
   public:
+    void update_insn_stream
+      (std::list<rtx_insn*>& reg_mod_insns, delegate* dlg);
+  private:
 
-    void update_insn_stream (std::list<rtx_insn*>& reg_mod_insns);
+    // A structure used to keep track of the address registers' values when
+    // generating new address modifying insns.  Each generated insn has a
+    // corresponding reg_value struct.
+    class reg_value
+    {
+    public:
+      reg_value (regno_t reg, addr_expr value)
+        : m_reg (reg), m_value (value), m_used (false) { }
+      reg_value (regno_t reg)
+        : m_reg (reg), m_value (make_reg_addr (reg)), m_used (false) { }
+
+      static bool arr_contains_reg (std::vector<reg_value> arr, regno_t reg)
+      {
+        for (std::vector<reg_value>::const_iterator it = arr.begin();
+             it != arr.end(); ++it)
+          {
+            if ((*it).reg () == reg) return true;
+          }
+        return false;
+      }
+
+      // The register that was set by the insn.
+      int reg (void) const { return m_reg; }
+
+      // The value that the register is set to, expressed with the original
+      // address registers.
+      const addr_expr& value (void) const { return m_value; }
+
+      // Shows whether this register is used in another address-modifying
+      // insn.  If so, register cloning costs must be taken into account
+      // when using it a second time.
+      bool is_used (void) const { return m_used; }
+
+      void set_used () { m_used = true; }
+
+    private:
+      regno_t m_reg;
+      addr_expr m_value;
+      bool m_used;
+    };
+
+    int find_min_mod_cost
+      (std::vector<reg_value>& addr_reg_values,
+       reg_value **min_start_addr, const addr_expr end_addr, delegate* dlg);
+    regno_t insert_reg_mod_insns
+      (reg_value *start_value, const addr_expr end_addr,
+       rtx_insn* insn, std::vector<reg_value>& addr_reg_values, delegate* dlg);
 
   };
 
