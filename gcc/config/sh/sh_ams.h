@@ -411,6 +411,12 @@ public:
     regno_t insert_reg_mod_insns
       (reg_value *start_value, const addr_expr end_addr,
        rtx_insn* insn, std::vector<reg_value>& addr_reg_values, delegate* dlg);
+    int try_modify_addr
+      (reg_value* start_value, const addr_expr end_addr,
+       std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
+       regno_t *final_addr_regno, delegate* dlg);
+    int try_modify_addr
+      (reg_value *start_value, const addr_expr end_addr, delegate* dlg);
 
   };
 
@@ -421,11 +427,15 @@ public:
     // use access::add_alternative.
     virtual void mem_access_alternatives (sh_ams::access& a) = 0;
 
-    // provide the cost for modifying (adding) a constant to the specified
+    // provide the cost for adding a constant to the specified
     // address register.
     // the cost must be somehow relative to the cost provided for access
     // alternatives.
-    virtual int addr_reg_mod_cost (sh_ams::regno_t reg, sh_ams::disp_t disp/*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp/*, const access_sequence& as*/) = 0;
+
+    // provide the cost for multiplying the specified address register
+    // by a constant.
+    virtual int addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale/*, const access_sequence& as*/) = 0;
 
     // provide the cost for cloning the address register, which is usually
     // required when splitting an access sequence.  if (address) register

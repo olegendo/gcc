@@ -821,7 +821,8 @@ extern opt_pass* make_pass_sh_optimize_sett_clrt (gcc::context* ctx,
 static struct ams_delegate : public sh_ams::delegate
 {
   virtual void mem_access_alternatives (sh_ams::access& a);
-  virtual int addr_reg_mod_cost (sh_ams::regno_t reg, sh_ams::disp_t disp);
+  virtual int addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp);
+  virtual int addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale);
   virtual int addr_reg_clone_cost (sh_ams::regno_t reg);
 } g_ams_delegate;
 
@@ -13769,7 +13770,7 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
 	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), true)));
 }
 
-int ams_delegate::addr_reg_mod_cost (sh_ams::regno_t reg, sh_ams::disp_t disp)
+int ams_delegate::addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp)
 {
   // modifying the GBR is impossible.
   if (reg == GBR_REG)
@@ -13784,6 +13785,19 @@ int ams_delegate::addr_reg_mod_cost (sh_ams::regno_t reg, sh_ams::disp_t disp)
   // FIXME: if register pressure is (expected to be) high, reduce the cost
   // a bit to avoid addr reg cloning.
   return 5;
+}
+
+int ams_delegate::addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale)
+{
+  // modifying the GBR is impossible.
+  if (reg == GBR_REG)
+    return sh_ams::infinite_costs;
+
+  // multiplying by powers of 2 can be done cheaper with shifts.
+  if ((scale & (scale - 1)) == 0)
+    return 2;
+
+  return 3;
 }
 
 int ams_delegate::addr_reg_clone_cost (sh_ams::regno_t reg ATTRIBUTE_UNUSED)

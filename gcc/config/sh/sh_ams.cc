@@ -589,6 +589,7 @@ void sh_ams::find_mem_accesses
     }
 }
 
+// FIXME: Add REG_DEAD notes and /f and /v flags.
 void sh_ams::access_sequence::update_insn_stream
 (std::list<rtx_insn*>& reg_mod_insns, delegate* dlg)
 {
@@ -665,8 +666,6 @@ void sh_ams::access_sequence::update_insn_stream
 
       // Insert the address reg modifying insns before the access insn
       // and update the access.
-      if (false) // FIXME: The functions need to be implemented first.
-        {
       regno_t access_base =
         insert_reg_mod_insns (min_start_base, min_end_base,
                               (*as_it).insn (), addr_reg_values, dlg);
@@ -677,7 +676,6 @@ void sh_ams::access_sequence::update_insn_stream
           gen_rtx_PLUS (word_mode,
                         gen_rtx_REG (word_mode, access_base),
                         gen_rtx_REG (word_mode, access_index));
-        }
     }
 }
 
@@ -688,8 +686,18 @@ int sh_ams::access_sequence::find_min_mod_cost
 (std::vector<reg_value>& addr_reg_values,
  reg_value **min_start_addr, const addr_expr end_addr, delegate* dlg)
 {
-  // FIXME: Needs to be implemented.
-  return infinite_costs;
+  int min_cost = infinite_costs;
+  for (std::vector<reg_value>::iterator it = addr_reg_values.begin ();
+       it != addr_reg_values.end (); ++it)
+    {
+      int cost = try_modify_addr (&(*it), end_addr, dlg);
+      if (cost < min_cost)
+        {
+          min_cost = cost;
+          *min_start_addr = &(*it);
+        }
+    }
+  return min_cost;
 }
 
 // Insert insns behind INSN that modify START_ADDR to arrive at END_ADDR.
@@ -698,8 +706,132 @@ sh_ams::regno_t sh_ams::access_sequence::insert_reg_mod_insns
 (reg_value* start_value, const addr_expr end_addr,
  rtx_insn* insn, std::vector<reg_value>& addr_reg_values, delegate* dlg)
 {
-  // FIXME: Needs to be implemented.
-  return 0;
+  regno_t final_addr_regno;
+  try_modify_addr (start_value, end_addr, &addr_reg_values,
+                   insn, &final_addr_regno, dlg);
+  return final_addr_regno;
+}
+
+// Try to find address modifying insns that change the address in START_VALUE
+// into END_ADDR.  If ADDR_REG_VALUES and INSN is not null, insert the insns
+// before INSN, insert their corresponding reg_value structure into
+// ADDR_REG_VALUES, and set FINAL_ADDR_REGNO to the register that stores the
+// final address.
+// Return the total cost of the modifying insns, or INFINITE_COSTS if no
+// suitable insns have been found.
+int sh_ams::access_sequence::try_modify_addr
+(reg_value* start_value, const addr_expr end_addr,
+ std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
+ regno_t* final_addr_regno, delegate* dlg)
+{
+  rtx new_reg = NULL_RTX;
+  int cost = start_value->is_used ()
+    ? dlg->addr_reg_clone_cost (start_value->reg ()) : 0;
+  if (final_addr_regno != NULL) *final_addr_regno = start_value->reg ();
+  rtx_insn *new_insns;
+  if (insn != NULL_RTX) start_sequence ();
+
+  // Canonicalize the start and end addresses by converting
+  // addresses of the form base+disp into index*1+disp.
+  addr_expr c_start_addr = start_value->value ();
+  addr_expr c_end_addr = end_addr;
+  if (c_start_addr.index_reg () == invalid_regno)
+    c_start_addr =
+      non_mod_addr (invalid_regno, c_start_addr.base_reg (), 1, 1, 1,
+                    c_start_addr.disp (), c_start_addr.disp (),
+                    c_start_addr.disp ());
+  if (c_end_addr.index_reg () == invalid_regno)
+    c_end_addr =
+      non_mod_addr (invalid_regno, c_end_addr.base_reg (), 1, 1, 1,
+                    c_end_addr.disp (), c_end_addr.disp (),
+                    c_end_addr.disp ());
+
+  if (c_start_addr.base_reg () != c_end_addr.base_reg ()
+      || c_start_addr.index_reg () != c_end_addr.index_reg ())
+    {
+      // FIXME: Handle cases when e.g. the start address doesn't have
+      // an index reg but the end address does.
+      return infinite_costs;
+    }
+
+  // Add scaling insns.
+  if (c_start_addr.index_reg () != invalid_regno
+      && c_start_addr.scale () != c_end_addr.scale ())
+    {
+      // We can't scale if the address has displacement or a base reg.
+      if (c_start_addr.disp () != 0 || c_start_addr.base_reg () != invalid_regno)
+        return infinite_costs;
+
+      // We can only scale by integers.
+      if (c_end_addr.scale () % c_start_addr.scale () != 0)
+        return infinite_costs;
+
+      scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
+      c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
+                                   c_end_addr.scale (), c_end_addr.scale (),
+                                   c_end_addr.scale (), 0, 0, 0);
+      cost += dlg->addr_reg_scale_cost (start_value->reg (), scale);
+      if (addr_reg_values != NULL)
+        {
+          start_value->set_used ();
+          new_reg = gen_reg_rtx (word_mode);
+          rtx mult_rtx;
+          if ((scale & (scale - 1)) == 0)
+            {
+              scale_t shift = 0;
+              while (scale >>= 1) ++shift;
+              mult_rtx = gen_rtx_ASHIFT
+                (word_mode,
+                 gen_rtx_REG (word_mode, start_value->reg ()),
+                 gen_rtx_CONST_INT (word_mode, shift));
+            }
+          else
+            mult_rtx = gen_rtx_MULT (word_mode,
+                                     gen_rtx_REG (word_mode, start_value->reg ()),
+                                     gen_rtx_CONST_INT (word_mode, scale));
+
+          emit_move_insn (new_reg, mult_rtx);
+          addr_reg_values->push_back (reg_value (REGNO (new_reg), c_start_addr));
+          start_value = &addr_reg_values->back ();
+          *final_addr_regno = REGNO (new_reg);
+        }
+    }
+
+  // Add displacement insns.
+  if (c_start_addr.disp () != c_end_addr.disp ())
+    {
+      cost += dlg->addr_reg_disp_cost (start_value->reg (),
+                                       c_end_addr.disp () - c_start_addr.disp ());
+      if (addr_reg_values != NULL)
+        {
+          start_value->set_used ();
+          new_reg = gen_reg_rtx (word_mode);
+          rtx plus_rtx
+            = gen_rtx_PLUS (word_mode,
+                            gen_rtx_REG (word_mode, start_value->reg ()),
+                            gen_rtx_CONST_INT
+                            (word_mode,
+                             c_end_addr.disp () - c_start_addr.disp ()));
+          emit_move_insn (new_reg, plus_rtx);
+          addr_reg_values->push_back (reg_value (REGNO (new_reg), c_end_addr));
+          *final_addr_regno = REGNO (new_reg);
+        }
+    }
+
+  if (insn != NULL_RTX)
+    {
+      new_insns = get_insns ();
+      end_sequence ();
+      emit_insn_before (new_insns, insn);
+    }
+
+  return cost;
+}
+
+int sh_ams::access_sequence::try_modify_addr
+(reg_value* start_value, const addr_expr end_addr, delegate* dlg)
+{
+  return try_modify_addr (start_value, end_addr, NULL, NULL, NULL, dlg);
 }
 
 unsigned int sh_ams::execute (function* fun)
