@@ -362,9 +362,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
         (XEXP (x, 0), insn, root_insn, mem_mach_mode, as, expand, reg_mod_insns);
       disp += op1.disp ();
       return non_mod_addr
-        (op1.base_reg (), op1.index_reg (),
-         op1.scale (), op1.scale (), op1.scale (),
-         disp, disp, disp);
+        (op1.base_reg (), op1.index_reg (), op1.scale (), disp);
     }
 
   switch (code)
@@ -374,8 +372,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
     // to the appropriate value.
     case CONST_INT:
       disp = INTVAL (x);
-      return non_mod_addr (invalid_regno, invalid_regno,
-                           0, 0, 0, disp, disp, disp);
+      return non_mod_addr (invalid_regno, invalid_regno, 0, disp);
     case REG:
       if (expand)
         {
@@ -455,9 +452,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
       if (op1.index_reg () != invalid_regno && op1.scale () != -1)
         break;
       op1 = non_mod_addr
-        (op1.index_reg (), op1.base_reg (),
-         -op1.scale (), -op1.scale (), -op1.scale (),
-         -op1.disp (), -op1.disp (), -op1.disp ());
+        (op1.index_reg (), op1.base_reg (), -op1.scale (), -op1.disp ());
       if (code == NEG) return op1;
     case PLUS:
       disp = op0.disp () + op1.disp ();
@@ -503,8 +498,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
             }
           else break;
         }
-      return non_mod_addr (base_reg, index_reg,
-                           scale, scale, scale, disp, disp, disp);
+      return non_mod_addr (base_reg, index_reg, scale, disp);
 
     // Change shift into multiply.
     case ASHIFT:
@@ -515,8 +509,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
         {
           disp_t mul = 1
             << op1.disp ();
-          op1 = non_mod_addr
-            (invalid_regno, invalid_regno, 0, 0, 0, mul, mul, mul);
+          op1 = non_mod_addr (invalid_regno, invalid_regno, 0, mul);
         }
       else break;
     case MULT:
@@ -542,10 +535,7 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
         }
       else break;
       return non_mod_addr (invalid_regno, index_reg,
-                           scale, scale, scale,
-                           op0.disp () * op1.disp (),
-                           op0.disp () * op1.disp (),
-                           op0.disp () * op1.disp ());
+                           scale, op0.disp () * op1.disp ());
     default:
       break;
     }
@@ -644,8 +634,7 @@ void sh_ams::access_sequence::update_insn_stream
           // The index reg will contain the rest (index*scale+disp).
           addr_expr end_index =
             non_mod_addr (invalid_regno, ae.index_reg (),
-                          ae.scale (), ae.scale (), ae.scale (),
-                          ae.disp (), ae.disp (), ae.disp ());
+                          ae.scale (), ae.disp ());
           reg_value *start_base, *start_index;
 
           // Get the minimal costs for using this alternative and update
@@ -737,13 +726,11 @@ int sh_ams::access_sequence::try_modify_addr
   addr_expr c_end_addr = end_addr;
   if (c_start_addr.index_reg () == invalid_regno)
     c_start_addr =
-      non_mod_addr (invalid_regno, c_start_addr.base_reg (), 1, 1, 1,
-                    c_start_addr.disp (), c_start_addr.disp (),
+      non_mod_addr (invalid_regno, c_start_addr.base_reg (), 1,
                     c_start_addr.disp ());
   if (c_end_addr.index_reg () == invalid_regno)
     c_end_addr =
-      non_mod_addr (invalid_regno, c_end_addr.base_reg (), 1, 1, 1,
-                    c_end_addr.disp (), c_end_addr.disp (),
+      non_mod_addr (invalid_regno, c_end_addr.base_reg (), 1,
                     c_end_addr.disp ());
 
   if (c_start_addr.base_reg () != c_end_addr.base_reg ()
@@ -768,8 +755,7 @@ int sh_ams::access_sequence::try_modify_addr
 
       scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
-                                   c_end_addr.scale (), c_end_addr.scale (),
-                                   c_end_addr.scale (), 0, 0, 0);
+                                   c_end_addr.scale (), 0);
       cost += dlg->addr_reg_scale_cost (start_value->reg (), scale);
       if (addr_reg_values != NULL)
         {

@@ -111,6 +111,19 @@ public:
       m_scale_max = scale_max;
     }
 
+    non_mod_addr (regno_t base_reg, regno_t index_reg, scale_t scale, disp_t disp)
+    {
+      m_type = non_mod;
+      m_base_reg = base_reg;
+      m_disp = disp;
+      m_disp_min = disp;
+      m_disp_max = disp;
+      m_index_reg = index_reg;
+      m_scale = scale;
+      m_scale_min = scale;
+      m_scale_max = scale;
+    }
+
 //   non_mod_addr (regno_t base_reg, disp_t disp, disp_t min_disp, disp_t max_disp)
   };
 
