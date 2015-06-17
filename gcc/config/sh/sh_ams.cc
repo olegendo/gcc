@@ -583,6 +583,8 @@ void sh_ams::find_mem_accesses
 void sh_ams::access_sequence::update_insn_stream
 (std::list<rtx_insn*>& reg_mod_insns, delegate* dlg)
 {
+  log_msg ("Updating insn list\n");
+
   // Remove all the insns that are originally used to arrive at
   // the required addresses.
   for (std::list<rtx_insn*>::iterator it = reg_mod_insns.begin();
@@ -692,6 +694,20 @@ void sh_ams::access_sequence::update_insn_stream
       // FIXME: It might be faster to update the df manually.
       df_insn_rescan ((*as_it).insn ());
     }
+
+  log_msg ("\naddr_reg_values after insn update:\n");
+  for (std::vector<reg_value>::iterator it = addr_reg_values.begin ();
+       it != addr_reg_values.end (); ++it)
+    {
+      log_msg ("r%d <- ", (*it).reg ());
+      if ((*it).value ().base_reg () != invalid_regno)
+        log_msg ("r%d + ", (*it).value ().base_reg ());
+      if ((*it).value ().index_reg () != invalid_regno)
+        log_msg ("r%d*%d + ", (*it).value ().index_reg (),
+                 (*it).value ().scale ());
+      log_msg ("%d\n", (*it).value ().disp ());
+    }
+  log_msg ("\n");
 }
 
 // Find the cheapest way END_ADDR can be arrived at from one of the values
