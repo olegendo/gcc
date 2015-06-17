@@ -665,6 +665,9 @@ void sh_ams::access_sequence::update_insn_stream
           gen_rtx_PLUS (word_mode,
                         gen_rtx_REG (word_mode, access_base),
                         gen_rtx_REG (word_mode, access_index));
+
+      // FIXME: It might be faster to update the df manually.
+      df_insn_rescan ((*as_it).insn ());
     }
 }
 
@@ -825,7 +828,6 @@ unsigned int sh_ams::execute (function* fun)
   log_msg ("sh-ams pass\n");
 
 //  df_set_flags (DF_DEFER_INSN_RESCAN); // needed?
-  df_set_flags (DF_NO_INSN_RESCAN);  // disable data flow updates.
 
   df_note_add_problem ();
   df_analyze ();
