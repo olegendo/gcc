@@ -651,12 +651,19 @@ void sh_ams::access_sequence::update_insn_stream
           // Get the minimal costs for using this alternative and update
           // the cheapest alternative so far.
           reg_value *start_base, *start_index;
-          int alt_min_cost = alt->costs ()
-            + find_min_mod_cost (addr_reg_values, &start_base, end_base, dlg);
+          int alt_min_cost = alt->costs ();
+          int address_mod_cost
+            = find_min_mod_cost (addr_reg_values, &start_base, end_base, dlg);
+          if (address_mod_cost == infinite_costs) continue;
+          alt_min_cost += address_mod_cost;
 
           if (alt_ae.index_reg () != invalid_regno)
-            alt_min_cost += find_min_mod_cost (addr_reg_values, &start_index,
-                                               end_index, dlg);
+            {
+              address_mod_cost = find_min_mod_cost (addr_reg_values, &start_index,
+                                                    end_index, dlg);
+              if (address_mod_cost == infinite_costs) continue;
+              alt_min_cost += address_mod_cost;
+            }
 
           if (alt_min_cost < min_cost)
             {
