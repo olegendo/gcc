@@ -608,6 +608,7 @@ void sh_ams::access_sequence::update_insn_stream
         addr_reg_values.push_back (reg_value (index_reg));
 
       int min_cost = infinite_costs;
+      access::alternative* min_alternative = NULL;
       reg_value *min_start_base = NULL, *min_start_index = NULL;
       addr_expr min_end_base, min_end_index;
       (*as_it).clear_alternatives ();
@@ -618,38 +619,54 @@ void sh_ams::access_sequence::update_insn_stream
         {
           const addr_expr ae = (*as_it).address ();
           const addr_expr alt_ae = alt->address ();
+          addr_expr end_base, end_index;
 
-          // Generate only base+index type accesses for now
-          // (other alternatives are skipped).
+          // Generate only base and base+index type accesses
+          // for now (other alternatives are skipped).
           if (alt_ae.base_reg () == invalid_regno
-              || alt_ae.index_reg () == invalid_regno
               || alt_ae.disp_min () != 0 || alt_ae.disp_max () != 0
-              || alt_ae.scale () != 1)
+              || (alt_ae.index_reg () != invalid_regno && alt_ae.scale () != 1))
             continue;
 
-          // The base register of the generated access will contain the base
-          // of the address in AE.
-          addr_expr end_base = make_reg_addr (ae.base_reg ());
+          if (alt_ae.index_reg () == invalid_regno)
+            {
+              // If the alternative only has one address register, it must
+              // contain the whole address in AE.
+              end_base = ae;
+            }
+          else
+            {
+              // For base+index type accesses, the base register of the generated
+              // access will contain the base of the address in AE.
+              end_base = make_reg_addr (ae.base_reg ());
 
-          // The index reg will contain the rest (index*scale+disp).
-          addr_expr end_index =
-            non_mod_addr (invalid_regno, ae.index_reg (),
-                          ae.scale (), ae.disp ());
-          reg_value *start_base, *start_index;
+              // The index reg will contain the rest (index*scale+disp).
+              end_index =
+                non_mod_addr (invalid_regno, ae.index_reg (),
+                              ae.scale (), ae.disp ());
+            }
 
           // Get the minimal costs for using this alternative and update
           // the cheapest alternative so far.
-          int alt_min_cost =
-            find_min_mod_cost (addr_reg_values, &start_base, end_base, dlg)
-            + find_min_mod_cost (addr_reg_values, &start_index, end_index, dlg)
-            + alt->costs ();
+          reg_value *start_base, *start_index;
+          int alt_min_cost = alt->costs ()
+            + find_min_mod_cost (addr_reg_values, &start_base, end_base, dlg);
+
+          if (alt_ae.index_reg () != invalid_regno)
+            alt_min_cost += find_min_mod_cost (addr_reg_values, &start_index,
+                                               end_index, dlg);
+
           if (alt_min_cost < min_cost)
             {
               min_cost = alt_min_cost;
               min_start_base = start_base;
-              min_start_index = start_index;
               min_end_base = end_base;
-              min_end_index = end_index;
+              if (alt_ae.index_reg () != invalid_regno)
+                {
+                  min_end_index = end_index;
+                  min_start_index = start_index;
+                }
+              min_alternative = alt;
             }
         }
 
@@ -658,13 +675,19 @@ void sh_ams::access_sequence::update_insn_stream
       regno_t access_base =
         insert_reg_mod_insns (min_start_base, min_end_base,
                               (*as_it).insn (), addr_reg_values, dlg);
-      regno_t access_index =
-        insert_reg_mod_insns (min_start_index, min_end_index,
-                              (*as_it).insn (), addr_reg_values, dlg);
-      *(*as_it).insn_ref () =
-          gen_rtx_PLUS (word_mode,
-                        gen_rtx_REG (word_mode, access_base),
-                        gen_rtx_REG (word_mode, access_index));
+
+      if (min_alternative->address ().index_reg () == invalid_regno)
+        *(*as_it).insn_ref () = gen_rtx_REG (word_mode, access_base);
+      else
+        {
+          regno_t access_index =
+            insert_reg_mod_insns (min_start_index, min_end_index,
+                                  (*as_it).insn (), addr_reg_values, dlg);
+          *(*as_it).insn_ref () =
+            gen_rtx_PLUS (word_mode,
+                          gen_rtx_REG (word_mode, access_base),
+                          gen_rtx_REG (word_mode, access_index));
+        }
 
       // FIXME: It might be faster to update the df manually.
       df_insn_rescan ((*as_it).insn ());
@@ -736,13 +759,41 @@ int sh_ams::access_sequence::try_modify_addr
       non_mod_addr (invalid_regno, c_end_addr.base_reg (), 1,
                     c_end_addr.disp ());
 
-  if (c_start_addr.base_reg () != c_end_addr.base_reg ()
-      || c_start_addr.index_reg () != c_end_addr.index_reg ())
+  // If the one of the addresses has the form base+index*1, it
+  // might be better to switch its base and index reg.
+  if (c_start_addr.index_reg () == c_end_addr.base_reg ())
     {
-      // FIXME: Handle cases when e.g. the start address doesn't have
-      // an index reg but the end address does.
-      return infinite_costs;
+      if (c_end_addr.base_reg () != invalid_regno
+          && c_end_addr.index_reg () != invalid_regno
+          && c_end_addr.scale () == 1)
+        {
+          c_end_addr = non_mod_addr (c_end_addr.index_reg (),
+                                     c_end_addr.base_reg (),
+                                     1, c_end_addr.disp ());
+        }
+      else if (c_start_addr.base_reg () != invalid_regno
+               && c_start_addr.index_reg () != invalid_regno
+               && c_start_addr.scale () == 1)
+        {
+          c_start_addr = non_mod_addr (c_start_addr.index_reg (),
+                                       c_start_addr.base_reg (),
+                                       1, c_start_addr.disp ());
+        }
     }
+
+  // If the start and end address have different index
+  // registers, give up.
+  if (c_start_addr.index_reg () != c_end_addr.index_reg ())
+    return infinite_costs;
+
+  // Same for base regs, unless the start address doesn't have
+  // a base reg, in which case we can add one.
+  if (c_start_addr.base_reg () != invalid_regno
+      && c_start_addr.base_reg () != c_end_addr.base_reg ())
+    return infinite_costs;
+
+  // FIXME: Handle cases when the end address consists only
+  // of a constant displacement.
 
   // Add scaling insns.
   if (c_start_addr.index_reg () != invalid_regno
@@ -780,6 +831,32 @@ int sh_ams::access_sequence::try_modify_addr
                                      gen_rtx_CONST_INT (word_mode, scale));
 
           emit_move_insn (new_reg, mult_rtx);
+          addr_reg_values->push_back (reg_value (REGNO (new_reg), c_start_addr));
+          start_value = &addr_reg_values->back ();
+          *final_addr_regno = REGNO (new_reg);
+        }
+    }
+
+  // Add missing base reg.
+  if (c_start_addr.base_reg () == invalid_regno
+      && c_end_addr.base_reg () != invalid_regno)
+    {
+      c_start_addr = non_mod_addr (c_end_addr.base_reg (),
+                                   c_start_addr.index_reg (),
+                                   c_start_addr.scale (),
+                                   c_start_addr.disp ());
+      cost += dlg->addr_reg_plus_reg_cost (start_value->reg (),
+                                           c_end_addr.base_reg ());
+      if (addr_reg_values != NULL)
+        {
+          start_value->set_used ();
+          new_reg = gen_reg_rtx (word_mode);
+          rtx reg_plus_rtx =
+            gen_rtx_PLUS (word_mode,
+                          gen_rtx_REG (word_mode, start_value->reg ()),
+                          gen_rtx_REG (word_mode, c_end_addr.base_reg ()));
+
+          emit_move_insn (new_reg, reg_plus_rtx);
           addr_reg_values->push_back (reg_value (REGNO (new_reg), c_start_addr));
           start_value = &addr_reg_values->back ();
           *final_addr_regno = REGNO (new_reg);

@@ -823,6 +823,7 @@ static struct ams_delegate : public sh_ams::delegate
   virtual void mem_access_alternatives (sh_ams::access& a);
   virtual int addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp);
   virtual int addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale);
+  virtual int addr_reg_plus_reg_cost (sh_ams::regno_t reg, sh_ams::regno_t disp_reg);
   virtual int addr_reg_clone_cost (sh_ams::regno_t reg);
 } g_ams_delegate;
 
@@ -13785,6 +13786,18 @@ int ams_delegate::addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp)
   // FIXME: if register pressure is (expected to be) high, reduce the cost
   // a bit to avoid addr reg cloning.
   return 5;
+}
+
+int ams_delegate::addr_reg_plus_reg_cost
+(sh_ams::regno_t reg, sh_ams::regno_t disp_reg ATTRIBUTE_UNUSED)
+{
+  // modifying the GBR is impossible.
+  if (reg == GBR_REG)
+    return sh_ams::infinite_costs;
+
+  // the costs for adding a register should be around the same
+  // as adding a small constant.
+  return 2;
 }
 
 int ams_delegate::addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale)

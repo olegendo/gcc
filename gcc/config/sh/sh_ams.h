@@ -450,6 +450,10 @@ public:
     // by a constant.
     virtual int addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale/*, const access_sequence& as*/) = 0;
 
+    // provide the cost for adding another register to the specified
+    // address register.
+    virtual int addr_reg_plus_reg_cost (sh_ams::regno_t reg, sh_ams::regno_t disp_reg/*, const access_sequence& as*/) = 0;
+
     // provide the cost for cloning the address register, which is usually
     // required when splitting an access sequence.  if (address) register
     // pressure is high, return a higher cost to avoid splitting.
