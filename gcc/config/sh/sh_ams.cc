@@ -590,7 +590,7 @@ void sh_ams::access_sequence::update_insn_stream
   for (std::list<rtx_insn*>::iterator it = reg_mod_insns.begin();
        it != reg_mod_insns.end(); ++it)
     {
-      SET_INSN_DELETED (*it);
+      set_insn_deleted (*it);
     }
 
   // Generate new address reg modifying insns.
