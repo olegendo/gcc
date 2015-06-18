@@ -786,7 +786,7 @@ int sh_ams::access_sequence::try_modify_addr
   int cost = start_value->is_used ()
     ? dlg->addr_reg_clone_cost (start_value->reg ()) : 0;
   if (final_addr_regno != NULL) *final_addr_regno = start_value->reg ();
-  rtx_insn *new_insns;
+
   if (insn != NULL_RTX) start_sequence ();
 
   // Canonicalize the start and end addresses by converting
@@ -827,13 +827,21 @@ int sh_ams::access_sequence::try_modify_addr
   // If the start and end address have different index
   // registers, give up.
   if (c_start_addr.index_reg () != c_end_addr.index_reg ())
-    return infinite_costs;
+    {
+      if (insn != NULL)
+        end_sequence ();
+      return infinite_costs;
+    }
 
   // Same for base regs, unless the start address doesn't have
   // a base reg, in which case we can add one.
   if (c_start_addr.base_reg () != invalid_regno
       && c_start_addr.base_reg () != c_end_addr.base_reg ())
-    return infinite_costs;
+    {
+      if (insn != NULL)
+        end_sequence ();
+      return infinite_costs;
+    }
 
   // FIXME: Handle cases when the end address consists only
   // of a constant displacement.
@@ -844,11 +852,19 @@ int sh_ams::access_sequence::try_modify_addr
     {
       // We can't scale if the address has displacement or a base reg.
       if (c_start_addr.disp () != 0 || c_start_addr.base_reg () != invalid_regno)
-        return infinite_costs;
+	{
+	  if (insn != NULL)
+	    end_sequence ();
+	  return infinite_costs;
+	}
 
       // We can only scale by integers.
       if (c_end_addr.scale () % c_start_addr.scale () != 0)
-        return infinite_costs;
+        {
+	  if (insn != NULL)
+	    end_sequence ();
+	  return infinite_costs;
+	}
 
       scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
@@ -933,7 +949,7 @@ int sh_ams::access_sequence::try_modify_addr
 
   if (insn != NULL_RTX)
     {
-      new_insns = get_insns ();
+      rtx_insn* new_insns = get_insns ();
       end_sequence ();
       emit_insn_before (new_insns, insn);
     }
