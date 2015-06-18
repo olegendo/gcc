@@ -693,20 +693,20 @@ void sh_ams::access_sequence::update_insn_stream
         {
           disp_t disp = ae.disp () - min_start_base->value ().disp ();
           if (disp == 0)
-            new_addr = gen_rtx_REG (word_mode, access_base);
+            new_addr = gen_rtx_REG (Pmode, access_base);
           else
-            new_addr = gen_rtx_PLUS (word_mode,
-                                     gen_rtx_REG (word_mode, access_base),
-                                     gen_rtx_CONST_INT (word_mode, disp));
+            new_addr = gen_rtx_PLUS (Pmode,
+                                     gen_rtx_REG (Pmode, access_base),
+                                     GEN_INT (disp));
         }
       else
         {
           regno_t access_index =
             insert_reg_mod_insns (min_start_index, min_end_index,
                                   (*as_it).insn (), addr_reg_values, 0, 0, dlg);
-          new_addr = gen_rtx_PLUS (word_mode,
-                                   gen_rtx_REG (word_mode, access_base),
-                                   gen_rtx_REG (word_mode, access_index));
+          new_addr = gen_rtx_PLUS (Pmode,
+                                   gen_rtx_REG (Pmode, access_base),
+                                   gen_rtx_REG (Pmode, access_index));
         }
 
       *(*as_it).mem_ref () =
@@ -859,21 +859,21 @@ int sh_ams::access_sequence::try_modify_addr
       if (addr_reg_values != NULL)
         {
           start_value->set_used ();
-          new_reg = gen_reg_rtx (word_mode);
+          new_reg = gen_reg_rtx (Pmode);
           rtx mult_rtx;
           if ((scale & (scale - 1)) == 0)
             {
               scale_t shift = 0;
               while (scale >>= 1) ++shift;
               mult_rtx = gen_rtx_ASHIFT
-                (word_mode,
-                 gen_rtx_REG (word_mode, start_value->reg ()),
-                 gen_rtx_CONST_INT (word_mode, shift));
+                (Pmode,
+                 gen_rtx_REG (Pmode, start_value->reg ()),
+                 GEN_INT (shift));
             }
           else
-            mult_rtx = gen_rtx_MULT (word_mode,
-                                     gen_rtx_REG (word_mode, start_value->reg ()),
-                                     gen_rtx_CONST_INT (word_mode, scale));
+            mult_rtx = gen_rtx_MULT (Pmode,
+                                     gen_rtx_REG (Pmode, start_value->reg ()),
+                                     GEN_INT (scale));
 
           emit_move_insn (new_reg, mult_rtx);
           addr_reg_values->push_back (reg_value (REGNO (new_reg), c_start_addr));
@@ -895,11 +895,11 @@ int sh_ams::access_sequence::try_modify_addr
       if (addr_reg_values != NULL)
         {
           start_value->set_used ();
-          new_reg = gen_reg_rtx (word_mode);
+          new_reg = gen_reg_rtx (Pmode);
           rtx reg_plus_rtx =
-            gen_rtx_PLUS (word_mode,
-                          gen_rtx_REG (word_mode, start_value->reg ()),
-                          gen_rtx_REG (word_mode, c_end_addr.base_reg ()));
+            gen_rtx_PLUS (Pmode,
+                          gen_rtx_REG (Pmode, start_value->reg ()),
+                          gen_rtx_REG (Pmode, c_end_addr.base_reg ()));
 
           emit_move_insn (new_reg, reg_plus_rtx);
           addr_reg_values->push_back (reg_value (REGNO (new_reg), c_start_addr));
@@ -922,11 +922,11 @@ int sh_ams::access_sequence::try_modify_addr
       if (addr_reg_values != NULL)
         {
           start_value->set_used ();
-          new_reg = gen_reg_rtx (word_mode);
+          new_reg = gen_reg_rtx (Pmode);
           rtx plus_rtx
-            = gen_rtx_PLUS (word_mode,
-                            gen_rtx_REG (word_mode, start_value->reg ()),
-                            gen_rtx_CONST_INT (word_mode, disp));
+            = gen_rtx_PLUS (Pmode,
+                            gen_rtx_REG (Pmode, start_value->reg ()),
+                            GEN_INT (disp));
           emit_move_insn (new_reg, plus_rtx);
           addr_reg_values->push_back (reg_value (REGNO (new_reg), c_end_addr));
           *final_addr_regno = REGNO (new_reg);
