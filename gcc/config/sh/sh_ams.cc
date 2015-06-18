@@ -121,7 +121,7 @@ sh_ams::access::access
   m_machine_mode = GET_MODE (*mem);
   m_addr_space = MEM_ADDR_SPACE (*mem);
   m_insn = insn;
-  m_insn_ref = &XEXP (*mem, 0);
+  m_mem_ref = mem;
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
   m_alternatives_count = 0;
@@ -684,19 +684,21 @@ void sh_ams::access_sequence::update_insn_stream
       regno_t access_base =
         insert_reg_mod_insns (min_start_base, min_end_base,
                               (*as_it).insn (), addr_reg_values, dlg);
-
+      rtx new_addr;
       if (min_alternative->address ().index_reg () == invalid_regno)
-        *(*as_it).insn_ref () = gen_rtx_REG (word_mode, access_base);
+        new_addr = gen_rtx_REG (word_mode, access_base);
       else
         {
           regno_t access_index =
             insert_reg_mod_insns (min_start_index, min_end_index,
                                   (*as_it).insn (), addr_reg_values, dlg);
-          *(*as_it).insn_ref () =
-            gen_rtx_PLUS (word_mode,
-                          gen_rtx_REG (word_mode, access_base),
-                          gen_rtx_REG (word_mode, access_index));
+          new_addr = gen_rtx_PLUS (word_mode,
+                                   gen_rtx_REG (word_mode, access_base),
+                                   gen_rtx_REG (word_mode, access_index));
         }
+
+      *(*as_it).mem_ref () =
+        replace_equiv_address (*(*as_it).mem_ref (), new_addr, false);
 
       // FIXME: It might be faster to update the df manually.
       df_insn_rescan ((*as_it).insn ());

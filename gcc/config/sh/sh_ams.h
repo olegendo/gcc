@@ -309,8 +309,8 @@ public:
     // the insn where this access occurs.
     rtx_insn* insn (void) const { return m_insn; }
 
-    // reference to the access rtx inside the insn.
-    rtx* insn_ref (void) const { return m_insn_ref; }
+    // reference to the mem rtx inside the insn.
+    rtx* mem_ref (void) const { return m_mem_ref; }
 
     // if m_access_mode is REG_MOD, this stores the expression
     // that the register is set to (NULL_RTX if the value is
@@ -355,7 +355,7 @@ public:
     machine_mode m_machine_mode;
     addr_space_t m_addr_space;
     rtx_insn* m_insn;
-    rtx* m_insn_ref;
+    rtx* m_mem_ref;
     rtx m_reg_mod_expr;
 
     // all available alternatives for this access as reported by the target.
