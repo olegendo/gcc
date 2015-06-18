@@ -709,11 +709,9 @@ void sh_ams::access_sequence::update_insn_stream
                                    gen_rtx_REG (Pmode, access_index));
         }
 
-      *(*as_it).mem_ref () =
-        replace_equiv_address (*(*as_it).mem_ref (), new_addr, false);
-
-      // FIXME: It might be faster to update the df manually.
-      df_insn_rescan ((*as_it).insn ());
+      validate_change (as_it->insn (), as_it->mem_ref (),
+		       replace_equiv_address (*(as_it->mem_ref ()), new_addr),
+		       false);
     }
 
   log_msg ("\naddr_reg_values after insn update:\n");
