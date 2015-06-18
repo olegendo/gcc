@@ -420,16 +420,20 @@ public:
 
     int find_min_mod_cost
       (std::vector<reg_value>& addr_reg_values,
-       reg_value **min_start_addr, const addr_expr end_addr, delegate* dlg);
+       reg_value **min_start_addr, const addr_expr end_addr,
+       disp_t disp_min, disp_t disp_max, delegate* dlg);
     regno_t insert_reg_mod_insns
-      (reg_value *start_value, const addr_expr end_addr,
-       rtx_insn* insn, std::vector<reg_value>& addr_reg_values, delegate* dlg);
+      (reg_value* start_value, const addr_expr end_addr,
+       rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
+       disp_t disp_min, disp_t disp_max, delegate* dlg);
     int try_modify_addr
       (reg_value* start_value, const addr_expr end_addr,
+       disp_t disp_min, disp_t disp_max,
        std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
-       regno_t *final_addr_regno, delegate* dlg);
+       regno_t* final_addr_regno, delegate* dlg);
     int try_modify_addr
-      (reg_value *start_value, const addr_expr end_addr, delegate* dlg);
+      (reg_value* start_value, const addr_expr end_addr,
+       disp_t disp_min, disp_t disp_max, delegate* dlg);
 
   };
 
