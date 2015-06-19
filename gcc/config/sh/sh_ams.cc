@@ -595,17 +595,17 @@ void sh_ams::access_sequence::update_insn_stream
 
   // Generate new address reg modifying insns.
   std::vector<reg_value> addr_reg_values;
-  for (access_sequence::iterator as_it = begin (); as_it != end (); ++as_it)
+  for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
-      if (as_it->access_mode () == reg_mod) continue;
-      const addr_expr ae = as_it->address ();
+      if (accs->access_mode () == reg_mod) continue;
+      const addr_expr ae = accs->address ();
 
       // Add the unmodified base and index reg values to ADDR_REG_VALUES.
-      regno_t base_reg = as_it->address ().base_reg ();
+      regno_t base_reg = accs->address ().base_reg ();
       if (base_reg != invalid_regno
           && !reg_value::arr_contains_reg (addr_reg_values, base_reg))
           addr_reg_values.push_back (reg_value (base_reg));
-      regno_t index_reg = as_it->address ().index_reg ();
+      regno_t index_reg = accs->address ().index_reg ();
       if (index_reg != invalid_regno
           && !reg_value::arr_contains_reg (addr_reg_values, index_reg))
         addr_reg_values.push_back (reg_value (index_reg));
@@ -614,11 +614,11 @@ void sh_ams::access_sequence::update_insn_stream
       access::alternative* min_alternative = NULL;
       reg_value *min_start_base = NULL, *min_start_index = NULL;
       addr_expr min_end_base, min_end_index;
-      as_it->clear_alternatives ();
-      dlg->mem_access_alternatives (*as_it);
+      accs->clear_alternatives ();
+      dlg->mem_access_alternatives (*accs);
 
-      for (access::alternative* alt = as_it->begin_alternatives ();
-           alt != as_it->end_alternatives (); ++alt)
+      for (access::alternative* alt = accs->begin_alternatives ();
+           alt != accs->end_alternatives (); ++alt)
         {
           const addr_expr alt_ae = alt->address ();
           addr_expr end_base, end_index;
@@ -684,7 +684,7 @@ void sh_ams::access_sequence::update_insn_stream
       // and update the access.
       regno_t access_base =
         insert_reg_mod_insns (min_start_base, min_end_base,
-                              as_it->insn (), addr_reg_values,
+                              accs->insn (), addr_reg_values,
                               min_alternative->address ().disp_min (),
                               min_alternative->address ().disp_max (),
                               dlg);
@@ -703,14 +703,14 @@ void sh_ams::access_sequence::update_insn_stream
         {
           regno_t access_index =
             insert_reg_mod_insns (min_start_index, min_end_index,
-                                  as_it->insn (), addr_reg_values, 0, 0, dlg);
+                                  accs->insn (), addr_reg_values, 0, 0, dlg);
           new_addr = gen_rtx_PLUS (Pmode,
                                    gen_rtx_REG (Pmode, access_base),
                                    gen_rtx_REG (Pmode, access_index));
         }
 
-      validate_change (as_it->insn (), as_it->mem_ref (),
-		       replace_equiv_address (*(as_it->mem_ref ()), new_addr),
+      validate_change (accs->insn (), accs->mem_ref (),
+		       replace_equiv_address (*(accs->mem_ref ()), new_addr),
 		       false);
     }
 
