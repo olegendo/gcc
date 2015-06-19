@@ -212,7 +212,9 @@ void sh_ams::add_reg_mod_access
 void sh_ams::find_reg_value
 (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn)
 {
-  std::list<std::pair<rtx*, access_mode_t> > mems;
+  std::vector<std::pair<rtx*, access_mode_t> > mems;
+  mems.reserve (32);
+
   // Go back through the insn list until we find the last instruction
   // that modified the register.
   for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
@@ -229,11 +231,13 @@ void sh_ams::find_reg_value
         {
           // Search for auto-mod memory accesses in the current
           // insn that modify REG.
+          mems.clear ();
           find_mem_accesses (PATTERN (i), std::back_inserter (mems));
-          while (!mems.empty ())
+          for (std::vector<std::pair<rtx*, access_mode_t> >
+	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
             {
-              rtx mem_addr = XEXP (*(mems.back ().first), 0);
-              enum rtx_code code = GET_CODE (mem_addr);
+              rtx mem_addr = XEXP (*(m->first), 0);
+              rtx_code code = GET_CODE (mem_addr);
               if (GET_RTX_CLASS (code) == RTX_AUTOINC
                   && REG_P (XEXP (mem_addr, 0))
                   && REGNO (XEXP (mem_addr, 0)) == REGNO (reg))
@@ -242,7 +246,6 @@ void sh_ams::find_reg_value
                   *mod_insn = i;
                   return;
                 }
-              mems.pop_back ();
             }
         }
     }
@@ -995,11 +998,12 @@ unsigned int sh_ams::execute (function* fun)
   df_note_add_problem ();
   df_analyze ();
 
+  std::vector<std::pair<rtx*, access_mode_t> > mems;
+
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
     {
       log_msg ("BB #%d:\n", bb->index);
-      std::list<std::pair<rtx*, access_mode_t> > mems;
       std::list<rtx_insn*> reg_mod_insns;
 
       // Construct the access sequence from the access insns.
@@ -1011,15 +1015,15 @@ unsigned int sh_ams::execute (function* fun)
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
               || bb->index != BLOCK_FOR_INSN (i)->index)
             continue;
+
           // Search for memory accesses inside the current insn
           // and add them to the address sequence.
+          mems.clear ();
           find_mem_accesses (PATTERN (i), std::back_inserter (mems));
-          while (!mems.empty ())
-            {
-              add_new_access
-                (as, i, mems.back ().first, mems.back ().second, reg_mod_insns);
-              mems.pop_back ();
-            }
+
+          for (std::vector<std::pair<rtx*, access_mode_t> >
+	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
+	    add_new_access (as, i, m->first, m->second, reg_mod_insns);
          }
       log_msg ("Access sequence contents:\n\n");
       for (access_sequence::const_iterator it = as.begin();
