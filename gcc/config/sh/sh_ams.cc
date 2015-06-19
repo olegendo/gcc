@@ -637,6 +637,7 @@ void sh_ams::access_sequence::update_insn_stream
 
       int min_cost = infinite_costs;
       access::alternative* min_alternative = NULL;
+      access::alternative* base_reg_alt = NULL;
       reg_value *min_start_base = NULL, *min_start_index = NULL;
       addr_expr min_end_base, min_end_index;
       accs->clear_alternatives ();
@@ -654,6 +655,14 @@ void sh_ams::access_sequence::update_insn_stream
                   && alt_ae.index_reg () != invalid_regno)
               || (alt_ae.index_reg () != invalid_regno && alt_ae.scale () != 1))
             continue;
+
+          // We might need to use the simple base reg alternative later,
+          // so keep track of it.
+          if (alt_ae.index_reg () == invalid_regno
+              && alt_ae.disp_min () == 0
+              && alt_ae.disp_max () == 0
+              && alt_ae.type () == non_mod)
+            base_reg_alt = alt;
 
           if (alt_ae.index_reg () == invalid_regno)
             {
@@ -714,15 +723,40 @@ void sh_ams::access_sequence::update_insn_stream
             }
         }
 
-      // Insert the address reg modifying insns before the access insn
-      // and update the access.
-      regno_t access_base =
-        insert_reg_mod_insns (min_start_base, min_end_base,
-                              accs->insn (), addr_reg_values,
-                              min_alternative->address ().disp_min (),
-                              min_alternative->address ().disp_max (),
-                              min_alternative->address ().type (),
-                              dlg);
+      regno_t access_base;
+      if (min_cost == infinite_costs)
+        {
+          // If no suitable alternative was found for an address that consists
+          // only of a constant displacement [e.g. *((int*) 0x1000)],
+          // use a simple base reg access with the base reg set to the address.
+          gcc_assert (ae.base_reg () == invalid_regno
+                      && ae.index_reg () == invalid_regno);
+
+          min_alternative = base_reg_alt;
+
+          rtx const_addr_base = gen_reg_rtx (Pmode);
+          access_base = REGNO (const_addr_base);
+          addr_reg_values.push_back (reg_value (REGNO (const_addr_base), ae));
+
+          start_sequence ();
+          emit_move_insn (const_addr_base, GEN_INT (ae.disp ()));
+          rtx_insn* new_insn = get_insns ();
+          end_sequence ();
+          emit_insn_before (new_insn, accs->insn ());
+        }
+      else
+        {
+          // Insert the address reg modifying insns before the access insn
+          // and update the access.
+          access_base =
+            insert_reg_mod_insns (min_start_base, min_end_base,
+                                  accs->insn (), addr_reg_values,
+                                  min_alternative->address ().disp_min (),
+                                  min_alternative->address ().disp_max (),
+                                  min_alternative->address ().type (),
+                                  dlg);
+        }
+
       rtx new_addr;
       if (min_alternative->address ().index_reg () == invalid_regno)
         {
@@ -855,7 +889,7 @@ int sh_ams::access_sequence::try_modify_addr
       non_mod_addr (invalid_regno, c_end_addr.base_reg (), 1,
                     c_end_addr.disp ());
 
-  // If the one of the addresses has the form base+index*1, it
+  // If one of the addresses has the form base+index*1, it
   // might be better to switch its base and index reg.
   if (c_start_addr.index_reg () == c_end_addr.base_reg ())
     {
