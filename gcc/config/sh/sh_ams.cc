@@ -664,31 +664,39 @@ void sh_ams::access_sequence::update_insn_stream
 
           // Get the minimal costs for using this alternative and update
           // the cheapest alternative so far.
-          reg_value *start_base, *start_index;
           int alt_min_cost = alt->costs ();
-          int address_mod_cost
-            = find_min_mod_cost (addr_reg_values, &start_base, end_base,
-                                 alt_ae.disp_min (), alt_ae.disp_max (), dlg);
-          if (address_mod_cost == infinite_costs) continue;
-          alt_min_cost += address_mod_cost;
+          
+          min_mod_cost_result base_mod_cost =
+		find_min_mod_cost (addr_reg_values, end_base,
+				   alt_ae.disp_min (), alt_ae.disp_max (), dlg);
+          
+	  if (base_mod_cost.cost == infinite_costs)
+	    continue;
+	    
+          alt_min_cost += base_mod_cost.cost;
+
+	  min_mod_cost_result index_mod_cost;
 
           if (alt_ae.index_reg () != invalid_regno)
             {
-              address_mod_cost = find_min_mod_cost (addr_reg_values, &start_index,
-                                                    end_index, 0, 0, dlg);
-              if (address_mod_cost == infinite_costs) continue;
-              alt_min_cost += address_mod_cost;
+	      index_mod_cost =
+		  find_min_mod_cost (addr_reg_values, end_index, 0, 0, dlg);
+
+              if (index_mod_cost.cost == infinite_costs)
+		continue;
+		
+              alt_min_cost += index_mod_cost.cost;
             }
 
           if (alt_min_cost < min_cost)
             {
               min_cost = alt_min_cost;
-              min_start_base = start_base;
+              min_start_base = base_mod_cost.min_start_addr;
               min_end_base = end_base;
               if (alt_ae.index_reg () != invalid_regno)
                 {
+                  min_start_index = index_mod_cost.min_start_addr;
                   min_end_index = end_index;
-                  min_start_index = start_index;
                 }
               min_alternative = alt;
             }
@@ -744,14 +752,17 @@ void sh_ams::access_sequence::update_insn_stream
 }
 
 // Find the cheapest way END_ADDR can be arrived at from one of the values
-// in ADDR_REG_VALUES.  Set MIN_START_ADDR to the reg_value that can be
-// changed into END_ADDR with the least cost and return its cost.
-int sh_ams::access_sequence::find_min_mod_cost
-(std::vector<reg_value>& addr_reg_values,
- reg_value **min_start_addr, const addr_expr& end_addr,
- disp_t disp_min, disp_t disp_max, delegate& dlg)
+// in ADDR_REG_VALUES.  Return the reg_value that can be changed into
+// END_ADDR with the least cost and the actual cost.
+sh_ams::access_sequence::min_mod_cost_result
+sh_ams::access_sequence
+::find_min_mod_cost (std::vector<reg_value>& addr_reg_values,
+		     const addr_expr& end_addr,
+		     disp_t disp_min, disp_t disp_max, delegate& dlg)
 {
   int min_cost = infinite_costs;
+  reg_value* min_start_addr = NULL;
+  
   for (std::vector<reg_value>::iterator it = addr_reg_values.begin ();
        it != addr_reg_values.end (); ++it)
     {
@@ -759,10 +770,10 @@ int sh_ams::access_sequence::find_min_mod_cost
       if (cost < min_cost)
         {
           min_cost = cost;
-          *min_start_addr = &(*it);
+          min_start_addr = &(*it);
         }
     }
-  return min_cost;
+  return min_mod_cost_result (min_cost, min_start_addr);
 }
 
 // Insert insns behind INSN that modify START_ADDR to arrive at END_ADDR.

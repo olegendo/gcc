@@ -408,10 +408,23 @@ public:
       bool m_used;
     };
 
-    int find_min_mod_cost
-      (std::vector<reg_value>& addr_reg_values,
-       reg_value **min_start_addr, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max, delegate& dlg);
+    struct min_mod_cost_result
+    {
+      int cost;
+      reg_value* min_start_addr;
+      
+      min_mod_cost_result (void)
+      : cost (infinite_costs), min_start_addr (NULL) { }
+
+      min_mod_cost_result (int c, reg_value* v)
+      : cost (c), min_start_addr (v) { }
+    };
+
+    min_mod_cost_result
+    find_min_mod_cost (std::vector<reg_value>& addr_reg_values,
+		       const addr_expr& end_addr,
+		       disp_t disp_min, disp_t disp_max, delegate& dlg);
+       
     regno_t insert_reg_mod_insns
       (reg_value* start_value, const addr_expr& end_addr,
        rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
