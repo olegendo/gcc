@@ -597,15 +597,15 @@ void sh_ams::access_sequence::update_insn_stream
   std::vector<reg_value> addr_reg_values;
   for (access_sequence::iterator as_it = begin (); as_it != end (); ++as_it)
     {
-      if ((*as_it).access_mode () == reg_mod) continue;
-      const addr_expr ae = (*as_it).address ();
+      if (as_it->access_mode () == reg_mod) continue;
+      const addr_expr ae = as_it->address ();
 
       // Add the unmodified base and index reg values to ADDR_REG_VALUES.
-      regno_t base_reg = (*as_it).address ().base_reg ();
+      regno_t base_reg = as_it->address ().base_reg ();
       if (base_reg != invalid_regno
           && !reg_value::arr_contains_reg (addr_reg_values, base_reg))
           addr_reg_values.push_back (reg_value (base_reg));
-      regno_t index_reg = (*as_it).address ().index_reg ();
+      regno_t index_reg = as_it->address ().index_reg ();
       if (index_reg != invalid_regno
           && !reg_value::arr_contains_reg (addr_reg_values, index_reg))
         addr_reg_values.push_back (reg_value (index_reg));
@@ -614,11 +614,11 @@ void sh_ams::access_sequence::update_insn_stream
       access::alternative* min_alternative = NULL;
       reg_value *min_start_base = NULL, *min_start_index = NULL;
       addr_expr min_end_base, min_end_index;
-      (*as_it).clear_alternatives ();
+      as_it->clear_alternatives ();
       dlg->mem_access_alternatives (*as_it);
 
-      for (access::alternative* alt = (*as_it).begin_alternatives ();
-           alt != (*as_it).end_alternatives (); ++alt)
+      for (access::alternative* alt = as_it->begin_alternatives ();
+           alt != as_it->end_alternatives (); ++alt)
         {
           const addr_expr alt_ae = alt->address ();
           addr_expr end_base, end_index;
@@ -684,7 +684,7 @@ void sh_ams::access_sequence::update_insn_stream
       // and update the access.
       regno_t access_base =
         insert_reg_mod_insns (min_start_base, min_end_base,
-                              (*as_it).insn (), addr_reg_values,
+                              as_it->insn (), addr_reg_values,
                               min_alternative->address ().disp_min (),
                               min_alternative->address ().disp_max (),
                               dlg);
@@ -703,7 +703,7 @@ void sh_ams::access_sequence::update_insn_stream
         {
           regno_t access_index =
             insert_reg_mod_insns (min_start_index, min_end_index,
-                                  (*as_it).insn (), addr_reg_values, 0, 0, dlg);
+                                  as_it->insn (), addr_reg_values, 0, 0, dlg);
           new_addr = gen_rtx_PLUS (Pmode,
                                    gen_rtx_REG (Pmode, access_base),
                                    gen_rtx_REG (Pmode, access_index));
@@ -718,13 +718,13 @@ void sh_ams::access_sequence::update_insn_stream
   for (std::vector<reg_value>::iterator it = addr_reg_values.begin ();
        it != addr_reg_values.end (); ++it)
     {
-      log_msg ("r%d <- ", (*it).reg ());
-      if ((*it).value ().base_reg () != invalid_regno)
-        log_msg ("r%d + ", (*it).value ().base_reg ());
-      if ((*it).value ().index_reg () != invalid_regno)
-        log_msg ("r%d*%d + ", (*it).value ().index_reg (),
-                 (*it).value ().scale ());
-      log_msg ("%d\n", (*it).value ().disp ());
+      log_msg ("r%d <- ", it->reg ());
+      if (it->value ().base_reg () != invalid_regno)
+        log_msg ("r%d + ", it->value ().base_reg ());
+      if (it->value ().index_reg () != invalid_regno)
+        log_msg ("r%d*%d + ", it->value ().index_reg (),
+                 it->value ().scale ());
+      log_msg ("%d\n", it->value ().disp ());
     }
   log_msg ("\n");
 }
@@ -1004,26 +1004,26 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::const_iterator it = as.begin();
            it != as.end(); ++it)
         {
-          if ((*it).access_mode () == reg_mod)
+          if (it->access_mode () == reg_mod)
             {
-              log_msg ("reg_mod: r%d set to\n", (*it).address ().base_reg ());
-              log_rtx ((*it).reg_mod_expr ());
+              log_msg ("reg_mod: r%d set to\n", it->address ().base_reg ());
+              log_rtx (it->reg_mod_expr ());
               log_msg("\n-----\n\n");
             }
           else
             {
               log_msg ("m_original_addr_expr:\n");
               log_msg ("base: %d, index: %d, scale: %d, disp: %d\n",
-                       (*it).original_address ().base_reg (),
-                       (*it).original_address ().index_reg (),
-                       (*it).original_address ().scale (),
-                       (*it).original_address ().disp ());
+                       it->original_address ().base_reg (),
+                       it->original_address ().index_reg (),
+                       it->original_address ().scale (),
+                       it->original_address ().disp ());
               log_msg ("\nm_addr_expr:\n");
               log_msg ("base: %d, index: %d, scale: %d, disp: %d\n-----\n\n",
-                       (*it).address ().base_reg (),
-                       (*it).address ().index_reg (),
-                       (*it).address ().scale (),
-                       (*it).address ().disp ());
+                       it->address ().base_reg (),
+                       it->address ().index_reg (),
+                       it->address ().scale (),
+                       it->address ().disp ());
             }
         }
       log_msg ("\n\n");
