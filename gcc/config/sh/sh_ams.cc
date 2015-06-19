@@ -598,7 +598,7 @@ void sh_ams::access_sequence::update_insn_stream
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
       if (accs->access_mode () == reg_mod) continue;
-      const addr_expr ae = accs->address ();
+      const addr_expr& ae = accs->address ();
 
       // Add the unmodified base and index reg values to ADDR_REG_VALUES.
       regno_t base_reg = accs->address ().base_reg ();
@@ -620,7 +620,7 @@ void sh_ams::access_sequence::update_insn_stream
       for (access::alternative* alt = accs->begin_alternatives ();
            alt != accs->end_alternatives (); ++alt)
         {
-          const addr_expr alt_ae = alt->address ();
+          const addr_expr& alt_ae = alt->address ();
           addr_expr end_base, end_index;
 
           // Generate only base, base+disp and base+index type accesses
@@ -734,7 +734,7 @@ void sh_ams::access_sequence::update_insn_stream
 // changed into END_ADDR with the least cost and return its cost.
 int sh_ams::access_sequence::find_min_mod_cost
 (std::vector<reg_value>& addr_reg_values,
- reg_value **min_start_addr, const addr_expr end_addr,
+ reg_value **min_start_addr, const addr_expr& end_addr,
  disp_t disp_min, disp_t disp_max, delegate* dlg)
 {
   int min_cost = infinite_costs;
@@ -754,7 +754,7 @@ int sh_ams::access_sequence::find_min_mod_cost
 // Insert insns behind INSN that modify START_ADDR to arrive at END_ADDR.
 // Return the register in which the final address is stored.
 sh_ams::regno_t sh_ams::access_sequence::insert_reg_mod_insns
-(reg_value* start_value, const addr_expr end_addr,
+(reg_value* start_value, const addr_expr& end_addr,
  rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
  disp_t disp_min, disp_t disp_max, delegate* dlg)
 {
@@ -777,7 +777,7 @@ sh_ams::regno_t sh_ams::access_sequence::insert_reg_mod_insns
 // Return the total cost of the modifying insns, or INFINITE_COSTS if no
 // suitable insns have been found.
 int sh_ams::access_sequence::try_modify_addr
-(reg_value* start_value, const addr_expr end_addr,
+(reg_value* start_value, const addr_expr& end_addr,
  disp_t disp_min, disp_t disp_max,
  std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
  regno_t* final_addr_regno, delegate* dlg)
@@ -958,7 +958,7 @@ int sh_ams::access_sequence::try_modify_addr
 }
 
 int sh_ams::access_sequence::try_modify_addr
-(reg_value* start_value, const addr_expr end_addr,
+(reg_value* start_value, const addr_expr& end_addr,
  disp_t disp_min, disp_t disp_max, delegate* dlg)
 {
   return try_modify_addr (start_value, end_addr, disp_min, disp_max,
