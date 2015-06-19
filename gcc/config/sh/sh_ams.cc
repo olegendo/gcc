@@ -109,6 +109,17 @@ bool sh_ams::gate (function* /*fun*/)
 namespace
 {
 
+struct regno_equal
+{
+  const int val;
+
+  regno_equal (int v) : val (v) { }
+  
+  bool operator () (const sh_ams::access_sequence::reg_value& a) const
+  {
+    return a.reg () == val;
+  }
+};
 
 } // anonymous namespace
 
@@ -603,11 +614,14 @@ void sh_ams::access_sequence::update_insn_stream
       // Add the unmodified base and index reg values to ADDR_REG_VALUES.
       regno_t base_reg = accs->address ().base_reg ();
       if (base_reg != invalid_regno
-          && !reg_value::arr_contains_reg (addr_reg_values, base_reg))
+	  && std::find_if (addr_reg_values.begin (), addr_reg_values.end (),
+			   regno_equal (base_reg)) == addr_reg_values.end ())
           addr_reg_values.push_back (reg_value (base_reg));
+
       regno_t index_reg = accs->address ().index_reg ();
       if (index_reg != invalid_regno
-          && !reg_value::arr_contains_reg (addr_reg_values, index_reg))
+	  && std::find_if (addr_reg_values.begin (), addr_reg_values.end (),
+			   regno_equal (index_reg)) == addr_reg_values.end ())
         addr_reg_values.push_back (reg_value (index_reg));
 
       int min_cost = infinite_costs;

@@ -5,6 +5,7 @@
 #include "tree-pass.h"
 #include <limits>
 #include <list>
+#include <vector>
 
 class sh_ams : public rtl_opt_pass
 {
@@ -375,7 +376,6 @@ public:
   public:
     void update_insn_stream
       (std::list<rtx_insn*>& reg_mod_insns, delegate* dlg);
-  private:
 
     // A structure used to keep track of the address registers' values when
     // generating new address modifying insns.  Each generated insn has a
@@ -387,16 +387,6 @@ public:
         : m_reg (reg), m_value (value), m_used (false) { }
       reg_value (regno_t reg)
         : m_reg (reg), m_value (make_reg_addr (reg)), m_used (false) { }
-
-      static bool arr_contains_reg (std::vector<reg_value> arr, regno_t reg)
-      {
-        for (std::vector<reg_value>::const_iterator it = arr.begin();
-             it != arr.end(); ++it)
-          {
-            if ((*it).reg () == reg) return true;
-          }
-        return false;
-      }
 
       // The register that was set by the insn.
       int reg (void) const { return m_reg; }
