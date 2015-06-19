@@ -167,11 +167,11 @@ public:
   static void add_reg_mod_access
     (access_sequence& as, rtx_insn* insn, rtx mod_expr,
      rtx_insn* mod_insn, regno_t reg);
-     
+
   template <typename OutputIterator> static void
   find_mem_accesses (rtx& x, OutputIterator out,
 		     access_mode_t access_mode = load);
-     
+
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
 
@@ -414,7 +414,7 @@ public:
     {
       int cost;
       reg_value* min_start_addr;
-      
+
       min_mod_cost_result (void)
       : cost (infinite_costs), min_start_addr (NULL) { }
 
@@ -425,20 +425,23 @@ public:
     min_mod_cost_result
     find_min_mod_cost (std::vector<reg_value>& addr_reg_values,
 		       const addr_expr& end_addr,
-		       disp_t disp_min, disp_t disp_max, delegate& dlg);
-       
+		       disp_t disp_min, disp_t disp_max,
+		       addr_type_t addr_type, delegate& dlg);
+
     regno_t insert_reg_mod_insns
       (reg_value* start_value, const addr_expr& end_addr,
        rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
-       disp_t disp_min, disp_t disp_max, delegate& dlg);
+       disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
+       delegate& dlg);
     int try_modify_addr
       (reg_value* start_value, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max,
+       disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
        regno_t* final_addr_regno, delegate& dlg);
     int try_modify_addr
       (reg_value* start_value, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max, delegate& dlg);
+       disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
+       delegate& dlg);
 
   };
 
