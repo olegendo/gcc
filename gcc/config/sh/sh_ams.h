@@ -375,7 +375,7 @@ public:
   {
   public:
     void update_insn_stream
-      (std::list<rtx_insn*>& reg_mod_insns, delegate* dlg);
+      (std::list<rtx_insn*>& reg_mod_insns, delegate& dlg);
 
     // A structure used to keep track of the address registers' values when
     // generating new address modifying insns.  Each generated insn has a
@@ -411,19 +411,19 @@ public:
     int find_min_mod_cost
       (std::vector<reg_value>& addr_reg_values,
        reg_value **min_start_addr, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max, delegate* dlg);
+       disp_t disp_min, disp_t disp_max, delegate& dlg);
     regno_t insert_reg_mod_insns
       (reg_value* start_value, const addr_expr& end_addr,
        rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
-       disp_t disp_min, disp_t disp_max, delegate* dlg);
+       disp_t disp_min, disp_t disp_max, delegate& dlg);
     int try_modify_addr
       (reg_value* start_value, const addr_expr& end_addr,
        disp_t disp_min, disp_t disp_max,
        std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
-       regno_t* final_addr_regno, delegate* dlg);
+       regno_t* final_addr_regno, delegate& dlg);
     int try_modify_addr
       (reg_value* start_value, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max, delegate* dlg);
+       disp_t disp_min, disp_t disp_max, delegate& dlg);
 
   };
 
@@ -456,7 +456,7 @@ public:
     virtual int addr_reg_clone_cost (sh_ams::regno_t reg /*, const access_sequence& as*/) = 0;
   };
 
-  sh_ams (gcc::context* ctx, const char* name, delegate* dlg);
+  sh_ams (gcc::context* ctx, const char* name, delegate& dlg);
   virtual ~sh_ams (void);
   virtual bool gate (function* fun);
   virtual unsigned int execute (function* fun);
@@ -464,7 +464,7 @@ public:
 private:
   static const pass_data default_pass_data;
 
-  delegate* m_delegate;
+  delegate& m_delegate;
 };
 
 

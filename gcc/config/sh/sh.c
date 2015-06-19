@@ -859,7 +859,7 @@ register_sh_passes (void)
 		 PASS_POS_INSERT_BEFORE, "sched2", 1);
 
   /* Add AMS pass before mode switching.  */
-  register_pass (new sh_ams (g, "sh_ams", &g_ams_delegate),
+  register_pass (new sh_ams (g, "sh_ams", g_ams_delegate),
 		 PASS_POS_INSERT_BEFORE, "mode_sw", 1);
 }
 

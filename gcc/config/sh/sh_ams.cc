@@ -90,7 +90,7 @@ const pass_data sh_ams::default_pass_data =
   TODO_df_finish	// todo_flags_finish
 };
 
-sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate* dlg)
+sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate& dlg)
 : rtl_opt_pass (default_pass_data, ctx),
   m_delegate (dlg)
 {
@@ -103,7 +103,7 @@ sh_ams::~sh_ams (void)
 
 bool sh_ams::gate (function* /*fun*/)
 {
-  return optimize > 0 && flag_auto_inc_dec && m_delegate != NULL;
+  return optimize > 0 && flag_auto_inc_dec;
 }
 
 namespace
@@ -592,7 +592,7 @@ void sh_ams::find_mem_accesses
 
 // FIXME: Add REG_DEAD notes and /f and /v flags.
 void sh_ams::access_sequence::update_insn_stream
-(std::list<rtx_insn*>& reg_mod_insns, delegate* dlg)
+(std::list<rtx_insn*>& reg_mod_insns, delegate& dlg)
 {
   log_msg ("Updating insn list\n");
 
@@ -629,7 +629,7 @@ void sh_ams::access_sequence::update_insn_stream
       reg_value *min_start_base = NULL, *min_start_index = NULL;
       addr_expr min_end_base, min_end_index;
       accs->clear_alternatives ();
-      dlg->mem_access_alternatives (*accs);
+      dlg.mem_access_alternatives (*accs);
 
       for (access::alternative* alt = accs->begin_alternatives ();
            alt != accs->end_alternatives (); ++alt)
@@ -749,7 +749,7 @@ void sh_ams::access_sequence::update_insn_stream
 int sh_ams::access_sequence::find_min_mod_cost
 (std::vector<reg_value>& addr_reg_values,
  reg_value **min_start_addr, const addr_expr& end_addr,
- disp_t disp_min, disp_t disp_max, delegate* dlg)
+ disp_t disp_min, disp_t disp_max, delegate& dlg)
 {
   int min_cost = infinite_costs;
   for (std::vector<reg_value>::iterator it = addr_reg_values.begin ();
@@ -770,7 +770,7 @@ int sh_ams::access_sequence::find_min_mod_cost
 sh_ams::regno_t sh_ams::access_sequence::insert_reg_mod_insns
 (reg_value* start_value, const addr_expr& end_addr,
  rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
- disp_t disp_min, disp_t disp_max, delegate* dlg)
+ disp_t disp_min, disp_t disp_max, delegate& dlg)
 {
   regno_t final_addr_regno;
   try_modify_addr (start_value, end_addr, disp_min, disp_max,
@@ -794,11 +794,11 @@ int sh_ams::access_sequence::try_modify_addr
 (reg_value* start_value, const addr_expr& end_addr,
  disp_t disp_min, disp_t disp_max,
  std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
- regno_t* final_addr_regno, delegate* dlg)
+ regno_t* final_addr_regno, delegate& dlg)
 {
   rtx new_reg = NULL_RTX;
   int cost = start_value->is_used ()
-    ? dlg->addr_reg_clone_cost (start_value->reg ()) : 0;
+	     ? dlg.addr_reg_clone_cost (start_value->reg ()) : 0;
   if (final_addr_regno != NULL) *final_addr_regno = start_value->reg ();
 
   if (insn != NULL_RTX) start_sequence ();
@@ -883,7 +883,7 @@ int sh_ams::access_sequence::try_modify_addr
       scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
                                    c_end_addr.scale (), 0);
-      cost += dlg->addr_reg_scale_cost (start_value->reg (), scale);
+      cost += dlg.addr_reg_scale_cost (start_value->reg (), scale);
       if (addr_reg_values != NULL)
         {
           start_value->set_used ();
@@ -918,8 +918,8 @@ int sh_ams::access_sequence::try_modify_addr
                                    c_start_addr.index_reg (),
                                    c_start_addr.scale (),
                                    c_start_addr.disp ());
-      cost += dlg->addr_reg_plus_reg_cost (start_value->reg (),
-                                           c_end_addr.base_reg ());
+      cost += dlg.addr_reg_plus_reg_cost (start_value->reg (),
+                                          c_end_addr.base_reg ());
       if (addr_reg_values != NULL)
         {
           start_value->set_used ();
@@ -946,7 +946,7 @@ int sh_ams::access_sequence::try_modify_addr
       disp_t alt_disp = c_end_addr.disp () - c_start_addr.disp () - disp_max;
       if (abs (alt_disp) < abs (disp)) disp = alt_disp;
 
-      cost += dlg->addr_reg_disp_cost (start_value->reg (), disp);
+      cost += dlg.addr_reg_disp_cost (start_value->reg (), disp);
       if (addr_reg_values != NULL)
         {
           start_value->set_used ();
@@ -973,7 +973,7 @@ int sh_ams::access_sequence::try_modify_addr
 
 int sh_ams::access_sequence::try_modify_addr
 (reg_value* start_value, const addr_expr& end_addr,
- disp_t disp_min, disp_t disp_max, delegate* dlg)
+ disp_t disp_min, disp_t disp_max, delegate& dlg)
 {
   return try_modify_addr (start_value, end_addr, disp_min, disp_max,
                           NULL, NULL, NULL, dlg);
