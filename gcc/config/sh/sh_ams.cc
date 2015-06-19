@@ -229,7 +229,7 @@ void sh_ams::find_reg_value
         {
           // Search for auto-mod memory accesses in the current
           // insn that modify REG.
-          find_mem_accesses (&PATTERN (i), mems);
+          find_mem_accesses (PATTERN (i), std::back_inserter (mems));
           while (!mems.empty ())
             {
               rtx mem_addr = XEXP (*(mems.back ().first), 0);
@@ -556,35 +556,31 @@ sh_ams::addr_expr sh_ams::extract_addr_expr
 // Find the memory accesses in INSN and add them to MEM_LIST, together with their
 // access mode. ACCESS_MODE indicates whether the next mem that we find is read
 // or written to.
-void sh_ams::find_mem_accesses
-(rtx* x_ref, std::list<std::pair<rtx*, access_mode_t> >& mem_list,
- access_mode_t access_mode)
+template <typename OutputIterator> void
+sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
+			   access_mode_t access_mode)
 {
-  int i;
-  rtx x = *x_ref;
-  enum rtx_code code = GET_CODE (x);
-  switch (code)
+  switch (GET_CODE (x))
     {
     case MEM:
-      mem_list.push_back
-        (std::pair<rtx*, access_mode_t> (x_ref, access_mode));
+      *out++ = std::make_pair (&x, access_mode);
       break;
     case PARALLEL:
-      for (i = 0; i < XVECLEN (x, 0); i++)
-        find_mem_accesses (&XVECEXP (x, 0, i), mem_list, access_mode);
+      for (int i = 0; i < XVECLEN (x, 0); i++)
+        find_mem_accesses (XVECEXP (x, 0, i), out, access_mode);
       break;
     case SET:
-      find_mem_accesses (&SET_DEST (x), mem_list, store);
-      find_mem_accesses (&SET_SRC (x), mem_list, load);
+      find_mem_accesses (SET_DEST (x), out, store);
+      find_mem_accesses (SET_SRC (x), out, load);
       break;
     case CALL:
-      find_mem_accesses (&XEXP (x, 0), mem_list, load);
+      find_mem_accesses (XEXP (x, 0), out, load);
       break;
     default:
       if (ARITHMETIC_P (x))
         {
-          for (i = 0; i < GET_RTX_LENGTH (code); i++)
-            find_mem_accesses (&XEXP (x, i), mem_list, access_mode);
+          for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
+            find_mem_accesses (XEXP (x, i), out, access_mode);
         }
       break;
     }
@@ -1017,7 +1013,7 @@ unsigned int sh_ams::execute (function* fun)
             continue;
           // Search for memory accesses inside the current insn
           // and add them to the address sequence.
-          find_mem_accesses (&PATTERN (i), mems);
+          find_mem_accesses (PATTERN (i), std::back_inserter (mems));
           while (!mems.empty ())
             {
               add_new_access

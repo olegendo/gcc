@@ -167,9 +167,11 @@ public:
   static void add_reg_mod_access
     (access_sequence& as, rtx_insn* insn, rtx mod_expr,
      rtx_insn* mod_insn, regno_t reg);
-  static void find_mem_accesses
-    (rtx* x_ref, std::list<std::pair<rtx*, access_mode_t> >& mem_list,
-     access_mode_t access_mode = load);
+     
+  template <typename OutputIterator> static void
+  find_mem_accesses (rtx& x, OutputIterator out,
+		     access_mode_t access_mode = load);
+     
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
   static bool find_reg_value_1 (rtx reg, rtx pattern, rtx* value);
