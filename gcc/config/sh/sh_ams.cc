@@ -206,6 +206,51 @@ void sh_ams::add_reg_mod_access
     }
 }
 
+// The recursive part of find_reg_value. If REG is modified in INSN,
+// set VALUE to REG's value and return true. Otherwise, return false.
+static std::pair<rtx, bool>
+find_reg_value_1 (rtx reg, rtx pat)
+{
+  switch (GET_CODE (pat))
+    {
+    case SET:
+      {
+        rtx dest = SET_DEST (pat);
+        if (REG_P (dest) && REGNO (dest) == REGNO (reg))
+          {
+            // We're in the last insn that modified REG, so return
+            // the expression in SET_SRC.
+            return std::make_pair (SET_SRC (pat), true);
+          }
+      }
+      break;
+
+    case CLOBBER:
+      {
+        rtx dest = XEXP (pat, 0);
+        if (REG_P (dest) && REGNO (dest) == REGNO (reg))
+	  {
+	    // The value of REG is unknown.
+	    return std::make_pair (NULL_RTX, true);
+	  }
+      }
+      break;
+
+    case PARALLEL:
+      for (int i = 0; i < XVECLEN (pat, 0); i++)
+        {
+          std::pair<rtx, bool> r = find_reg_value_1 (reg, XVECEXP (pat, 0, i));
+          if (r.second)
+            return r;
+        }
+      break;
+
+    default:
+      break;
+    }
+  return std::make_pair (NULL_RTX, false);
+}
+
 // Find the value that REG was last set to. Write the register value
 // into mod_expr and the modifying insn into mod_insn.
 // FIXME: make use of other info such as REG_EQUAL notes.
@@ -222,8 +267,11 @@ void sh_ams::find_reg_value
       if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
           || BLOCK_FOR_INSN (insn)->index != BLOCK_FOR_INSN (i)->index)
         continue;
-      if (find_reg_value_1 (reg, PATTERN (i), mod_expr))
+
+      std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
+      if (r.second)
         {
+          *mod_expr = r.first;
           *mod_insn = i;
           return;
         }
@@ -250,49 +298,6 @@ void sh_ams::find_reg_value
         }
     }
   *mod_expr = reg;
-}
-
-// The recursive part of find_reg_value. If REG is modified in INSN,
-// set VALUE to REG's value and return true. Otherwise, return false.
-bool sh_ams::find_reg_value_1 (rtx reg, rtx pattern, rtx* value)
-{
-  rtx dest;
-  switch (GET_CODE (pattern))
-    {
-    case SET:
-      {
-        dest = SET_DEST (pattern);
-        if (REG_P (dest) && REGNO (dest) == REGNO (reg))
-          {
-            // We're in the last insn that modified REG, so return
-            // the expression in SET_SRC.
-            *value = SET_SRC (pattern);
-            return true;
-          }
-      }
-      break;
-    case CLOBBER:
-      dest = XEXP (pattern, 0);
-      if (REG_P (dest) && REGNO (dest) == REGNO (reg))
-        {
-          // The value of REG is unknown.
-          *value = NULL_RTX;
-          return true;
-        }
-      break;
-    case PARALLEL:
-      {
-        for (int i = 0; i < XVECLEN (pattern, 0); i++)
-          {
-            if (find_reg_value_1 (reg, XVECEXP (pattern, 0, i), value))
-              return true;
-          }
-      }
-      break;
-    default:
-      break;
-    }
-  return false;
 }
 
 // Try to create an ADDR_EXPR struct of the form
