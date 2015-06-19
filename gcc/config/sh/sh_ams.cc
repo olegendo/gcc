@@ -208,6 +208,8 @@ void sh_ams::add_reg_mod_access
 
 // The recursive part of find_reg_value. If REG is modified in INSN,
 // set VALUE to REG's value and return true. Otherwise, return false.
+//
+// FIXME: see if we can re-use find_set_of_reg_bb from sh_treg_combine.cc
 static std::pair<rtx, bool>
 find_reg_value_1 (rtx reg, rtx pat)
 {
@@ -262,10 +264,12 @@ void sh_ams::find_reg_value
 
   // Go back through the insn list until we find the last instruction
   // that modified the register.
-  for (rtx_insn* i = PREV_INSN (insn); i != NULL_RTX; i = PREV_INSN (i))
+  for (rtx_insn* i = prev_nonnote_insn_bb (insn); i != NULL_RTX;
+       i = prev_nonnote_insn_bb (i))
     {
-      if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
-          || BLOCK_FOR_INSN (insn)->index != BLOCK_FOR_INSN (i)->index)
+      if (BARRIER_P (i))
+	break;
+      if (!NONDEBUG_INSN_P (i) || !NONJUMP_INSN_P (i))
         continue;
 
       std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
