@@ -726,7 +726,7 @@ void sh_ams::access_sequence::update_insn_stream
       rtx new_addr;
       if (min_alternative->address ().index_reg () == invalid_regno)
         {
-          disp_t disp = ae.disp () - min_start_base->value ().disp ();
+          disp_t disp = ae.disp () - addr_reg_values.back ().value ().disp ();
           if (disp == 0 || min_alternative->address ().type () != non_mod)
             new_addr = gen_rtx_REG (Pmode, access_base);
           else
