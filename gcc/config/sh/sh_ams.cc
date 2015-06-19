@@ -175,14 +175,14 @@ void sh_ams::add_reg_mod_access
         continue;
 
       // Keep track of the current insn in as.
-      if (INSN_UID ((*as_it).insn ()) == INSN_UID (i))
+      if (INSN_UID (as_it->insn ()) == INSN_UID (i))
         {
           ++as_it;
 
           // If the reg_mod access is already inside the access
           // sequence, don't add it a second time.
-          if ((*as_it).access_mode () == reg_mod
-              && (*as_it).reg_mod_expr () == mod_expr)
+          if (as_it->access_mode () == reg_mod
+              && as_it->reg_mod_expr () == mod_expr)
             break;
         }
       if (INSN_UID (i) == INSN_UID (mod_insn))
