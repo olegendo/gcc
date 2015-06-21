@@ -428,17 +428,38 @@ public:
 		       disp_t disp_min, disp_t disp_max,
 		       addr_type_t addr_type, delegate& dlg);
 
-    regno_t insert_reg_mod_insns
+    struct mod_addr_result
+    {
+      int cost;
+      regno_t addr_reg;
+      disp_t addr_disp;
+
+      mod_addr_result (void)
+      : cost (infinite_costs), addr_reg (invalid_regno), addr_disp (0) { }
+
+      mod_addr_result (regno_t regno)
+      : cost (infinite_costs), addr_reg (regno), addr_disp (0) { }
+
+      mod_addr_result (int c, regno_t regno, disp_t disp)
+      : cost (c), addr_reg (regno), addr_disp (disp) { }
+    };
+
+    mod_addr_result
+    insert_reg_mod_insns
       (reg_value* start_value, const addr_expr& end_addr,
        rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
-    int try_modify_addr
+
+    mod_addr_result
+    try_modify_addr
       (reg_value* start_value, const addr_expr& end_addr,
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
-       regno_t* final_addr_regno, delegate& dlg);
-    int try_modify_addr
+       delegate& dlg);
+
+    mod_addr_result
+    try_modify_addr
       (reg_value* start_value, const addr_expr& end_addr,
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
