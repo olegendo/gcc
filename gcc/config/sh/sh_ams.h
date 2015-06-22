@@ -175,9 +175,20 @@ public:
   static void add_new_access
     (access_sequence& as, rtx_insn* insn, rtx* mem,
      access_mode_t access_mode, std::list<rtx_insn*>& reg_mod_insns);
+
   static void add_reg_mod_access
-    (access_sequence& as, rtx_insn* insn, rtx mod_expr,
+    (access_sequence& as, rtx_insn* insn,
+     addr_expr mod_addr_expr, rtx mod_rtx,
      rtx_insn* mod_insn, rtx reg);
+
+  static void add_reg_mod_access
+    (access_sequence& as, rtx_insn* insn,
+     addr_expr mod_addr_expr,
+     rtx_insn* mod_insn, rtx reg);
+
+  static void add_reg_mod_access
+    (access_sequence& as, rtx_insn* insn,
+     rtx mod_rtx, rtx_insn* mod_insn, rtx reg);
 
   template <typename OutputIterator> static void
   find_mem_accesses (rtx& x, OutputIterator out,
@@ -299,8 +310,10 @@ public:
     };
 
     access (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
-	    addr_expr original_addr_expr, addr_expr addr_expr);
-    access (rtx_insn* insn, rtx mod_expr, rtx reg);
+	    addr_expr original_addr_expr, addr_expr addr_expr,
+	    int cost = infinite_costs);
+    access (rtx_insn* insn, addr_expr addr_expr, rtx addr_rtx, rtx mod_reg,
+	    int cost = infinite_costs);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -313,23 +326,31 @@ public:
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
 
     // If m_access_mode is REG_MOD, this access represents the modification
-    // of an address register.
+    // of an address register.  In that case, m_mod_reg stores the register
+    // that's modified and m_addr_expr is its new address.
     access_mode_t access_mode (void) const { return m_access_mode; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
     addr_space_t addr_space (void) const { return m_addr_space; }
+    int cost (void) const { return m_cost; }
 
     // the insn where this access occurs.
     rtx_insn* insn (void) const { return m_insn; }
 
-    // reference to the mem rtx inside the insn.
-    rtx* mem_ref (void) const { return m_mem_ref; }
+    // Stores the address if it can't be described with an
+    // addr_expr, or NULL_RTX if the address is unknown.
+    rtx addr_rtx (void) const { return m_addr_rtx; }
 
-    // if m_access_mode is REG_MOD, this stores the expression
-    // that the register is set to (NULL_RTX if the value is
-    // unknown).
-    rtx reg_mod_expr (void) const { return m_reg_mod_expr; }
+    // For reg_mod accesses, shows the register rtx that was modified.
+    rtx modified_reg (void) const { return m_mod_reg; }
+
+    // For reg_mod accesses, shows whether the register is used
+    // in another access. If so, register cloning costs must be
+    // taken into account when using it a second time.
+    bool is_used (void) const { return m_used; }
+
+    void set_used () { m_used = true; }
 
     access& add_alternative (int costs, const addr_expr& ae)
     {
@@ -362,15 +383,26 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
+    void update_access_insn (rtx new_addr, int new_cost)
+    {
+      validate_change (m_insn, m_mem_ref,
+		       replace_equiv_address (*m_mem_ref, new_addr),
+		       false);
+      m_cost = new_cost;
+    }
+
   private:
     addr_expr m_original_addr_expr;
     addr_expr m_addr_expr;
     access_mode_t m_access_mode;
     machine_mode m_machine_mode;
     addr_space_t m_addr_space;
+    int m_cost;
     rtx_insn* m_insn;
-    rtx* m_mem_ref;
-    rtx m_reg_mod_expr;
+    rtx* m_mem_ref; // reference to the mem rtx inside the insn.
+    rtx m_addr_rtx;
+    rtx m_mod_reg;
+    bool m_used;
 
     // all available alternatives for this access as reported by the target.
     enum
