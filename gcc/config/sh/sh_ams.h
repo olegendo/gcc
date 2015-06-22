@@ -29,10 +29,20 @@ public:
 
   enum
   {
-    invalid_regno = -1,
-    any_regno = -2,
     infinite_costs = INT_MAX// std::numeric_limits<int>::max ();
   };
+
+  static const rtx invalid_regno;
+  static const rtx any_regno;
+
+  static regno_t get_regno (const_rtx x)
+  {
+    if (x == NULL)
+      return -1;
+    if (x == any_regno)
+      return -2;
+    return REGNO (x);
+  }  
 
   // we could use an abstract base class etc etc, but that usually implies
   // that we need to store objects thereof on the free store and keep the
@@ -43,11 +53,15 @@ public:
   {
   public:
     addr_type_t type (void) const { return m_type; }
-    regno_t base_reg (void) const { return m_base_reg; }
+
+    rtx base_reg (void) const { return m_base_reg; }
+    
     disp_t disp (void) const { return m_disp; }
     disp_t disp_min (void) const { return m_disp_min; }
     disp_t disp_max (void) const { return m_disp_max; }
-    regno_t index_reg (void) const { return m_index_reg; }
+
+    rtx index_reg (void) const { return m_index_reg; }
+    
     scale_t scale (void) const { return m_scale; }
     scale_t scale_min (void) const { return m_scale_min; }
     scale_t scale_max (void) const { return m_scale_max; }
@@ -76,19 +90,16 @@ public:
   protected:
     addr_type_t m_type;
 
-    // FIXME: probably it's better to use an rtx for the base reg, because
-    // of things such as addresses into constant pool or constant address
-    // accesses.
     // although constant addresses can be grouped and a base reg can be
     // derived, on some architectures (8051) using a constant address directly
     // is possible.
     // after the constant pool layout has been determined, the value of the
     // base register will be a constant label_ref or something.
-    regno_t m_base_reg;
+    rtx m_base_reg;
     disp_t m_disp;
     disp_t m_disp_min;
     disp_t m_disp_max;
-    regno_t m_index_reg;
+    rtx m_index_reg;
     scale_t m_scale;
     scale_t m_scale_min;
     scale_t m_scale_max;
@@ -97,7 +108,7 @@ public:
   class non_mod_addr : public addr_expr
   {
   public:
-    non_mod_addr (regno_t base_reg, regno_t index_reg, scale_t scale,
+    non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale,
                   scale_t scale_min, scale_t scale_max,
                   disp_t disp, disp_t disp_min, disp_t disp_max)
     {
@@ -112,7 +123,7 @@ public:
       m_scale_max = scale_max;
     }
 
-    non_mod_addr (regno_t base_reg, regno_t index_reg, scale_t scale, disp_t disp)
+    non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp)
     {
       m_type = non_mod;
       m_base_reg = base_reg;
@@ -131,7 +142,7 @@ public:
   class pre_mod_addr : public addr_expr
   {
   public:
-    pre_mod_addr (regno_t base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
+    pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
     {
       m_type = pre_mod;
       m_base_reg = base_reg;
@@ -146,7 +157,7 @@ public:
   class post_mod_addr : public addr_expr
   {
   public:
-    post_mod_addr (regno_t base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
+    post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
     {
       m_type = post_mod;
       m_base_reg = base_reg;
@@ -166,7 +177,7 @@ public:
      access_mode_t access_mode, std::list<rtx_insn*>& reg_mod_insns);
   static void add_reg_mod_access
     (access_sequence& as, rtx_insn* insn, rtx mod_expr,
-     rtx_insn* mod_insn, regno_t reg);
+     rtx_insn* mod_insn, rtx reg);
 
   template <typename OutputIterator> static void
   find_mem_accesses (rtx& x, OutputIterator out,
@@ -181,13 +192,13 @@ public:
 
   // helper functions to create a particular type of address expression.
   static addr_expr
-  make_reg_addr (regno_t base_reg = any_regno);
+  make_reg_addr (rtx base_reg = any_regno);
 
   static addr_expr
   make_disp_addr (disp_t disp_min, disp_t disp_max);
 
   static addr_expr
-  make_disp_addr (regno_t base_reg, disp_t disp_min, disp_t disp_max);
+  make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max);
 
   static addr_expr
   make_index_addr (scale_t scale_min, scale_t scale_max);
@@ -196,16 +207,16 @@ public:
   make_index_addr (void);
 
   static addr_expr
-  make_post_inc_addr (machine_mode mode, regno_t base_reg = any_regno);
+  make_post_inc_addr (machine_mode mode, rtx base_rtx = any_regno);
 
   static addr_expr
-  make_post_dec_addr (machine_mode mode, regno_t base_reg = any_regno);
+  make_post_dec_addr (machine_mode mode, rtx base_reg = any_regno);
 
   static addr_expr
-  make_pre_inc_addr (machine_mode mode, regno_t base_reg = any_regno);
+  make_pre_inc_addr (machine_mode mode, rtx base_reg = any_regno);
 
   static addr_expr
-  make_pre_dec_addr (machine_mode mode, regno_t base_reg = any_regno);
+  make_pre_dec_addr (machine_mode mode, rtx base_reg = any_regno);
 
   static addr_expr
   make_invalid_addr (void);
@@ -289,7 +300,7 @@ public:
 
     access (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
 	    addr_expr original_addr_expr, addr_expr addr_expr);
-    access (rtx_insn* insn, rtx mod_expr, regno_t reg);
+    access (rtx_insn* insn, rtx mod_expr, rtx reg);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -385,13 +396,13 @@ public:
     class reg_value
     {
     public:
-      reg_value (regno_t reg, addr_expr value)
+      reg_value (rtx reg, addr_expr value)
         : m_reg (reg), m_value (value), m_used (false) { }
-      reg_value (regno_t reg)
+      reg_value (rtx reg)
         : m_reg (reg), m_value (make_reg_addr (reg)), m_used (false) { }
 
       // The register that was set by the insn.
-      int reg (void) const { return m_reg; }
+      rtx reg (void) const { return m_reg; }
 
       // The value that the register is set to, expressed with the original
       // address registers.
@@ -405,7 +416,7 @@ public:
       void set_used () { m_used = true; }
 
     private:
-      regno_t m_reg;
+      rtx m_reg;
       addr_expr m_value;
       bool m_used;
     };
@@ -431,16 +442,16 @@ public:
     struct mod_addr_result
     {
       int cost;
-      regno_t addr_reg;
+      rtx addr_reg;
       disp_t addr_disp;
 
       mod_addr_result (void)
       : cost (infinite_costs), addr_reg (invalid_regno), addr_disp (0) { }
 
-      mod_addr_result (regno_t regno)
+      mod_addr_result (rtx regno)
       : cost (infinite_costs), addr_reg (regno), addr_disp (0) { }
 
-      mod_addr_result (int c, regno_t regno, disp_t disp)
+      mod_addr_result (int c, rtx regno, disp_t disp)
       : cost (c), addr_reg (regno), addr_disp (disp) { }
     };
 
@@ -477,22 +488,22 @@ public:
     // address register.
     // the cost must be somehow relative to the cost provided for access
     // alternatives.
-    virtual int addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp/*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp/*, const access_sequence& as*/) = 0;
 
     // provide the cost for multiplying the specified address register
     // by a constant.
-    virtual int addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale/*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale/*, const access_sequence& as*/) = 0;
 
     // provide the cost for adding another register to the specified
     // address register.
-    virtual int addr_reg_plus_reg_cost (sh_ams::regno_t reg, sh_ams::regno_t disp_reg/*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_plus_reg_cost (const_rtx reg, const_rtx disp_reg/*, const access_sequence& as*/) = 0;
 
     // provide the cost for cloning the address register, which is usually
     // required when splitting an access sequence.  if (address) register
     // pressure is high, return a higher cost to avoid splitting.
     //
     // FIXME: alternative would be 'sequence_split_cost'
-    virtual int addr_reg_clone_cost (sh_ams::regno_t reg /*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_clone_cost (const_rtx reg /*, const access_sequence& as*/) = 0;
   };
 
   sh_ams (gcc::context* ctx, const char* name, delegate& dlg);
@@ -508,7 +519,7 @@ private:
 
 
 inline sh_ams::addr_expr
-sh_ams::make_reg_addr (regno_t base_reg)
+sh_ams::make_reg_addr (rtx base_reg)
 {
   return non_mod_addr (base_reg, invalid_regno, 0, 0, 0, 0, 0, 0);
 }
@@ -520,7 +531,7 @@ sh_ams::make_disp_addr (disp_t disp_min, disp_t disp_max)
 }
 
 inline sh_ams::addr_expr
-sh_ams::make_disp_addr (regno_t base_reg, disp_t disp_min, disp_t disp_max)
+sh_ams::make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max)
 {
   return non_mod_addr (base_reg, invalid_regno, 0, 0, 0, 0, disp_min, disp_max);
 }
@@ -538,28 +549,28 @@ sh_ams::make_index_addr (void)
 }
 
 inline sh_ams::addr_expr
-sh_ams::make_post_inc_addr (machine_mode mode, regno_t base_reg)
+sh_ams::make_post_inc_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = GET_MODE_SIZE (mode);
   return post_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
 inline sh_ams::addr_expr
-sh_ams::make_post_dec_addr (machine_mode mode, regno_t base_reg)
+sh_ams::make_post_dec_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = -GET_MODE_SIZE (mode);
   return post_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
 inline sh_ams::addr_expr
-sh_ams::make_pre_inc_addr (machine_mode mode, regno_t base_reg)
+sh_ams::make_pre_inc_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = GET_MODE_SIZE (mode);
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
 inline sh_ams::addr_expr
-sh_ams::make_pre_dec_addr (machine_mode mode, regno_t base_reg)
+sh_ams::make_pre_dec_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = -GET_MODE_SIZE (mode);
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);

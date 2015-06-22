@@ -821,10 +821,10 @@ extern opt_pass* make_pass_sh_optimize_sett_clrt (gcc::context* ctx,
 static struct ams_delegate : public sh_ams::delegate
 {
   virtual void mem_access_alternatives (sh_ams::access& a);
-  virtual int addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp);
-  virtual int addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale);
-  virtual int addr_reg_plus_reg_cost (sh_ams::regno_t reg, sh_ams::regno_t disp_reg);
-  virtual int addr_reg_clone_cost (sh_ams::regno_t reg);
+  virtual int addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp);
+  virtual int addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale);
+  virtual int addr_reg_plus_reg_cost (const_rtx reg, const_rtx disp_reg);
+  virtual int addr_reg_clone_cost (const_rtx reg);
 } g_ams_delegate;
 
 static void
@@ -10153,6 +10153,15 @@ get_t_reg_rtx (void)
   return t_reg_rtx;
 }
 
+static GTY(()) rtx gbr_reg_rtx;
+rtx
+get_gbr_reg_rtx (void)
+{
+  if (gbr_reg_rtx == NULL)
+    gbr_reg_rtx = gen_rtx_REG (Pmode, GBR_REG);
+  return gbr_reg_rtx;
+}
+
 static GTY(()) tree fpscr_values;
 
 static void
@@ -13705,7 +13714,7 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
   // on pseudos before RA will work.  but when ran after RA, AMS will have to
   // deal with hard-regs and do the checking on register classes + reg numbers.
   // this is some sort of register constraint handling.
-  if (a.address ().base_reg () == GBR_REG)
+  if (sh_ams::get_regno (a.address ().base_reg ()) == GBR_REG)
   {
     // A GBR relative address.  Sticking to the GBR base reg is the cheapest
     // and also allows for the largest displacement.
@@ -13718,7 +13727,8 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
 
     if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
       {
-	a.add_alternative (1, sh_ams::make_disp_addr (GBR_REG, 0, 255 * a.access_size ()));
+	a.add_alternative (1, sh_ams::make_disp_addr (get_gbr_reg_rtx (), 0,
+			   255 * a.access_size ()));
 	gbr_extra_cost = 2;
       }
   }
@@ -13771,10 +13781,11 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
 	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), true)));
 }
 
-int ams_delegate::addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp)
+int
+ams_delegate::addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp)
 {
   // modifying the GBR is impossible.
-  if (reg == GBR_REG)
+  if (sh_ams::get_regno (reg) == GBR_REG)
     return sh_ams::infinite_costs;
 
   // the costs for adding small constants should be higher than
@@ -13788,11 +13799,12 @@ int ams_delegate::addr_reg_disp_cost (sh_ams::regno_t reg, sh_ams::disp_t disp)
   return 5;
 }
 
-int ams_delegate::addr_reg_plus_reg_cost
-(sh_ams::regno_t reg, sh_ams::regno_t disp_reg ATTRIBUTE_UNUSED)
+int
+ams_delegate::addr_reg_plus_reg_cost (const_rtx reg,
+				      const_rtx disp_reg ATTRIBUTE_UNUSED)
 {
   // modifying the GBR is impossible.
-  if (reg == GBR_REG)
+  if (sh_ams::get_regno (reg) == GBR_REG)
     return sh_ams::infinite_costs;
 
   // the costs for adding a register should be around the same
@@ -13800,10 +13812,11 @@ int ams_delegate::addr_reg_plus_reg_cost
   return 2;
 }
 
-int ams_delegate::addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scale)
+int
+ams_delegate::addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale)
 {
   // modifying the GBR is impossible.
-  if (reg == GBR_REG)
+  if (sh_ams::get_regno (reg) == GBR_REG)
     return sh_ams::infinite_costs;
 
   // multiplying by powers of 2 can be done cheaper with shifts.
@@ -13813,7 +13826,8 @@ int ams_delegate::addr_reg_scale_cost (sh_ams::regno_t reg, sh_ams::scale_t scal
   return 3;
 }
 
-int ams_delegate::addr_reg_clone_cost (sh_ams::regno_t reg ATTRIBUTE_UNUSED)
+int
+ams_delegate::addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED)
 {
   // FIXME: maybe cloning the GBR should be cheaper?
   // FIXME: if register pressure is (expected to be) high, increase the cost
