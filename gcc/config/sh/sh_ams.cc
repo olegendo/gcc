@@ -172,8 +172,11 @@ log_addr_expr (const sh_ams::addr_expr& ae)
 
       if (ae.disp () != 0)
       	log_msg (" + %d", ae.disp ());
+      else if (ae.disp_min () != ae.disp_max ()
+	       && (ae.disp_min () != 0 || ae.disp_max () != 0))
+	log_msg (" + (%d ... %d)", ae.disp_min (), ae.disp_max ());
 
-      log_msg (" )", ae.disp ());
+      log_msg (" )");
       return;
     }
 
