@@ -124,6 +124,111 @@ struct regno_equal
   }
 };
 
+void log_reg (rtx x)
+{
+  if (x == sh_ams::invalid_regno)
+    log_msg ("(nil)");
+  else if (x == sh_ams::any_regno)
+    log_msg ("(reg:%s *)", GET_MODE_NAME (Pmode));
+  else
+    log_rtx (x);
+}
+
+void
+log_addr_expr (const sh_ams::addr_expr& ae)
+{
+  if (dump_file == NULL)
+    return;
+
+  if (ae.type () == sh_ams::pre_mod)
+    {
+      log_msg ("@( += %d", ae.disp ());
+      log_reg (ae.base_reg ());
+      log_msg (" )");
+      return;
+    }
+    
+  if (ae.type () == sh_ams::post_mod)
+    {
+      log_msg ("@( ");
+      log_reg (ae.base_reg ());
+      log_msg (" += %d )", ae.disp ());
+      return;
+    }
+
+  if (ae.type () == sh_ams::non_mod)
+    {
+      log_msg ("@( ");
+
+      log_reg (ae.base_reg ());
+
+      if (ae.index_reg () != sh_ams::invalid_regno)
+	{
+	  log_msg (" + ");
+	  log_reg (ae.index_reg ());
+	  if (ae.scale () != 1)
+	    log_msg (" * %d", ae.scale ());
+	}
+
+      if (ae.disp () != 0)
+      	log_msg (" + %d", ae.disp ());
+
+      log_msg (" )", ae.disp ());
+      return;
+    }
+
+  gcc_unreachable ();
+}
+
+void
+log_access (const sh_ams::access& a)
+{
+  if (dump_file == NULL)
+    return;
+
+  if (a.access_mode () == sh_ams::reg_mod)
+    {
+      log_msg ("reg_mod:\n  ");
+      log_rtx (a.address ().base_reg ());
+      log_msg (" = ");
+      log_rtx (a.reg_mod_expr ());
+      log_msg("\n-----\n");
+    }
+  else
+    {
+      if (a.access_mode () == sh_ams::load)
+	log_msg ("load ");
+      else if (a.access_mode () == sh_ams::store)
+	log_msg ("store");
+      else
+	gcc_unreachable ();
+
+      log_msg (" %smode (%d):\n",
+	       GET_MODE_NAME (a.mach_mode ()), a.access_size ());
+
+      log_msg ("  original addr:   ");
+      log_addr_expr (a.original_address ());
+      log_msg ("\n");
+              
+      log_msg ("  effective addr:  ");
+      log_addr_expr (a.address ());
+      log_msg ("\n");
+      
+      log_msg ("  %d alternatives:\n", a.alternatives_count ());
+      int alt_count = 0;
+      for (const sh_ams::access::alternative* alt = a.begin_alternatives ();
+	   alt != a.end_alternatives (); ++alt)
+	{
+	  log_msg ("    alt %d, costs %d: ", alt_count, alt->costs ());
+	  log_addr_expr (alt->address ());
+	  log_msg ("\n");  
+	  ++alt_count;
+	}
+      
+      log_msg("\n-----\n");
+    }
+}
+
 } // anonymous namespace
 
 
@@ -1139,32 +1244,16 @@ unsigned int sh_ams::execute (function* fun)
 	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
 	    add_new_access (as, i, m->first, m->second, reg_mod_insns);
          }
+
+      for (access_sequence::iterator it = as.begin();
+	   it != as.end(); ++it)
+	m_delegate.mem_access_alternatives (*it);
+
       log_msg ("Access sequence contents:\n\n");
       for (access_sequence::const_iterator it = as.begin();
-           it != as.end(); ++it)
-        {
-          if (it->access_mode () == reg_mod)
-            {
-              log_msg ("reg_mod: ");
-              log_rtx (it->address ().base_reg ());
-              log_msg (" set to\n");
-              log_rtx (it->reg_mod_expr ());
-              log_msg("\n-----\n\n");
-            }
-          else
-            {
-              log_msg ("m_original_addr_expr:\n");
-	      log_msg (" base: "); log_rtx (it->original_address ().base_reg ());
-	      log_msg (" index: "); log_rtx (it->original_address ().index_reg ());
-	      log_msg (" scale: %d", it->original_address ().scale ());
-	      log_msg (" disp: %d\n", it->original_address ().disp ());
-              log_msg ("\nm_addr_expr:\n");
-              log_msg (" base: "); log_rtx (it->address ().base_reg ());
-              log_msg (" index: "); log_rtx (it->address ().index_reg ());
-              log_msg (" scale: %d", it->address ().scale ());
-              log_msg (" disp: %d\n-----\n\n", it->address ().disp ());
-            }
-        }
+	   it != as.end(); ++it)
+        log_access (*it);
+
       log_msg ("\n\n");
 
       as.update_insn_stream (reg_mod_insns, m_delegate);
