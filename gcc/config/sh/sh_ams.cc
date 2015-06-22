@@ -806,12 +806,16 @@ void sh_ams::access_sequence::update_insn_stream
   for (std::vector<reg_value>::iterator it = addr_reg_values.begin ();
        it != addr_reg_values.end (); ++it)
     {
-      log_msg ("r%d <- ", it->reg ());
+      log_rtx (it->reg ()); log_msg (" = ");
       if (it->value ().base_reg () != invalid_regno)
-        log_msg ("r%d + ", it->value ().base_reg ());
+	{
+	  log_rtx (it->value ().base_reg ()); log_msg (" + ");
+	}
       if (it->value ().index_reg () != invalid_regno)
-        log_msg ("r%d*%d + ", it->value ().index_reg (),
-                 it->value ().scale ());
+	{
+	  log_rtx (it->value ().index_reg ());
+	  log_msg (" * %d + ", it->value ().scale ());
+	}
       log_msg ("%d\n", it->value ().disp ());
     }
   log_msg ("\n");
@@ -1141,24 +1145,24 @@ unsigned int sh_ams::execute (function* fun)
         {
           if (it->access_mode () == reg_mod)
             {
-              log_msg ("reg_mod: r%d set to\n", it->address ().base_reg ());
+              log_msg ("reg_mod: ");
+              log_rtx (it->address ().base_reg ());
+              log_msg (" set to\n");
               log_rtx (it->reg_mod_expr ());
               log_msg("\n-----\n\n");
             }
           else
             {
               log_msg ("m_original_addr_expr:\n");
-              log_msg ("base: %d, index: %d, scale: %d, disp: %d\n",
-                       it->original_address ().base_reg (),
-                       it->original_address ().index_reg (),
-                       it->original_address ().scale (),
-                       it->original_address ().disp ());
+	      log_msg (" base: "); log_rtx (it->original_address ().base_reg ());
+	      log_msg (" index: "); log_rtx (it->original_address ().index_reg ());
+	      log_msg (" scale: %d", it->original_address ().scale ());
+	      log_msg (" disp: %d\n", it->original_address ().disp ());
               log_msg ("\nm_addr_expr:\n");
-              log_msg ("base: %d, index: %d, scale: %d, disp: %d\n-----\n\n",
-                       it->address ().base_reg (),
-                       it->address ().index_reg (),
-                       it->address ().scale (),
-                       it->address ().disp ());
+              log_msg (" base: "); log_rtx (it->address ().base_reg ());
+              log_msg (" index: "); log_rtx (it->address ().index_reg ());
+              log_msg (" scale: %d", it->address ().scale ());
+              log_msg (" disp: %d\n-----\n\n", it->address ().disp ());
             }
         }
       log_msg ("\n\n");
