@@ -702,7 +702,7 @@ sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
       find_mem_accesses (XEXP (x, 0), out, load);
       break;
     default:
-      if (ARITHMETIC_P (x))
+      if (UNARY_P (x) || ARITHMETIC_P (x))
         {
           for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
             find_mem_accesses (XEXP (x, i), out, access_mode);
