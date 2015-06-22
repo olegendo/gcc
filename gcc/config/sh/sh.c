@@ -13791,12 +13791,12 @@ ams_delegate::addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp)
   // the costs for adding small constants should be higher than
   // QI/HI displacement mode addresses.
   if (CONST_OK_FOR_I08 (disp))
-    return 2;
+    return 4;
 
   // assume that everything else is even worse.
   // FIXME: if register pressure is (expected to be) high, reduce the cost
   // a bit to avoid addr reg cloning.
-  return 5;
+  return 6;
 }
 
 int
@@ -13809,7 +13809,7 @@ ams_delegate::addr_reg_plus_reg_cost (const_rtx reg,
 
   // the costs for adding a register should be around the same
   // as adding a small constant.
-  return 2;
+  return 3;
 }
 
 int
