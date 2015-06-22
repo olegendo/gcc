@@ -853,7 +853,7 @@ void sh_ams::access_sequence::update_insn_stream
           min_alternative = base_reg_alt;
 
           rtx const_addr_base = gen_reg_rtx (Pmode);
-          base_insert_result = mod_addr_result (const_addr_base);
+          base_insert_result = mod_addr_result (const_addr_base, ae.disp ());
           addr_reg_values.push_back (reg_value (const_addr_base, ae));
 
           start_sequence ();
@@ -1063,9 +1063,6 @@ sh_ams::access_sequence::try_modify_addr
         end_sequence ();
       return mod_addr_result (infinite_costs, invalid_regno, 0);
     }
-
-  // FIXME: Handle cases when the end address consists only
-  // of a constant displacement.
 
   // Add scaling insns.
   if (c_start_addr.index_reg () != invalid_regno

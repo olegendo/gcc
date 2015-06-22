@@ -42,7 +42,7 @@ public:
     if (x == any_regno)
       return -2;
     return REGNO (x);
-  }  
+  }
 
   // we could use an abstract base class etc etc, but that usually implies
   // that we need to store objects thereof on the free store and keep the
@@ -55,13 +55,13 @@ public:
     addr_type_t type (void) const { return m_type; }
 
     rtx base_reg (void) const { return m_base_reg; }
-    
+
     disp_t disp (void) const { return m_disp; }
     disp_t disp_min (void) const { return m_disp_min; }
     disp_t disp_max (void) const { return m_disp_max; }
 
     rtx index_reg (void) const { return m_index_reg; }
-    
+
     scale_t scale (void) const { return m_scale; }
     scale_t scale_min (void) const { return m_scale_min; }
     scale_t scale_max (void) const { return m_scale_max; }
@@ -450,6 +450,9 @@ public:
 
       mod_addr_result (rtx regno)
       : cost (infinite_costs), addr_reg (regno), addr_disp (0) { }
+
+      mod_addr_result (rtx regno, disp_t disp)
+      : cost (infinite_costs), addr_reg (regno), addr_disp (disp) { }
 
       mod_addr_result (int c, rtx regno, disp_t disp)
       : cost (c), addr_reg (regno), addr_disp (disp) { }
