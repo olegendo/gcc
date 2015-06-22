@@ -192,7 +192,6 @@ log_access (const sh_ams::access& a)
       log_rtx (a.address ().base_reg ());
       log_msg (" = ");
       log_rtx (a.reg_mod_expr ());
-      log_msg("\n-----\n");
     }
   else
     {
@@ -219,13 +218,13 @@ log_access (const sh_ams::access& a)
       for (const sh_ams::access::alternative* alt = a.begin_alternatives ();
 	   alt != a.end_alternatives (); ++alt)
 	{
+	  if (alt_count > 0)
+	    log_msg ("\n");
+
 	  log_msg ("    alt %d, costs %d: ", alt_count, alt->costs ());
 	  log_addr_expr (alt->address ());
-	  log_msg ("\n");  
 	  ++alt_count;
 	}
-      
-      log_msg("\n-----\n");
     }
 }
 
@@ -733,6 +732,10 @@ void sh_ams::access_sequence::update_insn_stream
       if (accs->access_mode () == reg_mod) continue;
       const addr_expr& ae = accs->address ();
 
+      log_msg ("\nprocessing access ");
+      log_access (*accs);
+      log_msg ("\n");
+
       // Add the unmodified base and index reg values to ADDR_REG_VALUES.
       rtx base_reg = accs->address ().base_reg ();
       if (base_reg != invalid_regno
@@ -837,6 +840,7 @@ void sh_ams::access_sequence::update_insn_stream
       mod_addr_result base_insert_result;
       if (min_cost == infinite_costs)
         {
+	  log_msg ("no suitable alternative found.  trying simple base reg.\n");
           // If no suitable alternative was found for an address that consists
           // only of a constant displacement [e.g. *((int*) 0x1000)],
           // use a simple base reg access with the base reg set to the address.
@@ -889,6 +893,10 @@ void sh_ams::access_sequence::update_insn_stream
           new_addr = gen_rtx_PLUS (Pmode, base_insert_result.addr_reg,
 					  index_insert_result.addr_reg);
         }
+
+      log_msg ("min alternative: %d  min costs = %d\n",
+	       (int)(min_alternative - accs->begin_alternatives ()),
+	       min_cost);
 
       if (min_alternative->address ().type () == pre_mod)
         {
@@ -1252,7 +1260,10 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("Access sequence contents:\n\n");
       for (access_sequence::const_iterator it = as.begin();
 	   it != as.end(); ++it)
-        log_access (*it);
+	{
+	  log_access (*it);
+	  log_msg("\n-----\n");
+	}
 
       log_msg ("\n\n");
 
