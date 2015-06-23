@@ -590,33 +590,16 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           if (reg_value != NULL_RTX && REG_P (reg_value))
             {
 
-              // If we're going to stop expanding the register, add
-              // a reg_mod access that sets the reg to itself.  This
-              // makes it easier for the address modification generator
-              // to find all possible starting addresses.
+              // Stop expanding the reg if we reach a hardreg -> pseudo reg copy,
+              // or if the reg can't be expanded any further.
               if (REGNO (reg_value) == REGNO (x) || HARD_REGISTER_P (reg_value))
                 {
+                  // Add a reg_mod access that sets the reg to itself.
+                  // This makes it easier for the address modification
+                  // generator to find all possible starting addresses.
                   as.add_reg_mod_access
                     (root_insn, make_reg_addr (x), make_reg_addr (x),
                      reg_mod_insn, x);
-                }
-
-              if (REGNO (reg_value) == REGNO (x))
-                return make_reg_addr (x);
-
-              // Don't expand hardreg -> pseudo reg copies.  Instead, add the
-              // copy as a reg_mod access.
-              if (HARD_REGISTER_P (reg_value))
-                {
-                  as.add_reg_mod_access
-                    (root_insn, make_reg_addr (reg_value),
-                     make_reg_addr (reg_value), reg_mod_insn, x);
-
-                  // The hard reg still needs to be traced back in case it
-                  // is set to some unknown value, like the result of a CALL.
-                  extract_addr_expr
-                    (reg_value, reg_mod_insn, root_insn,
-                     mem_mach_mode, as, true, false);
                   return make_reg_addr (x);
                 }
             }
