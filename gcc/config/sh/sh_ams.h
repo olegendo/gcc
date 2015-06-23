@@ -152,6 +152,17 @@ public:
       m_index_reg = invalid_regno;
       m_scale = m_scale_min = m_scale_max = 0;
     }
+
+    pre_mod_addr (rtx base_reg, disp_t disp)
+    {
+      m_type = pre_mod;
+      m_base_reg = base_reg;
+      m_disp = disp;
+      m_disp_min = disp;
+      m_disp_max = disp;
+      m_index_reg = invalid_regno;
+      m_scale = m_scale_min = m_scale_max = 0;
+    }
   };
 
   class post_mod_addr : public addr_expr
@@ -167,28 +178,21 @@ public:
       m_index_reg = invalid_regno;
       m_scale = m_scale_min = m_scale_max = 0;
     }
+
+    post_mod_addr (rtx base_reg, disp_t disp)
+    {
+      m_type = post_mod;
+      m_base_reg = base_reg;
+      m_disp = disp;
+      m_disp_min = disp;
+      m_disp_max = disp;
+      m_index_reg = invalid_regno;
+      m_scale = m_scale_min = m_scale_max = 0;
+    }
   };
 
   class access;
   class access_sequence;
-
-  static void add_new_access
-    (access_sequence& as, rtx_insn* insn, rtx* mem,
-     access_mode_t access_mode, std::list<rtx_insn*>& reg_mod_insns);
-
-  static void add_reg_mod_access
-    (access_sequence& as, rtx_insn* insn,
-     addr_expr mod_addr_expr, rtx mod_rtx,
-     rtx_insn* mod_insn, rtx reg);
-
-  static void add_reg_mod_access
-    (access_sequence& as, rtx_insn* insn,
-     addr_expr mod_addr_expr,
-     rtx_insn* mod_insn, rtx reg);
-
-  static void add_reg_mod_access
-    (access_sequence& as, rtx_insn* insn,
-     rtx mod_rtx, rtx_insn* mod_insn, rtx reg);
 
   template <typename OutputIterator> static void
   find_mem_accesses (rtx& x, OutputIterator out,
@@ -383,12 +387,13 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
-    void update_access_insn (rtx new_addr, int new_cost)
+    void update_access_insn (rtx new_addr, int new_cost, addr_expr new_addr_expr)
     {
       validate_change (m_insn, m_mem_ref,
 		       replace_equiv_address (*m_mem_ref, new_addr),
 		       false);
       m_cost = new_cost;
+      m_original_addr_expr = new_addr_expr;
     }
 
   private:
@@ -422,52 +427,40 @@ public:
     void update_insn_stream
       (std::list<rtx_insn*>& reg_mod_insns, delegate& dlg);
 
-    // A structure used to keep track of the address registers' values when
-    // generating new address modifying insns.  Each generated insn has a
-    // corresponding reg_value struct.
-    class reg_value
-    {
-    public:
-      reg_value (rtx reg, addr_expr value)
-        : m_reg (reg), m_value (value), m_used (false) { }
-      reg_value (rtx reg)
-        : m_reg (reg), m_value (make_reg_addr (reg)), m_used (false) { }
+    access& add_new_access
+      (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
+       std::list<rtx_insn*>& reg_mod_insns);
 
-      // The register that was set by the insn.
-      rtx reg (void) const { return m_reg; }
+    access& add_reg_mod_access
+      (rtx_insn* insn, addr_expr mod_addr_expr, rtx mod_rtx,
+       rtx_insn* mod_insn, rtx reg);
 
-      // The value that the register is set to, expressed with the original
-      // address registers.
-      const addr_expr& value (void) const { return m_value; }
+    access& add_reg_mod_access
+      (rtx_insn* insn, addr_expr mod_addr_expr,
+       rtx_insn* mod_insn, rtx reg);
 
-      // Shows whether this register is used in another address-modifying
-      // insn.  If so, register cloning costs must be taken into account
-      // when using it a second time.
-      bool is_used (void) const { return m_used; }
+    access& add_reg_mod_access
+      (rtx_insn* insn, rtx mod_rtx,
+       rtx_insn* mod_insn, rtx reg);
 
-      void set_used () { m_used = true; }
-
-    private:
-      rtx m_reg;
-      addr_expr m_value;
-      bool m_used;
-    };
+    access& add_reg_mod_access
+      (access_sequence::iterator insert_before, addr_expr mod_addr_expr,
+       rtx_insn* mod_insn, rtx reg);
 
     struct min_mod_cost_result
     {
       int cost;
-      reg_value* min_start_addr;
+      access* min_start_addr;
 
       min_mod_cost_result (void)
       : cost (infinite_costs), min_start_addr (NULL) { }
 
-      min_mod_cost_result (int c, reg_value* v)
-      : cost (c), min_start_addr (v) { }
+      min_mod_cost_result (int c, access* a)
+      : cost (c), min_start_addr (a) { }
     };
 
     min_mod_cost_result
-    find_min_mod_cost (std::vector<reg_value>& addr_reg_values,
-		       const addr_expr& end_addr,
+    find_min_mod_cost (const addr_expr& end_addr,
 		       disp_t disp_min, disp_t disp_max,
 		       addr_type_t addr_type, delegate& dlg);
 
@@ -492,21 +485,21 @@ public:
 
     mod_addr_result
     insert_reg_mod_insns
-      (reg_value* start_value, const addr_expr& end_addr,
-       rtx_insn* insn, std::vector<reg_value>& addr_reg_values,
-       disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-       delegate& dlg);
+      (access* start_addr, const addr_expr& end_addr,
+       disp_t disp_min, disp_t disp_max,
+       access_sequence::iterator access_place,
+       addr_type_t addr_type, rtx_insn* insn, delegate& dlg);
 
     mod_addr_result
     try_modify_addr
-      (reg_value* start_value, const addr_expr& end_addr,
+      (access* start_addr, const addr_expr& end_addr,
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-       std::vector<reg_value>* addr_reg_values, rtx_insn* insn,
-       delegate& dlg);
+       access_sequence::iterator access_place,
+       rtx_insn* insn, delegate& dlg);
 
     mod_addr_result
     try_modify_addr
-      (reg_value* start_value, const addr_expr& end_addr,
+      (access* start_addr, const addr_expr& end_addr,
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
 
