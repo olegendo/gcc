@@ -177,50 +177,52 @@ log_access (const sh_ams::access& a)
   if (dump_file == NULL)
     return;
 
-  if (a.access_mode () == sh_ams::reg_mod)
+  if (a.access_mode () == sh_ams::load)
+    log_msg ("load ");
+  else if (a.access_mode () == sh_ams::store)
+    log_msg ("store");
+  else if (a.access_mode () == sh_ams::reg_mod)
     {
       log_msg ("reg_mod:\n  ");
       log_rtx (a.modified_reg ());
-      log_msg (" = ");
-      if (a.address ().is_invalid ())
-        {
-          if (a.addr_rtx ()) log_rtx (a.addr_rtx ());
-          else log_msg ("unknown");
-        }
-      else log_addr_expr (a.address ());
+      log_msg (" set\n");
     }
   else
+    gcc_unreachable ();
+
+  if (a.access_mode () == sh_ams::load || a.access_mode () == sh_ams::store)
+    log_msg (" %smode (%d):\n",
+             GET_MODE_NAME (a.mach_mode ()), a.access_size ());
+
+  log_msg ("  original addr:   ");
+
+  if (a.original_address ().is_invalid ())
     {
-      if (a.access_mode () == sh_ams::load)
-	log_msg ("load ");
-      else if (a.access_mode () == sh_ams::store)
-	log_msg ("store");
-      else
-	gcc_unreachable ();
+      if (a.addr_rtx ()) log_rtx (a.addr_rtx ());
+      else log_msg ("unknown");
+    }
+  else log_addr_expr (a.original_address ());
 
-      log_msg (" %smode (%d):\n",
-	       GET_MODE_NAME (a.mach_mode ()), a.access_size ());
-
-      log_msg ("  original addr:   ");
-      log_addr_expr (a.original_address ());
-      log_msg ("\n");
-
-      log_msg ("  effective addr:  ");
+  if (!a.address ().is_invalid ())
+    {
+      log_msg ("\n  effective addr:  ");
       log_addr_expr (a.address ());
-      log_msg ("\n");
+    }
 
-      log_msg ("  %d alternatives:\n", a.alternatives_count ());
+  if (a.access_mode () == sh_ams::load || a.access_mode () == sh_ams::store)
+    {
+      log_msg ("\n  %d alternatives:\n", a.alternatives_count ());
       int alt_count = 0;
       for (const sh_ams::access::alternative* alt = a.begin_alternatives ();
-	   alt != a.end_alternatives (); ++alt)
-	{
-	  if (alt_count > 0)
-	    log_msg ("\n");
+           alt != a.end_alternatives (); ++alt)
+        {
+          if (alt_count > 0)
+            log_msg ("\n");
 
-	  log_msg ("    alt %d, costs %d: ", alt_count, alt->costs ());
-	  log_addr_expr (alt->address ());
-	  ++alt_count;
-	}
+          log_msg ("    alt %d, costs %d: ", alt_count, alt->costs ());
+          log_addr_expr (alt->address ());
+          ++alt_count;
+        }
     }
 }
 
@@ -247,12 +249,13 @@ sh_ams::access::access
 
 // Constructor for reg_mod accesses.
 sh_ams::access::access
-(rtx_insn* insn, addr_expr addr_expr, rtx addr_rtx, rtx mod_reg, int cost)
+(rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
+ rtx addr_rtx, rtx mod_reg, int cost)
 {
   m_access_mode = reg_mod;
   m_cost = cost;
   m_insn = insn;
-  m_original_addr_expr = make_invalid_addr ();
+  m_original_addr_expr = original_addr_expr;
   m_addr_expr =  addr_expr;
   m_addr_rtx =  addr_rtx;
   m_mod_reg = mod_reg;
@@ -283,12 +286,13 @@ sh_ams::access_sequence::add_new_access
 // find the correct place inside AS where the access needs to be inserted.
 sh_ams::access&
 sh_ams::access_sequence::add_reg_mod_access
-(rtx_insn* insn, addr_expr mod_addr_expr, rtx mod_rtx,
- rtx_insn* mod_insn, rtx reg)
+(rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
+ rtx addr_rtx, rtx_insn* mod_insn, rtx reg)
 {
   if (empty ())
     {
-      push_back (access (mod_insn, mod_addr_expr, mod_rtx, reg));
+      push_back (access (mod_insn, original_addr_expr, addr_expr,
+                         addr_rtx, reg));
       return back ();
     }
 
@@ -305,7 +309,8 @@ sh_ams::access_sequence::add_reg_mod_access
             return *as_it;
         }
 
-      push_front (access (mod_insn, mod_addr_expr, mod_rtx, reg));
+      push_front (access (mod_insn, original_addr_expr, addr_expr,
+                          addr_rtx, reg));
       return front ();
     }
 
@@ -326,7 +331,7 @@ sh_ams::access_sequence::add_reg_mod_access
           // sequence, don't add it a second time.
           if (as_it->access_mode () == reg_mod
               && as_it->insn () == mod_insn && as_it->modified_reg () == reg
-              && as_it->address ().base_reg () == mod_addr_expr.base_reg ())
+              && as_it->address ().base_reg () == addr_expr.base_reg ())
             {
               return *as_it;
               break;
@@ -338,7 +343,8 @@ sh_ams::access_sequence::add_reg_mod_access
           // We found mod_insn inside the insn list, so we know where to
           // insert the access.
           insert (as_it.base (),
-                  access (mod_insn, mod_addr_expr, mod_rtx, reg));
+                  access (mod_insn, original_addr_expr, addr_expr,
+                          addr_rtx, reg));
           return *as_it;
         }
     }
@@ -347,31 +353,31 @@ sh_ams::access_sequence::add_reg_mod_access
 
 sh_ams::access&
 sh_ams::access_sequence::add_reg_mod_access
-(rtx_insn* insn, addr_expr mod_addr_expr,
+(rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
  rtx_insn* mod_insn, rtx reg)
 {
-  return add_reg_mod_access (insn, mod_addr_expr,
+  return add_reg_mod_access (insn, original_addr_expr, addr_expr,
                              NULL_RTX, mod_insn, reg);
 }
-
 sh_ams::access&
 sh_ams::access_sequence::add_reg_mod_access
-(rtx_insn* insn, rtx mod_rtx,
+(rtx_insn* insn, rtx addr_rtx,
  rtx_insn* mod_insn, rtx reg)
 {
-  return add_reg_mod_access (insn, make_invalid_addr (),
-                             mod_rtx, mod_insn, reg);
+  return add_reg_mod_access (insn, make_invalid_addr (), make_invalid_addr (),
+                             addr_rtx, mod_insn, reg);
 }
-
 // Create a reg_mod access and place it before INSERT_BEFORE
 // in the access sequence.
 sh_ams::access&
 sh_ams::access_sequence::add_reg_mod_access
-(access_sequence::iterator insert_before, addr_expr mod_addr_expr,
+(access_sequence::iterator insert_before,
+ addr_expr original_addr_expr, addr_expr addr_expr,
  rtx_insn* mod_insn, rtx reg)
 {
   insert (insert_before,
-          access (mod_insn, mod_addr_expr, NULL_RTX, reg));
+          access (mod_insn, original_addr_expr, addr_expr,
+                  NULL_RTX, reg));
   return *(--insert_before);
 }
 
@@ -587,7 +593,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               if (REGNO (reg_value) == REGNO (x) || HARD_REGISTER_P (reg_value))
                 {
                   as.add_reg_mod_access
-                    (root_insn, make_reg_addr (x), reg_mod_insn, x);
+                    (root_insn, make_reg_addr (x), make_reg_addr (x),
+                     reg_mod_insn, x);
                 }
 
               if (REGNO (reg_value) == REGNO (x))
@@ -598,7 +605,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               if (HARD_REGISTER_P (reg_value))
                 {
                   as.add_reg_mod_access
-                    (root_insn, make_reg_addr (reg_value), reg_mod_insn, x);
+                    (root_insn, make_reg_addr (reg_value),
+                     make_reg_addr (reg_value), reg_mod_insn, x);
 
                   // The hard reg still needs to be traced back in case it
                   // is set to some unknown value, like the result of a CALL.
@@ -909,7 +917,7 @@ void sh_ams::access_sequence::update_insn_stream
           rtx const_addr_base = gen_reg_rtx (Pmode);
           base_insert_result = mod_addr_result (const_addr_base, ae.disp ());
 
-          add_reg_mod_access (accs, ae, accs->insn (), const_addr_base);
+          add_reg_mod_access (accs, ae, ae, accs->insn (), const_addr_base);
 
           start_sequence ();
           emit_move_insn (const_addr_base, GEN_INT (ae.disp ()));
@@ -933,7 +941,7 @@ void sh_ams::access_sequence::update_insn_stream
       addr_expr new_addr_expr;
       if (min_alternative->address ().index_reg () == invalid_regno)
         {
-          disp_t disp = ae.disp () - base_insert_result.addr_disp;;
+          disp_t disp = ae.disp () - base_insert_result.addr_disp;
           if (disp == 0 || min_alternative->address ().type () != non_mod)
             new_addr = base_insert_result.addr_reg;
           else
@@ -1144,7 +1152,8 @@ sh_ams::access_sequence::try_modify_addr
           if ((scale & (scale - 1)) == 0)
             {
               scale_t shift = 0;
-              while (scale >>= 1) ++shift;
+              scale_t temp = scale;
+              while (temp >>= 1) ++shift;
               mult_rtx = gen_rtx_ASHIFT (Pmode, start_addr->modified_reg (),
 						GEN_INT (shift));
             }
@@ -1153,8 +1162,13 @@ sh_ams::access_sequence::try_modify_addr
 					    GEN_INT (scale));
 
           emit_move_insn (new_reg, mult_rtx);
-          start_addr = &add_reg_mod_access (access_place,
-                                            c_start_addr, insn, new_reg);
+          start_addr
+            = &add_reg_mod_access (access_place,
+                                   non_mod_addr (invalid_regno,
+                                                 start_addr->modified_reg (),
+                                                 scale, 0),
+                                   c_start_addr,
+                                   insn, new_reg);
           final_addr_regno = new_reg;
         }
     }
@@ -1177,8 +1191,13 @@ sh_ams::access_sequence::try_modify_addr
 						  c_end_addr.base_reg ());
 
           emit_move_insn (new_reg, reg_plus_rtx);
-          start_addr = &add_reg_mod_access (access_place,
-                                            c_start_addr, insn, new_reg);
+          start_addr
+            = &add_reg_mod_access (access_place,
+                                   non_mod_addr (c_start_addr.base_reg (),
+                                                 start_addr->modified_reg (),
+                                                 1, 0),
+                                   c_start_addr,
+                                   insn, new_reg);
           final_addr_regno = new_reg;
         }
     }
@@ -1218,8 +1237,12 @@ sh_ams::access_sequence::try_modify_addr
           rtx plus_rtx = gen_rtx_PLUS (Pmode, start_addr->modified_reg (),
 					      GEN_INT (disp));
           emit_move_insn (new_reg, plus_rtx);
-          start_addr = &add_reg_mod_access (access_place, c_start_addr,
-                                            insn, new_reg);
+          start_addr
+            = &add_reg_mod_access (access_place,
+                                   non_mod_addr (start_addr->modified_reg (),
+                                                 invalid_regno, 1, disp),
+                                   c_start_addr,
+                                   insn, new_reg);
           final_addr_regno = new_reg;
         }
     }
@@ -1239,8 +1262,11 @@ sh_ams::access_sequence::try_modify_addr
           rtx pre_mod_reg = new_reg;
           new_reg = gen_reg_rtx (Pmode);
           emit_move_insn (new_reg, pre_mod_reg);
-          start_addr = &add_reg_mod_access (access_place, c_start_addr,
-                                            insn, new_reg);
+          start_addr
+            = &add_reg_mod_access (access_place,
+                                   make_reg_addr (new_reg),
+                                   c_start_addr,
+                                   insn, new_reg);
           final_addr_regno = new_reg;
         }
     }

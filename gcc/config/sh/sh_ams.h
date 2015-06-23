@@ -316,8 +316,8 @@ public:
     access (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
 	    addr_expr original_addr_expr, addr_expr addr_expr,
 	    int cost = infinite_costs);
-    access (rtx_insn* insn, addr_expr addr_expr, rtx addr_rtx, rtx mod_reg,
-	    int cost = infinite_costs);
+    access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
+	    rtx addr_rtx, rtx mod_reg, int cost = infinite_costs);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -432,19 +432,20 @@ public:
        std::list<rtx_insn*>& reg_mod_insns);
 
     access& add_reg_mod_access
-      (rtx_insn* insn, addr_expr mod_addr_expr, rtx mod_rtx,
+      (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
+       rtx addr_rtx, rtx_insn* mod_insn, rtx reg);
+
+    access& add_reg_mod_access
+      (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
        rtx_insn* mod_insn, rtx reg);
 
     access& add_reg_mod_access
-      (rtx_insn* insn, addr_expr mod_addr_expr,
+      (rtx_insn* insn, rtx addr_rtx,
        rtx_insn* mod_insn, rtx reg);
 
     access& add_reg_mod_access
-      (rtx_insn* insn, rtx mod_rtx,
-       rtx_insn* mod_insn, rtx reg);
-
-    access& add_reg_mod_access
-      (access_sequence::iterator insert_before, addr_expr mod_addr_expr,
+      (access_sequence::iterator insert_before,
+       addr_expr original_addr_expr, addr_expr addr_expr,
        rtx_insn* mod_insn, rtx reg);
 
     struct min_mod_cost_result
