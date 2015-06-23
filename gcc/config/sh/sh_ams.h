@@ -388,13 +388,22 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
-    void update_access_insn (rtx new_addr, int new_cost, addr_expr new_addr_expr)
+    void update_address (int new_cost, addr_expr new_addr_expr)
+    {
+      m_cost = new_cost;
+      m_original_addr_expr = new_addr_expr;
+    }
+
+    void update_mem (rtx new_addr)
     {
       validate_change (m_insn, m_mem_ref,
 		       replace_equiv_address (*m_mem_ref, new_addr),
 		       false);
-      m_cost = new_cost;
-      m_original_addr_expr = new_addr_expr;
+    }
+
+    void update_insn (rtx_insn *new_insn)
+    {
+      m_insn = new_insn;
     }
 
   private:
@@ -431,7 +440,9 @@ public:
     // in update_insn_stream.
     std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
 
-    void update_insn_stream (delegate& dlg);
+    void gen_address_mod (delegate& dlg);
+
+    void update_insn_stream ();
 
     access& add_new_access
       (rtx_insn* insn, rtx* mem, access_mode_t access_mode);
@@ -490,18 +501,10 @@ public:
     };
 
     mod_addr_result
-    insert_reg_mod_insns
-      (access* start_addr, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max,
-       access_sequence::iterator access_place,
-       addr_type_t addr_type, rtx_insn* insn, delegate& dlg);
-
-    mod_addr_result
     try_modify_addr
       (access* start_addr, const addr_expr& end_addr,
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-       access_sequence::iterator access_place,
-       rtx_insn* insn, delegate& dlg);
+       access_sequence::iterator *access_place, delegate& dlg);
 
     mod_addr_result
     try_modify_addr
