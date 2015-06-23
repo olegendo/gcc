@@ -203,7 +203,8 @@ public:
 
   static addr_expr extract_addr_expr
     (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
-     access_sequence& as, bool expand, std::list<rtx_insn*> *reg_mod_insns);
+     access_sequence& as,
+     bool expand, bool collect_mod_insns);
 
   // helper functions to create a particular type of address expression.
   static addr_expr
@@ -424,12 +425,16 @@ public:
   class access_sequence : public std::list<access>
   {
   public:
-    void update_insn_stream
-      (std::list<rtx_insn*>& reg_mod_insns, delegate& dlg);
+
+    // The address modifying insns related to this access sequence
+    // that are in the insn stream.  Used to delete the original insns
+    // in update_insn_stream.
+    std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
+
+    void update_insn_stream (delegate& dlg);
 
     access& add_new_access
-      (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
-       std::list<rtx_insn*>& reg_mod_insns);
+      (rtx_insn* insn, rtx* mem, access_mode_t access_mode);
 
     access& add_reg_mod_access
       (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
@@ -504,6 +509,8 @@ public:
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
 
+  private:
+    std::vector<rtx_insn*> m_reg_mod_insns;
   };
 
   // a delegate for the ams pass.  usually implemented by the target.
