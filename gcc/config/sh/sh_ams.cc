@@ -631,6 +631,12 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               as.add_reg_mod_access
                 (root_insn, reg_value, reg_mod_insn, x);
 
+              // Add an (rx = rx) reg_mod access to help the
+              // address modification generator.
+              as.add_reg_mod_access
+                (root_insn, make_reg_addr (x), make_reg_addr (x),
+                 reg_mod_insn, x);
+
               // Remove any insn that might have been inserted while
               // expanding this register.
               if (collect_mod_insns)
