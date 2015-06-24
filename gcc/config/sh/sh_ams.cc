@@ -1287,6 +1287,13 @@ try_modify_addr
           start_addr->set_used ();
           new_reg = gen_reg_rtx (Pmode);
           final_addr_regno = new_reg;
+          start_addr
+            = &add_reg_mod_access (*access_place,
+                                   non_mod_addr (start_addr->modified_reg (),
+                                                 invalid_regno,
+                                                 1, disp),
+                                   c_start_addr,
+                                   NULL, new_reg);
         }
     }
 
