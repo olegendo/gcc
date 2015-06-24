@@ -217,6 +217,9 @@ public:
   make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max);
 
   static addr_expr
+  make_const_addr (disp_t disp);
+
+  static addr_expr
   make_index_addr (scale_t scale_min, scale_t scale_max);
 
   static addr_expr
@@ -573,6 +576,12 @@ inline sh_ams::addr_expr
 sh_ams::make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max)
 {
   return non_mod_addr (base_reg, invalid_regno, 0, 0, 0, 0, disp_min, disp_max);
+}
+
+inline sh_ams::addr_expr
+sh_ams::make_const_addr (disp_t disp)
+{
+  return non_mod_addr (invalid_regno, invalid_regno, 0, 0, 0, disp, disp, disp);
 }
 
 inline sh_ams::addr_expr

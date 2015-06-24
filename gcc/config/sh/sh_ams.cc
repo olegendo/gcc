@@ -587,12 +587,13 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           std::vector<rtx_insn*>::iterator inserted_mod_insn
             = as.reg_mod_insns ().end ();
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
-          if (reg_value != NULL_RTX && REG_P (reg_value))
+          if (reg_value != NULL_RTX)
             {
-
-              // Stop expanding the reg if we reach a hardreg -> pseudo reg copy,
-              // or if the reg can't be expanded any further.
-              if (REGNO (reg_value) == REGNO (x) || HARD_REGISTER_P (reg_value))
+              // Stop expanding the reg if we reach a hardreg -> pseudo reg
+              // copy, or if the reg can't be expanded any further.
+              if (REG_P (reg_value)
+                  && (REGNO (reg_value) == REGNO (x)
+                      || HARD_REGISTER_P (reg_value)))
                 {
                   // Add a reg_mod access that sets the reg to itself.
                   // This makes it easier for the address modification
@@ -602,6 +603,24 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                      reg_mod_insn, x);
                   return make_reg_addr (x);
                 }
+
+                // For constant -> reg copies, add the reg to the
+                // sequence as a reg_mod access.
+                if (CONST_INT_P (reg_value))
+                  {
+                    access& const_access
+                      = as.add_reg_mod_access
+                      (root_insn,
+                       make_const_addr (INTVAL (reg_value)),
+                       make_const_addr (INTVAL (reg_value)),
+                       NULL, x);
+
+                    // Mark the access as used so that cloning costs are
+                    // always added during address modification generation.
+                    // This encourages the generator to reuse the base regs
+                    // of previous constant accesses.
+                    const_access.set_used ();
+                  }
             }
 
           // Collect all the insns that are used to arrive at the address
@@ -804,7 +823,6 @@ void sh_ams::access_sequence::gen_address_mod (delegate& dlg)
 
       int min_cost = infinite_costs;
       access::alternative* min_alternative = NULL;
-      access::alternative* base_reg_alt = NULL;
       access *min_start_base = NULL, *min_start_index = NULL;
       addr_expr min_end_base, min_end_index;
       accs->clear_alternatives ();
@@ -822,14 +840,6 @@ void sh_ams::access_sequence::gen_address_mod (delegate& dlg)
                   && alt_ae.index_reg () != invalid_regno)
               || (alt_ae.index_reg () != invalid_regno && alt_ae.scale () != 1))
             continue;
-
-          // We might need to use the simple base reg alternative later,
-          // so keep track of it.
-          if (alt_ae.index_reg () == invalid_regno
-              && alt_ae.disp_min () == 0
-              && alt_ae.disp_max () == 0
-              && alt_ae.type () == non_mod)
-            base_reg_alt = alt;
 
           if (alt_ae.index_reg () == invalid_regno)
             {
@@ -889,33 +899,15 @@ void sh_ams::access_sequence::gen_address_mod (delegate& dlg)
             }
         }
 
-      mod_addr_result base_insert_result;
-      if (min_cost == infinite_costs)
-        {
-	  log_msg ("no suitable alternative found.  trying simple base reg.\n");
-          // If no suitable alternative was found for an address that consists
-          // only of a constant displacement [e.g. *((int*) 0x1000)],
-          // use a simple base reg access with the base reg set to the address.
-          gcc_assert (ae.base_reg () == invalid_regno
-                      && ae.index_reg () == invalid_regno);
+      gcc_assert (min_cost != infinite_costs);
 
-          min_alternative = base_reg_alt;
-
-          rtx const_addr_base = gen_reg_rtx (Pmode);
-          base_insert_result = mod_addr_result (const_addr_base, ae.disp ());
-
-          add_reg_mod_access (accs, ae, ae, NULL, const_addr_base);
-        }
-      else
-        {
-          // Insert the modifications needed to arrive at the address
-          // in the base reg.
-          base_insert_result =
-            try_modify_addr (min_start_base, min_end_base,
-                             min_alternative->address ().disp_min (),
-                             min_alternative->address ().disp_max (),
-                             min_alternative->address ().type (), &accs, dlg);
-        }
+      // Insert the modifications needed to arrive at the address
+      // in the base reg.
+      mod_addr_result base_insert_result =
+        try_modify_addr (min_start_base, min_end_base,
+                         min_alternative->address ().disp_min (),
+                         min_alternative->address ().disp_max (),
+                         min_alternative->address ().type (), &accs, dlg);
 
       addr_expr new_addr_expr;
       if (min_alternative->address ().index_reg () == invalid_regno)
@@ -1300,7 +1292,11 @@ try_modify_addr
   // For auto-mod accesses, copy the base reg into a new pseudo that will
   // be used by the auto-mod access.  This way, both the pre-access and
   // post-access version of the base reg can be reused by later accesses.
-  if (addr_type != non_mod)
+  // Do the same for constant displacement addresses so that there's no
+  // cloning penalty for reusing the constant address in another access.
+  if (addr_type != non_mod
+      || (c_end_addr.base_reg () == invalid_regno
+          && c_end_addr.index_reg () == invalid_regno))
     {
       c_start_addr = non_mod_addr (c_end_addr.base_reg (),
                                    c_start_addr.index_reg (),
