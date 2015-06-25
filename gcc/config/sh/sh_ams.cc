@@ -436,7 +436,6 @@ void sh_ams::find_reg_value
 (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn)
 {
   std::vector<std::pair<rtx*, access_mode_t> > mems;
-  mems.reserve (32);
 
   // Go back through the insn list until we find the last instruction
   // that modified the register.
@@ -455,11 +454,13 @@ void sh_ams::find_reg_value
           *mod_insn = i;
           return;
         }
-      else
+      else if (find_regno_note (i, REG_INC, REGNO (reg)) != NULL)
         {
           // Search for auto-mod memory accesses in the current
           // insn that modify REG.
           mems.clear ();
+	  mems.reserve (32);
+
           find_mem_accesses (PATTERN (i), std::back_inserter (mems));
           for (std::vector<std::pair<rtx*, access_mode_t> >
 	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
