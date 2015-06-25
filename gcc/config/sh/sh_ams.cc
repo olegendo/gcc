@@ -228,6 +228,37 @@ log_access (const sh_ams::access& a)
     }
 }
 
+// FIXME: Is it OK to use Pmode for the index reg and signed ops?
+rtx
+expand_mult (rtx a, rtx b)
+{
+  return expand_mult (Pmode, a, b, NULL, false);
+}
+
+rtx
+expand_mult (rtx a, HOST_WIDE_INT b)
+{
+  return expand_mult (a, GEN_INT (b));
+}
+
+rtx
+expand_plus (rtx a, rtx b)
+{
+  if (b == const0_rtx)
+    return a;
+
+  return expand_binop (Pmode, add_optab, a, b, NULL, false, OPTAB_LIB_WIDEN);
+}
+
+rtx
+expand_plus (rtx a, HOST_WIDE_INT b)
+{
+  if (b == 0)
+    return a;
+
+  return expand_plus (a, GEN_INT (b));
+}
+
 } // anonymous namespace
 
 
@@ -993,28 +1024,14 @@ void sh_ams::access_sequence::update_insn_stream ()
             new_val = GEN_INT (accs->original_address ().disp ());
           else if (accs->original_address ().index_reg () != invalid_regno)
             {
-              rtx index = accs->original_address ().index_reg ();
-              if (accs->original_address ().scale () != 1)
-                {
-                  scale_t scale = accs->original_address ().scale ();
+	      rtx index = expand_mult (accs->original_address ().index_reg (),
+				       accs->original_address ().scale ());
 
-                  // If SCALE is a power of 2, use shift instead.
-                  if ((scale & (scale - 1)) == 0)
-                    {
-                      scale_t shift = 0;
-                      while (scale >>= 1) ++shift;
-                      index = gen_rtx_ASHIFT (Pmode, index, GEN_INT (shift));
-                    }
-                  else
-                    index = gen_rtx_MULT (Pmode, accs->modified_reg (),
-                                          GEN_INT (scale));
-                }
               if (accs->original_address ().base_reg () == invalid_regno)
                 new_val = index;
               else
-                new_val = gen_rtx_PLUS (Pmode,
-                                         accs->original_address ().base_reg (),
-                                         index);
+		new_val = expand_plus (accs->original_address ().base_reg (),
+				       index);
             }
           else
             new_val = accs->original_address ().base_reg ();
@@ -1024,14 +1041,6 @@ void sh_ams::access_sequence::update_insn_stream ()
         }
       else
         {
-          if (sequence_started)
-            {
-              rtx_insn* new_insns = get_insns ();
-              end_sequence ();
-              emit_insn_before (new_insns, accs->insn ());
-              sequence_started = false;
-            }
-
           // Update the access rtx to reflect ORIGINAL_ADDRESS.
 
           rtx new_addr = accs->original_address ().base_reg ();
@@ -1039,12 +1048,9 @@ void sh_ams::access_sequence::update_insn_stream ()
           // Add (possibly scaled) index reg.
           if (accs->original_address ().index_reg () != invalid_regno)
             {
-              rtx index = accs->original_address ().index_reg ();
-              if (accs->original_address ().scale () != 1)
-                index = gen_rtx_MULT (Pmode, index,
-                                      GEN_INT
-                                      (accs->original_address ().scale ()));
-              new_addr = gen_rtx_PLUS (Pmode, new_addr, index);
+	      rtx index = expand_mult (accs->original_address ().index_reg (),
+				       accs->original_address ().scale ());
+	      new_addr = expand_plus (new_addr, index);
             }
 
           // Surround with POST/PRE_INC/DEC if ORIGINAL_ADDRESS is an
@@ -1063,11 +1069,14 @@ void sh_ams::access_sequence::update_insn_stream ()
             }
 
           // Add constant displacement.
-          else if (accs->original_address ().disp () != 0)
+	  new_addr = expand_plus (new_addr, accs->original_address ().disp ());
+
+          if (sequence_started)
             {
-              new_addr = gen_rtx_PLUS (Pmode, new_addr,
-                                       GEN_INT
-                                       (accs->original_address ().disp ()));
+              rtx_insn* new_insns = get_insns ();
+              end_sequence ();
+              emit_insn_before (new_insns, accs->insn ());
+              sequence_started = false;
             }
 
           bool mem_update_ok = accs->update_mem (new_addr);
