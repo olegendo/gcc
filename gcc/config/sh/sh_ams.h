@@ -24,7 +24,10 @@ public:
   enum access_mode_t { load, store, reg_mod };
 
   typedef int regno_t;
-  typedef int disp_t;
+
+  // for a constant displacement using a 32 bit int should be sufficient.
+  // however, we use it also to represent constant addresses.
+  typedef HOST_WIDE_INT disp_t;
   typedef int scale_t;
 
   enum

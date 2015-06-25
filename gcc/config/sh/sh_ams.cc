@@ -577,8 +577,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
     // For CONST_INT and REG, the set the base register or the displacement
     // to the appropriate value.
     case CONST_INT:
-      disp = INTVAL (x);
-      return non_mod_addr (invalid_regno, invalid_regno, 0, disp);
+      return make_const_addr (INTVAL (x));
+
     case REG:
       if (expand)
         {
