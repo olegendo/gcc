@@ -52,6 +52,8 @@
 
 #include "sh_ams.h"
 
+#include "sh-protos.h"
+
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 // Helper functions
@@ -1069,6 +1071,8 @@ void sh_ams::access_sequence::update_insn_stream ()
 
           bool mem_update_ok = accs->update_mem (new_addr);
           gcc_assert (mem_update_ok);
+
+          sh_check_add_incdec_notes (accs->insn ());
         }
 
     }
