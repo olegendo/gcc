@@ -1181,21 +1181,13 @@ try_modify_addr
   // If the start and end address have different index
   // registers, give up.
   if (c_start_addr.index_reg () != c_end_addr.index_reg ())
-    {
-      if (access_place)
-        end_sequence ();
-      return mod_addr_result (infinite_costs, invalid_regno, 0);
-    }
+    return mod_addr_result (infinite_costs, invalid_regno, 0);
 
   // Same for base regs, unless the start address doesn't have
   // a base reg, in which case we can add one.
   if (c_start_addr.base_reg () != invalid_regno
       && c_start_addr.base_reg () != c_end_addr.base_reg ())
-    {
-      if (access_place)
-        end_sequence ();
-      return mod_addr_result (infinite_costs, invalid_regno, 0);
-    }
+    return mod_addr_result (infinite_costs, invalid_regno, 0);
 
   // Add scaling.
   if (c_start_addr.index_reg () != invalid_regno
@@ -1203,19 +1195,11 @@ try_modify_addr
     {
       // We can't scale if the address has displacement or a base reg.
       if (c_start_addr.disp () != 0 || c_start_addr.base_reg () != invalid_regno)
-	{
-	  if (access_place)
-	    end_sequence ();
-	  return mod_addr_result (infinite_costs, invalid_regno, 0);
-	}
+        return mod_addr_result (infinite_costs, invalid_regno, 0);
 
       // We can only scale by integers.
       if (c_end_addr.scale () % c_start_addr.scale () != 0)
-        {
-	  if (access_place)
-	    end_sequence ();
-	  return mod_addr_result (infinite_costs, invalid_regno, 0);
-	}
+        return mod_addr_result (infinite_costs, invalid_regno, 0);
 
       scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
