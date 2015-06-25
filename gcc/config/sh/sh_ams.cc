@@ -1067,7 +1067,8 @@ void sh_ams::access_sequence::update_insn_stream ()
                                        (accs->original_address ().disp ()));
             }
 
-          accs->update_mem (new_addr);
+          bool mem_update_ok = accs->update_mem (new_addr);
+          gcc_assert (mem_update_ok);
         }
 
     }

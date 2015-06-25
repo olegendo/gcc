@@ -397,11 +397,11 @@ public:
       m_original_addr_expr = new_addr_expr;
     }
 
-    void update_mem (rtx new_addr)
+    bool update_mem (rtx new_addr)
     {
-      validate_change (m_insn, m_mem_ref,
-		       replace_equiv_address (*m_mem_ref, new_addr),
-		       false);
+      return validate_change (m_insn, m_mem_ref,
+			      replace_equiv_address (*m_mem_ref, new_addr),
+			      false);
     }
 
     void update_insn (rtx_insn *new_insn)
