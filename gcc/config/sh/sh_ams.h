@@ -359,9 +359,12 @@ public:
     // For reg_mod accesses, shows whether the register is used
     // in another access. If so, register cloning costs must be
     // taken into account when using it a second time.
+    // FIXME: It might be better for M_USED to be public instead of having 3
+    // accessing/modifying functions.
     bool is_used (void) const { return m_used; }
 
     void set_used () { m_used = true; }
+    void reset_used () { m_used = false; }
 
     access& add_alternative (int costs, const addr_expr& ae)
     {
@@ -470,6 +473,56 @@ public:
        addr_expr original_addr_expr, addr_expr addr_expr,
        rtx_insn* mod_insn, rtx reg);
 
+  private:
+
+    // A structure for keeping track of modifications to the access sequence.
+    // Used in gen_min_mod for backtracking.
+    class mod_tracker
+    {
+    public:
+      mod_tracker (void)
+      {
+	m_inserted_accs.reserve (8);
+	m_use_changed_accs.reserve (4);
+      }
+
+      void reset_changes (access_sequence &as)
+      {
+	for (std::vector<access_sequence::iterator>::iterator
+	       ins_it = inserted_accs ().begin ();
+	     ins_it != inserted_accs ().end (); ++ins_it)
+	    as.erase (*ins_it);
+
+	for (std::vector<access*>::iterator
+	       use_it = use_changed_accs ().begin ();
+	     use_it != use_changed_accs ().end (); ++use_it)
+	  (*use_it)->reset_used ();
+      }
+
+      // List of accesses that were inserted into the sequence.
+      std::vector<access_sequence::iterator>&
+      inserted_accs (void) { return m_inserted_accs; }
+
+      // List of accesses whose M_USED field was changed.
+      std::vector<access*>&
+      use_changed_accs (void) { return m_use_changed_accs; }
+
+    private:
+      std::vector<access_sequence::iterator> m_inserted_accs;
+      std::vector<access*> m_use_changed_accs;
+    };
+
+    int gen_min_mod (access_sequence::iterator acc,
+		     delegate& dlg, bool record_in_sequence);
+
+    void gen_mod_for_alt
+      (access::alternative& alternative,
+       access* start_base, access* start_index,
+       const addr_expr& end_base, const addr_expr& end_index,
+       access_sequence::iterator acc,
+       mod_tracker *mod_tracker,
+       delegate& dlg);
+
     struct min_mod_cost_result
     {
       int cost;
@@ -510,7 +563,9 @@ public:
     try_modify_addr
       (access* start_addr, const addr_expr& end_addr,
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-       access_sequence::iterator *access_place, delegate& dlg);
+       access_sequence::iterator *access_place,
+       mod_tracker *mod_tracker,
+       delegate& dlg);
 
     mod_addr_result
     try_modify_addr
@@ -518,7 +573,6 @@ public:
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
 
-  private:
     std::vector<rtx_insn*> m_reg_mod_insns;
   };
 
