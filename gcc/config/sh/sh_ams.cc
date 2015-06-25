@@ -1282,7 +1282,7 @@ try_modify_addr
       // adding smaller constants often costs less.
       disp_t disp = c_end_addr.disp () - c_start_addr.disp () - disp_min;
       disp_t alt_disp = c_end_addr.disp () - c_start_addr.disp () - disp_max;
-      if (abs (alt_disp) < abs (disp)) disp = alt_disp;
+      if (std::abs (alt_disp) < std::abs (disp)) disp = alt_disp;
 
       c_start_addr = non_mod_addr (c_end_addr.base_reg (),
                                    c_start_addr.index_reg (),
