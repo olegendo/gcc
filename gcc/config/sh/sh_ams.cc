@@ -353,21 +353,18 @@ sh_ams::access_sequence::add_reg_mod_access
         continue;
 
       // Keep track of the current insn in the sequence.
-      while (INSN_UID (as_it->insn ()) == INSN_UID (i))
+      while (as_it->insn () && INSN_UID (as_it->insn ()) == INSN_UID (i))
         {
           ++as_it;
 
-          if (as_it == rend ()) break;
+          if (as_it == rend () || !as_it->insn ()) break;
 
           // If the reg_mod access is already inside the access
           // sequence, don't add it a second time.
           if (as_it->access_mode () == reg_mod
               && as_it->insn () == mod_insn && as_it->modified_reg () == reg
               && as_it->address ().base_reg () == addr_expr.base_reg ())
-            {
-              return *as_it;
-              break;
-            }
+            return *as_it;
 
         }
       if (INSN_UID (i) == INSN_UID (mod_insn))
