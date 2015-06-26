@@ -723,6 +723,47 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       index_reg = invalid_regno;
       scale = 0;
 
+      // If the same reg is used in both addresses, try to
+      // merge them into one reg.
+      if (op0.base_reg () == op1.base_reg ())
+        {
+          if (op0.index_reg () == invalid_regno)
+            {
+              op1 = non_mod_addr (invalid_regno, op1.index_reg (),
+                                  op1.scale (), op1.disp ());
+              op0 = non_mod_addr (invalid_regno, op0.base_reg (),
+                                  2, op0.disp ());
+            }
+          else if (op1.index_reg () == invalid_regno)
+            {
+              op0 = non_mod_addr (invalid_regno, op0.index_reg (),
+                                  op0.scale (), op0.disp ());
+              op1 = non_mod_addr (invalid_regno, op1.base_reg (),
+                                  2, op1.disp ());
+            }
+        }
+      if (op0.base_reg () == op1.index_reg ())
+        {
+          op0 = non_mod_addr (invalid_regno, op0.index_reg (),
+                              op0.scale (), op0.disp ());
+
+          op1 = non_mod_addr (op1.base_reg (), op1.index_reg (),
+                              op1.scale () + 1, op1.disp ());
+        }
+      if (op1.base_reg () == op0.index_reg ())
+        {
+          op1 = non_mod_addr (invalid_regno, op1.index_reg (),
+                              op1.scale (), op1.disp ());
+          op0 = non_mod_addr (op0.base_reg (), op0.index_reg (),
+                              op0.scale () + 1, op0.disp ());
+        }
+      if (op0.index_reg () == op1.index_reg ())
+        {
+          op0 = non_mod_addr (op0.base_reg (), op0.index_reg (),
+                              op0.scale () + op1.scale (), op0.disp ());
+          op1 = non_mod_addr (op1.base_reg (), invalid_regno, 0, op1.disp ());
+        }
+
       // If only one operand has a base register, that will
       // be the base register of the sum.
       if (op0.base_reg () == invalid_regno)
@@ -742,8 +783,6 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
       // If both operands have a base reg and one of them also has
       // an index reg, they can't be combined.
-      // FIXME: it might be possible to combine them when the base
-      // and/or index regs are the same.
       else break;
 
       // If only one of the operands has a base reg and only one
