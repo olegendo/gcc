@@ -615,8 +615,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // and convert it to an addr_expr.
           rtx reg_value;
           rtx_insn *reg_mod_insn = NULL;
-          std::vector<rtx_insn*>::iterator inserted_mod_insn
-            = as.reg_mod_insns ().end ();
+          rtx_insn* inserted_mod_insn
+            = as.reg_mod_insns ().empty () ? NULL : as.reg_mod_insns ().back ();
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
           if (reg_value != NULL_RTX)
             {
@@ -666,8 +666,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
               // Keep track of where we inserted the insn in case
               // we might have to backtrack later.
-              inserted_mod_insn = as.reg_mod_insns ().end ();
-              --inserted_mod_insn;
+              inserted_mod_insn = reg_mod_insn;
             }
 
           addr_expr reg_addr_expr = extract_addr_expr
@@ -690,8 +689,16 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               // Remove any insn that might have been inserted while
               // expanding this register.
               if (collect_mod_insns)
-                as.reg_mod_insns ().erase (inserted_mod_insn,
-                                           as.reg_mod_insns ().end ());
+                {
+                  if (inserted_mod_insn)
+                    {
+                      while (as.reg_mod_insns ().back () != inserted_mod_insn)
+                        as.reg_mod_insns ().pop_back ();
+                      as.reg_mod_insns ().pop_back ();
+                    }
+                  else as.reg_mod_insns ().clear ();
+                }
+
               return make_reg_addr (x);
             }
           return reg_addr_expr;
@@ -1061,9 +1068,7 @@ void sh_ams::access_sequence::update_insn_stream ()
   // the required addresses.
   for (std::vector<rtx_insn*>::iterator it = reg_mod_insns ().begin ();
        it != reg_mod_insns ().end (); ++it)
-    {
-      set_insn_deleted (*it);
-    }
+    set_insn_deleted (*it);
   reg_mod_insns ().clear ();
 
   bool sequence_started = false;
@@ -1508,15 +1513,16 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("\n\n");
 
       as.gen_address_mod (m_delegate);
-      as.update_insn_stream ();
 
-      log_msg ("\nAccess sequence contents after insn generation:\n\n");
+      log_msg ("\nAccess sequence contents after address mod generation:\n\n");
       for (access_sequence::const_iterator it = as.begin();
 	   it != as.end(); ++it)
 	{
 	  log_access (*it);
 	  log_msg("\n-----\n");
 	}
+
+      as.update_insn_stream ();
 
       log_msg ("\n\n");
     }
