@@ -6,6 +6,7 @@
 #include <limits>
 #include <list>
 #include <vector>
+#include <functional>
 
 class sh_ams : public rtl_opt_pass
 {
@@ -498,15 +499,11 @@ public:
 
       void reset_changes (access_sequence &as)
       {
-	for (std::vector<access_sequence::iterator>::iterator
-	       ins_it = inserted_accs ().begin ();
-	     ins_it != inserted_accs ().end (); ++ins_it)
-	    as.erase (*ins_it);
+	std::for_each (inserted_accs ().begin (), inserted_accs ().end (),
+		std::bind1st (std::mem_fun (&access_sequence::erase), &as));
 
-	for (std::vector<access*>::iterator
-	       use_it = use_changed_accs ().begin ();
-	     use_it != use_changed_accs ().end (); ++use_it)
-	  (*use_it)->reset_used ();
+	std::for_each (use_changed_accs ().begin (), use_changed_accs ().end (),
+		std::mem_fun (&access::reset_used));
       }
 
       // List of accesses that were inserted into the sequence.
