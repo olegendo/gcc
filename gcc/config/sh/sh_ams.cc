@@ -174,7 +174,7 @@ log_addr_expr (const sh_ams::addr_expr& ae)
 }
 
 void
-log_access (const sh_ams::access& a)
+log_access (const sh_ams::access& a, bool log_alternatives = true)
 {
   if (dump_file == NULL)
     return;
@@ -211,7 +211,9 @@ log_access (const sh_ams::access& a)
       log_addr_expr (a.address ());
     }
 
-  if (a.access_mode () == sh_ams::load || a.access_mode () == sh_ams::store)
+  if (log_alternatives
+      && (a.access_mode () == sh_ams::load
+	  || a.access_mode () == sh_ams::store))
     {
       log_msg ("\n  %d alternatives:\n", a.alternatives_count ());
       int alt_count = 0;
@@ -1545,7 +1547,7 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::const_iterator it = as.begin();
 	   it != as.end(); ++it)
 	{
-	  log_access (*it);
+	  log_access (*it, false);
 	  log_msg("\n-----\n");
 	}
 
@@ -1557,7 +1559,7 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::const_iterator it = as.begin();
 	   it != as.end(); ++it)
 	{
-	  log_access (*it);
+	  log_access (*it, false);
 	  log_msg("\n-----\n");
 	}
 
