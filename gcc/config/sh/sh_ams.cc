@@ -300,9 +300,8 @@ sh_ams::access::access
 
 // Add a normal access to the end of the access sequence.
 sh_ams::access&
-sh_ams::access_sequence::add_new_access
-(rtx_insn* insn, rtx* mem,
- access_mode_t access_mode)
+sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
+					 access_mode_t access_mode)
 {
   machine_mode m_mode = GET_MODE (*mem);
   // Create an ADDR_EXPR struct from the address expression of MEM.
@@ -1532,7 +1531,7 @@ unsigned int sh_ams::execute (function* fun)
 
           for (std::vector<std::pair<rtx*, access_mode_t> >
 	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
-	    as.add_new_access (i, m->first, m->second);
+	    as.add_mem_access (i, m->first, m->second);
          }
 
       for (access_sequence::iterator it = as.begin();
