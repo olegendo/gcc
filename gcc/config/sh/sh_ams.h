@@ -476,6 +476,13 @@ public:
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx_insn* mod_insn, rtx reg);
 
+    // find the next true mem access in this access sequence.  returns
+    // the end iterator if nothing is found.
+    // FIXME: convert this into an iterator decorator and also add variants
+    // to iterate over other things than mem accesses.
+    iterator next_mem_access (iterator i);
+    const_iterator next_mem_access (const_iterator i) const;
+
   private:
 
     // A structure for keeping track of modifications to the access sequence.

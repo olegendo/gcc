@@ -263,6 +263,21 @@ expand_plus (rtx a, HOST_WIDE_INT b)
 
 } // anonymous namespace
 
+// borrowed from C++11
+
+namespace stdx
+{
+
+template<class ForwardIt> ForwardIt
+next (ForwardIt it,
+      typename std::iterator_traits<ForwardIt>::difference_type n = 1)
+{
+  std::advance (it, n);
+  return it;
+}
+
+} // namespace stdx
+
 
 sh_ams::access::access
 (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
@@ -410,6 +425,25 @@ sh_ams::access_sequence::add_reg_mod (access_sequence::iterator insert_before,
           access (mod_insn, original_addr_expr, addr_expr,
                   NULL_RTX, reg));
   return *(--insert_before);
+}
+
+sh_ams::access_sequence::iterator
+sh_ams::access_sequence::next_mem_access (iterator i)
+{
+  if (i == end ())
+    return i;
+
+  for (iterator i = stdx::next (i); i != end (); ++i)
+    if (i->access_mode () == load || i->access_mode () == store)
+      return i;
+
+  return end ();
+}
+
+sh_ams::access_sequence::const_iterator
+sh_ams::access_sequence::next_mem_access (const_iterator i) const
+{
+  return const_cast<access_sequence*> (this)->next_mem_access (i);
 }
 
 // The recursive part of find_reg_value. If REG is modified in INSN,
@@ -916,18 +950,9 @@ gen_min_mod
   access *min_start_base = NULL, *min_start_index = NULL;
   addr_expr min_end_base, min_end_index;
 
-  access_sequence::iterator next_acc;
-  if (record_in_sequence)
-    {
-      next_acc = acc;
-      ++next_acc;
-      for (; next_acc != end (); ++next_acc)
-        {
-          if (next_acc->access_mode () == load
-              || next_acc->access_mode () == load)
-            break;
-        }
-    } else next_acc = end ();
+  access_sequence::iterator next_acc = record_in_sequence
+				       ? next_mem_access (acc)
+				       : end ();
 
   acc->clear_alternatives ();
   dlg.mem_access_alternatives (*acc);
