@@ -607,7 +607,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
     // For CONST_INT and REG, the set the base register or the displacement
     // to the appropriate value.
     case CONST_INT:
-      return make_const_addr (INTVAL (x));
+      return make_const_addr (x);
 
     case REG:
       if (expand)
@@ -642,8 +642,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                 if (CONST_INT_P (reg_value))
                   {
                     access& a = as.add_reg_mod (
-			root_insn, make_const_addr (INTVAL (reg_value)),
-			make_const_addr (INTVAL (reg_value)), NULL, x);
+			root_insn, make_const_addr (reg_value),
+			make_const_addr (reg_value), NULL, x);
 
                     // Mark the access as used so that cloning costs are
                     // always added during address modification generation.

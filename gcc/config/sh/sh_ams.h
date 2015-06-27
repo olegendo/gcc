@@ -223,6 +223,9 @@ public:
   make_const_addr (disp_t disp);
 
   static addr_expr
+  make_const_addr (rtx disp);
+
+  static addr_expr
   make_index_addr (scale_t scale_min, scale_t scale_max);
 
   static addr_expr
@@ -453,25 +456,25 @@ public:
 
     void update_insn_stream ();
 
-    access& add_new_access
-      (rtx_insn* insn, rtx* mem, access_mode_t access_mode);
+    access&
+    add_mem_access (rtx_insn* insn, rtx* mem, access_mode_t access_mode);
 
-    access& add_reg_mod_access
-      (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
-       rtx addr_rtx, rtx_insn* mod_insn, rtx reg);
+    access&
+    add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
+		 const addr_expr& addr_expr, rtx addr_rtx,
+		 rtx_insn* mod_insn, rtx reg);
 
-    access& add_reg_mod_access
-      (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
-       rtx_insn* mod_insn, rtx reg);
+    access&
+    add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
+		 const addr_expr& addr_expr, rtx_insn* mod_insn, rtx reg);
 
-    access& add_reg_mod_access
-      (rtx_insn* insn, rtx addr_rtx,
-       rtx_insn* mod_insn, rtx reg);
+    access&
+    add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn, rtx reg);
 
-    access& add_reg_mod_access
-      (access_sequence::iterator insert_before,
-       addr_expr original_addr_expr, addr_expr addr_expr,
-       rtx_insn* mod_insn, rtx reg);
+    access&
+    add_reg_mod (access_sequence::iterator insert_before,
+		 const addr_expr& original_addr_expr,
+		 const addr_expr& addr_expr, rtx_insn* mod_insn, rtx reg);
 
   private:
 
@@ -639,6 +642,13 @@ inline sh_ams::addr_expr
 sh_ams::make_const_addr (disp_t disp)
 {
   return non_mod_addr (invalid_regno, invalid_regno, 0, 0, 0, disp, disp, disp);
+}
+
+inline sh_ams::addr_expr
+sh_ams::make_const_addr (rtx disp)
+{
+  gcc_assert (CONST_INT_P (disp));
+  return make_const_addr (INTVAL (disp));
 }
 
 inline sh_ams::addr_expr
