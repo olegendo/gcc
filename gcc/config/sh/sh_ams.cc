@@ -318,9 +318,10 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
 // This function traverses the insn list backwards starting from INSN to
 // find the correct place inside AS where the access needs to be inserted.
 sh_ams::access&
-sh_ams::access_sequence::add_reg_mod_access
-(rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
- rtx addr_rtx, rtx_insn* mod_insn, rtx reg)
+sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
+				      const addr_expr& original_addr_expr,
+				      const addr_expr& addr_expr, rtx addr_rtx,
+				      rtx_insn* mod_insn, rtx reg)
 {
   if (empty ())
     {
@@ -382,28 +383,28 @@ sh_ams::access_sequence::add_reg_mod_access
 }
 
 sh_ams::access&
-sh_ams::access_sequence::add_reg_mod_access
-(rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
- rtx_insn* mod_insn, rtx reg)
+sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
+				      const addr_expr& original_addr_expr,
+				      const addr_expr& addr_expr,
+				      rtx_insn* mod_insn, rtx reg)
 {
-  return add_reg_mod_access (insn, original_addr_expr, addr_expr,
-                             NULL_RTX, mod_insn, reg);
+  return add_reg_mod (insn, original_addr_expr, addr_expr, NULL, mod_insn, reg);
 }
+
 sh_ams::access&
-sh_ams::access_sequence::add_reg_mod_access
-(rtx_insn* insn, rtx addr_rtx,
- rtx_insn* mod_insn, rtx reg)
+sh_ams::access_sequence::add_reg_mod (rtx_insn* insn, rtx addr_rtx,
+				      rtx_insn* mod_insn, rtx reg)
 {
-  return add_reg_mod_access (insn, make_invalid_addr (), make_invalid_addr (),
-                             addr_rtx, mod_insn, reg);
+  return add_reg_mod (insn, make_invalid_addr (), make_invalid_addr (),
+                      addr_rtx, mod_insn, reg);
 }
 // Create a reg_mod access and place it before INSERT_BEFORE
 // in the access sequence.
 sh_ams::access&
-sh_ams::access_sequence::add_reg_mod_access
-(access_sequence::iterator insert_before,
- addr_expr original_addr_expr, addr_expr addr_expr,
- rtx_insn* mod_insn, rtx reg)
+sh_ams::access_sequence::add_reg_mod (access_sequence::iterator insert_before,
+				      const addr_expr& original_addr_expr,
+				      const addr_expr& addr_expr,
+				      rtx_insn* mod_insn, rtx reg)
 {
   insert (insert_before,
           access (mod_insn, original_addr_expr, addr_expr,
@@ -516,7 +517,7 @@ void sh_ams::find_reg_value
 // as far back as possible.
 // INSN is the insn in which the access happens.  ROOT_INSN is the INSN
 // argument that was passed to the function at the top level of recursion
-// (used as the start insn when calling add_reg_mod_access).
+// (used as the start insn when calling add_reg_mod).
 sh_ams::addr_expr
 sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 			   machine_mode mem_mach_mode,
@@ -630,9 +631,9 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                   // Add a reg_mod access that sets the reg to itself.
                   // This makes it easier for the address modification
                   // generator to find all possible starting addresses.
-                  as.add_reg_mod_access
-                    (root_insn, make_reg_addr (x), make_reg_addr (x),
-                     reg_mod_insn, x);
+                  as.add_reg_mod (root_insn,
+				  make_reg_addr (x), make_reg_addr (x),
+				  reg_mod_insn, x);
                   return make_reg_addr (x);
                 }
 
@@ -640,18 +641,15 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                 // sequence as a reg_mod access.
                 if (CONST_INT_P (reg_value))
                   {
-                    access& const_access
-                      = as.add_reg_mod_access
-                      (root_insn,
-                       make_const_addr (INTVAL (reg_value)),
-                       make_const_addr (INTVAL (reg_value)),
-                       NULL, x);
+                    access& a = as.add_reg_mod (
+			root_insn, make_const_addr (INTVAL (reg_value)),
+			make_const_addr (INTVAL (reg_value)), NULL, x);
 
                     // Mark the access as used so that cloning costs are
                     // always added during address modification generation.
                     // This encourages the generator to reuse the base regs
                     // of previous constant accesses.
-                    const_access.set_used ();
+                    a.set_used ();
                   }
             }
 
@@ -678,14 +676,12 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // reg instead, and add a reg_mod access to the access sequence.
           if (reg_addr_expr.is_invalid ())
             {
-              as.add_reg_mod_access
-                (root_insn, reg_value, reg_mod_insn, x);
+              as.add_reg_mod (root_insn, reg_value, reg_mod_insn, x);
 
               // Add an (rx = rx) reg_mod access to help the
               // address modification generator.
-              as.add_reg_mod_access
-                (root_insn, make_reg_addr (x), make_reg_addr (x),
-                 reg_mod_insn, x);
+              as.add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
+			      reg_mod_insn, x);
 
               // Remove any insn that might have been inserted while
               // expanding this register.
@@ -1336,13 +1332,11 @@ try_modify_addr
             }
 
           new_reg = gen_reg_rtx (Pmode);
-          start_addr
-            = &add_reg_mod_access (*access_place,
-                                   non_mod_addr (invalid_regno,
-                                                 start_addr->modified_reg (),
-                                                 scale, 0),
-                                   c_start_addr,
-                                   NULL, new_reg);
+          start_addr = &add_reg_mod (
+			   *access_place,
+			   non_mod_addr (invalid_regno,
+					 start_addr->modified_reg (), scale, 0),
+                           c_start_addr, NULL, new_reg);
           final_addr_regno = new_reg;
 
           if (mod_tracker)
@@ -1373,13 +1367,11 @@ try_modify_addr
                 mod_tracker->use_changed_accs ().push_back (start_addr);
             }
           new_reg = gen_reg_rtx (Pmode);
-          start_addr
-            = &add_reg_mod_access (*access_place,
-                                   non_mod_addr (c_start_addr.base_reg (),
-                                                 start_addr->modified_reg (),
-                                                 1, 0),
-                                   c_start_addr,
-                                   NULL, new_reg);
+          start_addr = &add_reg_mod (
+			    *access_place,
+			    non_mod_addr (c_start_addr.base_reg (),
+					  start_addr->modified_reg (), 1, 0),
+			    c_start_addr, NULL, new_reg);
           final_addr_regno = new_reg;
 
           if (mod_tracker)
@@ -1428,13 +1420,11 @@ try_modify_addr
                 mod_tracker->use_changed_accs ().push_back (start_addr);
             }
           new_reg = gen_reg_rtx (Pmode);
-          start_addr
-            = &add_reg_mod_access (*access_place,
-                                   non_mod_addr (start_addr->modified_reg (),
-                                                 invalid_regno,
-                                                 1, disp),
-                                   c_start_addr,
-                                   NULL, new_reg);
+          start_addr = &add_reg_mod (
+			    *access_place,
+			    non_mod_addr (start_addr->modified_reg (),
+					  invalid_regno, 1, disp),
+			    c_start_addr, NULL, new_reg);
           final_addr_regno = new_reg;
 
           if (mod_tracker)
@@ -1469,11 +1459,8 @@ try_modify_addr
             }
           rtx pre_mod_reg = new_reg;
           new_reg = gen_reg_rtx (Pmode);
-          start_addr
-            = &add_reg_mod_access (*access_place,
-                                   make_reg_addr (pre_mod_reg),
-                                   c_start_addr,
-                                   NULL, new_reg);
+          start_addr = &add_reg_mod (*access_place, make_reg_addr (pre_mod_reg),
+				     c_start_addr, NULL, new_reg);
           final_addr_regno = new_reg;
 
           if (mod_tracker)
