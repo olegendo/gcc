@@ -13746,13 +13746,6 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
   a.add_alternative (1 + gbr_extra_cost + r0_extra_cost,
 		     sh_ams::make_index_addr ());
 
-  // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
-  // everything.
-  if (a.access_mode () == sh_ams::load)
-    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_post_inc_addr (a.mach_mode ()));
-  else if (a.access_mode () == sh_ams::store)
-    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_pre_dec_addr (a.mach_mode ()));
-
   if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
@@ -13770,6 +13763,13 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
 	  1 + (a.access_size () < 4 ? r0_extra_cost : 0) + gbr_extra_cost,
 	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), false)));
     }
+
+  // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
+  // everything.
+  if (a.access_mode () == sh_ams::load)
+    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_post_inc_addr (a.mach_mode ()));
+  else if (a.access_mode () == sh_ams::store)
+    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_pre_dec_addr (a.mach_mode ()));
 
   // On SH2A we can do larger displacements and also do FP modes with
   // displacements, but those are 32 bit insns, which we generally try to avoid.
