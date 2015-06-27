@@ -744,7 +744,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
       // Only expressions of the form base + index * (-1) + disp
       // or base + disp are inverted.
-      if (op1.index_reg () != invalid_regno && op1.scale () != -1)
+      if (op1.has_index_reg () && op1.scale () != -1)
         break;
       op1 = non_mod_addr
         (op1.index_reg (), op1.base_reg (), -op1.scale (), -op1.disp ());
@@ -758,14 +758,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       // merge them into one reg.
       if (op0.base_reg () == op1.base_reg ())
         {
-          if (op0.index_reg () == invalid_regno)
+	  if (op0.has_no_index_reg ())
             {
               op1 = non_mod_addr (invalid_regno, op1.index_reg (),
                                   op1.scale (), op1.disp ());
               op0 = non_mod_addr (invalid_regno, op0.base_reg (),
                                   2, op0.disp ());
             }
-          else if (op1.index_reg () == invalid_regno)
+          else if (op1.has_no_index_reg ())
             {
               op0 = non_mod_addr (invalid_regno, op0.index_reg (),
                                   op0.scale (), op0.disp ());
@@ -797,15 +797,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
       // If only one operand has a base register, that will
       // be the base register of the sum.
-      if (op0.base_reg () == invalid_regno)
+      if (op0.has_no_base_reg ())
         base_reg = op1.base_reg ();
-      else if (op1.base_reg () == invalid_regno)
+      else if (op1.has_no_base_reg ())
         base_reg = op0.base_reg ();
 
       // Otherwise, one of the base regs becomes the index reg
       // (with scale = 1).
-      else if (op0.index_reg () == invalid_regno
-               && op1.index_reg () == invalid_regno)
+      else if (op0.has_no_index_reg () && op1.has_no_index_reg ())
         {
           base_reg = op0.base_reg ();
           index_reg = op1.base_reg ();
@@ -820,12 +819,12 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       // has an index reg, combine them.
       if (index_reg == invalid_regno)
         {
-          if (op0.index_reg () == invalid_regno)
+          if (op0.has_no_index_reg ())
             {
               index_reg = op1.index_reg ();
               scale = op1.scale ();
             }
-          else if (op1.index_reg () == invalid_regno)
+          else if (op1.has_no_index_reg ())
             {
               index_reg = op0.index_reg ();
               scale = op0.scale ();
@@ -838,11 +837,10 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
     case ASHIFT:
 
       // OP1 must be a non-negative constant.
-      if (op1.base_reg () == invalid_regno && op1.index_reg () == invalid_regno
+      if (op1.has_no_base_reg () && op1.has_no_index_reg ()
           && op1.disp () >= 0)
         {
-          disp_t mul = 1
-            << op1.disp ();
+          disp_t mul = disp_t (1) << op1.disp ();
           op1 = non_mod_addr (invalid_regno, invalid_regno, 0, mul);
         }
       else break;
@@ -850,19 +848,19 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
       // One of the operands must be a constant term.
       // Bring it to the right side.
-      if (op0.base_reg () == invalid_regno && op0.index_reg () == invalid_regno)
+      if (op0.has_no_base_reg () && op0.has_no_index_reg ())
         std::swap (op0, op1);
-      if (op1.base_reg () != invalid_regno || op1.index_reg () != invalid_regno)
+      if (op1.has_base_reg () || op1.has_index_reg ())
         break;
 
       // Only one register can be scaled, so OP0 can have either a
       // BASE_REG or an INDEX_REG.
-      if (op0.base_reg () == invalid_regno)
+      if (op0.has_no_base_reg ())
         {
           index_reg = op0.index_reg ();
           scale = op0.scale () * op1.disp ();
         }
-      else if (op0.index_reg () == invalid_regno)
+      else if (op0.has_no_index_reg ())
         {
           index_reg = op0.base_reg ();
           scale = op1.disp ();
@@ -966,13 +964,12 @@ gen_min_mod
       addr_expr end_base, end_index;
 
       // Handle only SH-specific access alternatives for now.
-      if (alt_ae.base_reg () == invalid_regno
-          || (alt_ae.type () != non_mod
-              && alt_ae.index_reg () != invalid_regno)
-          || (alt_ae.index_reg () != invalid_regno && alt_ae.scale () != 1))
+      if (alt_ae.has_no_base_reg ()
+          || (alt_ae.type () != non_mod && alt_ae.has_index_reg ())
+          || (alt_ae.has_index_reg () && alt_ae.scale () != 1))
         continue;
 
-      if (alt_ae.index_reg () == invalid_regno)
+      if (alt_ae.has_no_index_reg ())
         {
           // If the alternative only has one address register, it must
           // contain the whole address in AE.
@@ -1005,7 +1002,7 @@ gen_min_mod
 
       min_mod_cost_result index_mod_cost;
 
-      if (alt_ae.index_reg () != invalid_regno)
+      if (alt_ae.has_index_reg ())
         {
           index_mod_cost =
             find_min_mod_cost (end_index, 0, 0, alt_ae.type (), dlg);
@@ -1041,7 +1038,7 @@ gen_min_mod
           min_cost = alt_min_cost;
           min_start_base = base_mod_cost.min_start_addr;
           min_end_base = end_base;
-          if (alt_ae.index_reg () != invalid_regno)
+          if (alt_ae.has_index_reg ())
             {
               min_start_index = index_mod_cost.min_start_addr;
               min_end_index = end_index;
@@ -1089,7 +1086,7 @@ gen_mod_for_alt
 
   const addr_expr& ae = acc->address ();
   addr_expr new_addr_expr;
-  if (alternative.address ().index_reg () == invalid_regno)
+  if (alternative.address ().has_no_index_reg ())
     {
       disp_t disp = ae.disp () - base_insert_result.addr_disp;
       new_addr_expr = non_mod_addr (base_insert_result.addr_reg,
@@ -1143,8 +1140,8 @@ void sh_ams::access_sequence::update_insn_stream ()
           if (accs->original_address ().is_invalid ())
             continue;
           if (accs->original_address ().base_reg () == accs->modified_reg ()
-              && accs->original_address ().index_reg () == invalid_regno
-              && accs->original_address ().disp () == 0)
+              && accs->original_address ().has_no_index_reg ()
+              && accs->original_address ().has_no_disp ())
             continue;
 
           if (!sequence_started)
@@ -1157,15 +1154,15 @@ void sh_ams::access_sequence::update_insn_stream ()
 
           rtx new_val;
 
-          if (accs->original_address ().base_reg () == invalid_regno
-              && accs->original_address ().index_reg () == invalid_regno)
+          if (accs->original_address ().has_no_base_reg ()
+              && accs->original_address ().has_no_index_reg ())
             new_val = GEN_INT (accs->original_address ().disp ());
-          else if (accs->original_address ().index_reg () != invalid_regno)
+          else if (accs->original_address ().has_index_reg ())
             {
 	      rtx index = expand_mult (accs->original_address ().index_reg (),
 				       accs->original_address ().scale ());
 
-              if (accs->original_address ().base_reg () == invalid_regno)
+              if (accs->original_address ().has_no_base_reg ())
                 new_val = index;
               else
 		new_val = expand_plus (accs->original_address ().base_reg (),
@@ -1184,7 +1181,7 @@ void sh_ams::access_sequence::update_insn_stream ()
           rtx new_addr = accs->original_address ().base_reg ();
 
           // Add (possibly scaled) index reg.
-          if (accs->original_address ().index_reg () != invalid_regno)
+          if (accs->original_address ().has_index_reg ())
             {
 	      rtx index = expand_mult (accs->original_address ().index_reg (),
 				       accs->original_address ().scale ());
@@ -1289,11 +1286,11 @@ try_modify_addr
   // addresses of the form base+disp into index*1+disp.
   addr_expr c_start_addr = start_addr->address ();
   addr_expr c_end_addr = end_addr;
-  if (c_start_addr.index_reg () == invalid_regno)
+  if (c_start_addr.has_no_index_reg ())
     c_start_addr =
       non_mod_addr (invalid_regno, c_start_addr.base_reg (), 1,
                     c_start_addr.disp ());
-  if (c_end_addr.index_reg () == invalid_regno)
+  if (c_end_addr.has_no_index_reg ())
     c_end_addr =
       non_mod_addr (invalid_regno, c_end_addr.base_reg (), 1,
                     c_end_addr.disp ());
@@ -1302,17 +1299,15 @@ try_modify_addr
   // might be better to switch its base and index reg.
   if (c_start_addr.index_reg () == c_end_addr.base_reg ())
     {
-      if (c_end_addr.base_reg () != invalid_regno
-          && c_end_addr.index_reg () != invalid_regno
-          && c_end_addr.scale () == 1)
+      if (c_end_addr.has_base_reg ()
+          && c_end_addr.has_index_reg () && c_end_addr.scale () == 1)
         {
           c_end_addr = non_mod_addr (c_end_addr.index_reg (),
                                      c_end_addr.base_reg (),
                                      1, c_end_addr.disp ());
         }
-      else if (c_start_addr.base_reg () != invalid_regno
-               && c_start_addr.index_reg () != invalid_regno
-               && c_start_addr.scale () == 1)
+      else if (c_start_addr.has_base_reg ()
+               && c_start_addr.has_index_reg () && c_start_addr.scale () == 1)
         {
           c_start_addr = non_mod_addr (c_start_addr.index_reg (),
                                        c_start_addr.base_reg (),
@@ -1327,16 +1322,16 @@ try_modify_addr
 
   // Same for base regs, unless the start address doesn't have
   // a base reg, in which case we can add one.
-  if (c_start_addr.base_reg () != invalid_regno
+  if (c_start_addr.has_base_reg ()
       && c_start_addr.base_reg () != c_end_addr.base_reg ())
     return mod_addr_result (infinite_costs, invalid_regno, 0);
 
   // Add scaling.
-  if (c_start_addr.index_reg () != invalid_regno
+  if (c_start_addr.has_index_reg ()
       && c_start_addr.scale () != c_end_addr.scale ())
     {
       // We can't scale if the address has displacement or a base reg.
-      if (c_start_addr.disp () != 0 || c_start_addr.base_reg () != invalid_regno)
+      if (c_start_addr.has_disp () || c_start_addr.has_base_reg ())
         return mod_addr_result (infinite_costs, invalid_regno, 0);
 
       // We can only scale by integers.
@@ -1374,8 +1369,7 @@ try_modify_addr
     }
 
   // Add missing base reg.
-  if (c_start_addr.base_reg () == invalid_regno
-      && c_end_addr.base_reg () != invalid_regno)
+  if (c_start_addr.has_no_base_reg () && c_end_addr.has_base_reg ())
     {
       c_start_addr = non_mod_addr (c_end_addr.base_reg (),
                                    c_start_addr.index_reg (),
@@ -1467,8 +1461,7 @@ try_modify_addr
   // Do the same for constant displacement addresses so that there's no
   // cloning penalty for reusing the constant address in another access.
   if (addr_type != non_mod
-      || (c_end_addr.base_reg () == invalid_regno
-          && c_end_addr.index_reg () == invalid_regno))
+      || (c_end_addr.has_no_base_reg () && c_end_addr.has_no_index_reg ()))
     {
       c_start_addr = non_mod_addr (c_end_addr.base_reg (),
                                    c_start_addr.index_reg (),
