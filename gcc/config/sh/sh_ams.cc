@@ -433,7 +433,7 @@ sh_ams::access_sequence::next_mem_access (iterator i)
   if (i == end ())
     return i;
 
-  for (iterator i = stdx::next (i); i != end (); ++i)
+  for (++i; i != end (); ++i)
     if (i->access_mode () == load || i->access_mode () == store)
       return i;
 
@@ -951,9 +951,6 @@ gen_min_mod
   access_sequence::iterator next_acc = record_in_sequence
 				       ? next_mem_access (acc)
 				       : end ();
-
-  acc->clear_alternatives ();
-  dlg.mem_access_alternatives (*acc);
 
   // Go through the alternatives for this access and keep
   // track of the one with minimal costs.
