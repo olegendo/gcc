@@ -1155,7 +1155,9 @@ void sh_ams::access_sequence::update_insn_stream ()
               && accs->original_address ().has_no_index_reg ()
               && accs->original_address ().has_no_disp ())
 	    {
-	      log_msg ("unsupported reg mod expr\n");
+	      log_msg ("skipping reg mod expr\n");
+	      log_addr_expr (accs->original_address ());
+	      log_msg ("\n");
 	      continue;
 	    }
 
@@ -1204,6 +1206,12 @@ void sh_ams::access_sequence::update_insn_stream ()
         }
       else
         {
+          if (!sequence_started)
+            {
+              start_sequence ();
+              sequence_started = true;
+            }
+
           // Update the access rtx to reflect ORIGINAL_ADDRESS.
 
           rtx new_addr = accs->original_address ().base_reg ();
@@ -1255,16 +1263,19 @@ void sh_ams::access_sequence::update_insn_stream ()
 	      log_msg ("\n");
 	    }
 
-          if (sequence_started)
+	  gcc_assert (sequence_started);
+//          if (sequence_started)
             {
               rtx_insn* new_insns = get_insns ();
-
-              log_msg ("new insns = \n");
-              log_rtx (new_insns);
-              log_msg ("\n");
               end_sequence ();
-              emit_insn_before (new_insns, accs->insn ());
               sequence_started = false;
+
+              log_msg ("emitting new insns = \n");
+              log_rtx (new_insns);
+              log_msg ("\nbefore insn\n");
+              log_insn (accs->insn ());
+              log_msg ("\n");
+              emit_insn_before (new_insns, accs->insn ());
             }
 
 	  log_msg ("new addr (6) = ");
