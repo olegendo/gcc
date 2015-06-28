@@ -13749,11 +13749,11 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
   if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
-      if (a.access_mode () == sh_ams::load && TARGET_SH2A)
+      if (a.access_type () == sh_ams::load && TARGET_SH2A)
 	a.add_alternative (1 + r0_extra_cost + gbr_extra_cost,
 			   sh_ams::make_pre_dec_addr (a.mach_mode ()));
 
-      if (a.access_mode () == sh_ams::store && TARGET_SH2A)
+      if (a.access_type () == sh_ams::store && TARGET_SH2A)
 	a.add_alternative (1 + r0_extra_cost + gbr_extra_cost,
 			   sh_ams::make_post_inc_addr (a.mach_mode ()));
 
@@ -13766,9 +13766,9 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
 
   // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
   // everything.
-  if (a.access_mode () == sh_ams::load)
+  if (a.access_type () == sh_ams::load)
     a.add_alternative (1 + gbr_extra_cost, sh_ams::make_post_inc_addr (a.mach_mode ()));
-  else if (a.access_mode () == sh_ams::store)
+  else if (a.access_type () == sh_ams::store)
     a.add_alternative (1 + gbr_extra_cost, sh_ams::make_pre_dec_addr (a.mach_mode ()));
 
   // On SH2A we can do larger displacements and also do FP modes with

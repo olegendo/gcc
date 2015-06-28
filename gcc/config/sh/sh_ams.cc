@@ -179,11 +179,11 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
   if (dump_file == NULL)
     return;
 
-  if (a.access_mode () == sh_ams::load)
+  if (a.access_type () == sh_ams::load)
     log_msg ("load ");
-  else if (a.access_mode () == sh_ams::store)
+  else if (a.access_type () == sh_ams::store)
     log_msg ("store");
-  else if (a.access_mode () == sh_ams::reg_mod)
+  else if (a.access_type () == sh_ams::reg_mod)
     {
       log_msg ("reg_mod:\n  ");
       log_rtx (a.modified_reg ());
@@ -192,7 +192,7 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
   else
     gcc_unreachable ();
 
-  if (a.access_mode () == sh_ams::load || a.access_mode () == sh_ams::store)
+  if (a.access_type () == sh_ams::load || a.access_type () == sh_ams::store)
     log_msg (" %smode (%d):\n",
              GET_MODE_NAME (a.mach_mode ()), a.access_size ());
 
@@ -212,8 +212,8 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
     }
 
   if (log_alternatives
-      && (a.access_mode () == sh_ams::load
-	  || a.access_mode () == sh_ams::store))
+      && (a.access_type () == sh_ams::load
+	  || a.access_type () == sh_ams::store))
     {
       log_msg ("\n  %d alternatives:\n", a.alternatives_count ());
       int alt_count = 0;
@@ -292,10 +292,10 @@ next (ForwardIt it,
 
 
 sh_ams::access::access
-(rtx_insn* insn, rtx* mem, access_mode_t access_mode,
+(rtx_insn* insn, rtx* mem, access_type_t access_type,
  addr_expr original_addr_expr, addr_expr addr_expr, int cost)
 {
-  m_access_mode = access_mode;
+  m_access_type = access_type;
   m_machine_mode = GET_MODE (*mem);
   m_addr_space = MEM_ADDR_SPACE (*mem);
   m_cost = cost;
@@ -314,7 +314,7 @@ sh_ams::access::access
 (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
  rtx addr_rtx, rtx mod_reg, int cost)
 {
-  m_access_mode = reg_mod;
+  m_access_type = reg_mod;
   m_cost = cost;
   m_insn = insn;
   m_original_addr_expr = original_addr_expr;
@@ -328,7 +328,7 @@ sh_ams::access::access
 // Add a normal access to the end of the access sequence.
 sh_ams::access&
 sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
-					 access_mode_t access_mode)
+					 access_type_t access_type)
 {
   machine_mode m_mode = GET_MODE (*mem);
   // Create an ADDR_EXPR struct from the address expression of MEM.
@@ -337,7 +337,7 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
   addr_expr expr =
     extract_addr_expr ((XEXP (*mem, 0)), insn, insn,
                        m_mode, *this, true, true);
-  push_back (access (insn, mem, access_mode, original_expr, expr));
+  push_back (access (insn, mem, access_type, original_expr, expr));
   return back ();
 }
 
@@ -365,7 +365,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
       for (access_sequence::iterator as_it = begin ();
            as_it != end () && !as_it->insn (); ++as_it)
         {
-          if (as_it->access_mode () == reg_mod
+          if (as_it->access_type () == reg_mod
               && as_it->modified_reg () == reg)
             return *as_it;
         }
@@ -390,7 +390,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
 
           // If the reg_mod access is already inside the access
           // sequence, don't add it a second time.
-          if (as_it->access_mode () == reg_mod
+          if (as_it->access_type () == reg_mod
               && as_it->insn () == mod_insn && as_it->modified_reg () == reg
               && as_it->address ().base_reg () == addr_expr.base_reg ())
             return *as_it;
@@ -446,7 +446,7 @@ sh_ams::access_sequence::next_mem_access (iterator i)
     return i;
 
   for (++i; i != end (); ++i)
-    if (i->access_mode () == load || i->access_mode () == store)
+    if (i->access_type () == load || i->access_type () == store)
       return i;
 
   return end ();
@@ -511,7 +511,7 @@ find_reg_value_1 (rtx reg, rtx pat)
 void sh_ams::find_reg_value
 (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn)
 {
-  std::vector<std::pair<rtx*, access_mode_t> > mems;
+  std::vector<std::pair<rtx*, access_type_t> > mems;
 
   // Go back through the insn list until we find the last instruction
   // that modified the register.
@@ -538,7 +538,7 @@ void sh_ams::find_reg_value
 	  mems.reserve (32);
 
           find_mem_accesses (PATTERN (i), std::back_inserter (mems));
-          for (std::vector<std::pair<rtx*, access_mode_t> >
+          for (std::vector<std::pair<rtx*, access_type_t> >
 	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
             {
               rtx mem_addr = XEXP (*(m->first), 0);
@@ -887,20 +887,20 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 }
 
 // Find the memory accesses in INSN and add them to MEM_LIST, together with their
-// access mode. ACCESS_MODE indicates whether the next mem that we find is read
+// access mode. ACCESS_TYPE indicates whether the next mem that we find is read
 // or written to.
 template <typename OutputIterator> void
 sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
-			   access_mode_t access_mode)
+			   access_type_t access_type)
 {
   switch (GET_CODE (x))
     {
     case MEM:
-      *out++ = std::make_pair (&x, access_mode);
+      *out++ = std::make_pair (&x, access_type);
       break;
     case PARALLEL:
       for (int i = 0; i < XVECLEN (x, 0); i++)
-        find_mem_accesses (XVECEXP (x, 0, i), out, access_mode);
+        find_mem_accesses (XVECEXP (x, 0, i), out, access_type);
       break;
     case SET:
       find_mem_accesses (SET_DEST (x), out, store);
@@ -913,7 +913,7 @@ sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
       if (UNARY_P (x) || ARITHMETIC_P (x))
         {
           for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
-            find_mem_accesses (XEXP (x, i), out, access_mode);
+            find_mem_accesses (XEXP (x, i), out, access_type);
         }
       break;
     }
@@ -933,7 +933,7 @@ gen_address_mod (delegate& dlg)
 
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
-      if (accs->access_mode () == reg_mod) continue;
+      if (accs->access_type () == reg_mod) continue;
       gen_min_mod (accs, dlg, true);
     }
 }
@@ -1142,7 +1142,7 @@ void sh_ams::access_sequence::update_insn_stream ()
 
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
-      if (accs->access_mode () == reg_mod)
+      if (accs->access_type () == reg_mod)
         {
           // Skip accesses with unknown values and the ones that
           // don't modify anything.
@@ -1312,7 +1312,7 @@ sh_ams::access_sequence
 
   for (access_sequence::iterator it = begin (); it != end (); ++it)
     {
-      if (it->access_mode () != reg_mod || it->address ().is_invalid ())
+      if (it->access_type () != reg_mod || it->address ().is_invalid ())
         continue;
 
       int cost = try_modify_addr (&(*it), end_addr,
@@ -1586,7 +1586,7 @@ unsigned int sh_ams::execute (function* fun)
   df_note_add_problem ();
   df_analyze ();
 
-  std::vector<std::pair<rtx*, access_mode_t> > mems;
+  std::vector<std::pair<rtx*, access_type_t> > mems;
 
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
@@ -1608,7 +1608,7 @@ unsigned int sh_ams::execute (function* fun)
           mems.clear ();
           find_mem_accesses (PATTERN (i), std::back_inserter (mems));
 
-          for (std::vector<std::pair<rtx*, access_mode_t> >
+          for (std::vector<std::pair<rtx*, access_type_t> >
 	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
 	    as.add_mem_access (i, m->first, m->second);
          }
@@ -1616,7 +1616,7 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::iterator it = as.begin();
 	   it != as.end(); ++it)
         {
-          if (it->access_mode () != reg_mod)
+          if (it->access_type () != reg_mod)
             m_delegate.mem_access_alternatives (*it);
         }
 

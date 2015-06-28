@@ -22,7 +22,7 @@ public:
   // if abs ('disp') == access mode size it's a {PRE,POST}_{INC_DEC}.
 
   enum addr_type_t { non_mod, pre_mod, post_mod };
-  enum access_mode_t { load, store, reg_mod };
+  enum access_type_t { load, store, reg_mod };
 
   typedef int regno_t;
 
@@ -206,7 +206,7 @@ public:
 
   template <typename OutputIterator> static void
   find_mem_accesses (rtx& x, OutputIterator out,
-		     access_mode_t access_mode = load);
+		     access_type_t access_type = load);
 
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
@@ -330,7 +330,7 @@ public:
       int m_costs;
     };
 
-    access (rtx_insn* insn, rtx* mem, access_mode_t access_mode,
+    access (rtx_insn* insn, rtx* mem, access_type_t access_type,
 	    addr_expr original_addr_expr, addr_expr addr_expr,
 	    int cost = infinite_costs);
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
@@ -346,10 +346,10 @@ public:
     // ignore it.
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
 
-    // If m_access_mode is REG_MOD, this access represents the modification
+    // If m_access_type is REG_MOD, this access represents the modification
     // of an address register.  In that case, m_mod_reg stores the register
     // that's modified and m_addr_expr is its new address.
-    access_mode_t access_mode (void) const { return m_access_mode; }
+    access_type_t access_type (void) const { return m_access_type; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
@@ -428,7 +428,7 @@ public:
   private:
     addr_expr m_original_addr_expr;
     addr_expr m_addr_expr;
-    access_mode_t m_access_mode;
+    access_type_t m_access_type;
     machine_mode m_machine_mode;
     addr_space_t m_addr_space;
     int m_cost;
@@ -464,7 +464,7 @@ public:
     void update_insn_stream ();
 
     access&
-    add_mem_access (rtx_insn* insn, rtx* mem, access_mode_t access_mode);
+    add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
