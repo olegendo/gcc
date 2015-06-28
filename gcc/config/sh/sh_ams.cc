@@ -1201,6 +1201,8 @@ void sh_ams::access_sequence::update_insn_stream ()
               log_msg ("\n");
             }
 
+          new_val = expand_plus (new_val, accs->original_address ().disp ());
+
           accs->update_insn (emit_move_insn (accs->modified_reg (), new_val));
           reg_mod_insns ().push_back (accs->insn ());
         }
