@@ -234,6 +234,12 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
 rtx
 expand_mult (rtx a, rtx b)
 {
+  log_msg ("\nexpand_mult ");
+  log_rtx (a);
+  log_msg (" * ");
+  log_rtx (b);
+  log_msg ("\n");
+
   return expand_mult (Pmode, a, b, NULL, false);
 }
 
@@ -246,6 +252,12 @@ expand_mult (rtx a, HOST_WIDE_INT b)
 rtx
 expand_plus (rtx a, rtx b)
 {
+  log_msg ("\nexpand_plus ");
+  log_rtx (a);
+  log_msg (" + ");
+  log_rtx (b);
+  log_msg ("\n");
+
   if (b == const0_rtx)
     return a;
 
@@ -1135,11 +1147,17 @@ void sh_ams::access_sequence::update_insn_stream ()
           // Skip accesses with unknown values and the ones that
           // don't modify anything.
           if (accs->original_address ().is_invalid ())
-            continue;
+	    {
+	      log_msg ("access original address not valid\n");
+	      continue;
+	    }
           if (accs->original_address ().base_reg () == accs->modified_reg ()
               && accs->original_address ().has_no_index_reg ()
               && accs->original_address ().has_no_disp ())
-            continue;
+	    {
+	      log_msg ("unsupported reg mod expr\n");
+	      continue;
+	    }
 
           if (!sequence_started)
             {
@@ -1153,7 +1171,12 @@ void sh_ams::access_sequence::update_insn_stream ()
 
           if (accs->original_address ().has_no_base_reg ()
               && accs->original_address ().has_no_index_reg ())
-            new_val = GEN_INT (accs->original_address ().disp ());
+	    {
+	      new_val = GEN_INT (accs->original_address ().disp ());
+	      log_msg ("reg mod new val (1) = ");
+	      log_rtx (new_val);
+	      log_msg ("\n");
+	    }
           else if (accs->original_address ().has_index_reg ())
             {
 	      rtx index = expand_mult (accs->original_address ().index_reg (),
@@ -1164,9 +1187,17 @@ void sh_ams::access_sequence::update_insn_stream ()
               else
 		new_val = expand_plus (accs->original_address ().base_reg (),
 				       index);
+              log_msg ("reg mod new val (2) = ");
+              log_rtx (new_val);
+              log_msg ("\n");
             }
           else
-            new_val = accs->original_address ().base_reg ();
+            {
+              new_val = accs->original_address ().base_reg ();
+              log_msg ("reg mod new val (3) = ");
+              log_rtx (new_val);
+              log_msg ("\n");
+            }
 
           accs->update_insn (emit_move_insn (accs->modified_reg (), new_val));
           reg_mod_insns ().push_back (accs->insn ());
@@ -1176,6 +1207,9 @@ void sh_ams::access_sequence::update_insn_stream ()
           // Update the access rtx to reflect ORIGINAL_ADDRESS.
 
           rtx new_addr = accs->original_address ().base_reg ();
+          log_msg ("new addr (1) = ");
+          log_rtx (new_addr);
+          log_msg ("\n");
 
           // Add (possibly scaled) index reg.
           if (accs->original_address ().has_index_reg ())
@@ -1183,6 +1217,9 @@ void sh_ams::access_sequence::update_insn_stream ()
 	      rtx index = expand_mult (accs->original_address ().index_reg (),
 				       accs->original_address ().scale ());
 	      new_addr = expand_plus (new_addr, index);
+	      log_msg ("new addr (2) = ");
+	      log_rtx (new_addr);
+	      log_msg ("\n");
             }
 
           // Surround with POST/PRE_INC/DEC if ORIGINAL_ADDRESS is an
@@ -1192,24 +1229,47 @@ void sh_ams::access_sequence::update_insn_stream ()
               if (accs->original_address ().disp () > 0)
                 new_addr = gen_rtx_PRE_INC (Pmode, new_addr);
               else new_addr = gen_rtx_PRE_DEC (Pmode, new_addr);
+
+	      log_msg ("new addr (3) = ");
+	      log_rtx (new_addr);
+	      log_msg ("\n");
             }
           else if (accs->original_address ().type () == post_mod)
             {
               if (accs->original_address ().disp () > 0)
                 new_addr = gen_rtx_POST_INC (Pmode, new_addr);
               else new_addr = gen_rtx_POST_DEC (Pmode, new_addr);
-            }
 
-          // Add constant displacement.
-	  new_addr = expand_plus (new_addr, accs->original_address ().disp ());
+	      log_msg ("new addr (4) = ");
+	      log_rtx (new_addr);
+	      log_msg ("\n");
+            }
+          else
+            {
+              // Add constant displacement.
+	      new_addr = expand_plus (new_addr,
+				      accs->original_address ().disp ());
+
+	      log_msg ("new addr (5) = ");
+	      log_rtx (new_addr);
+	      log_msg ("\n");
+	    }
 
           if (sequence_started)
             {
               rtx_insn* new_insns = get_insns ();
+
+              log_msg ("new insns = \n");
+              log_rtx (new_insns);
+              log_msg ("\n");
               end_sequence ();
               emit_insn_before (new_insns, accs->insn ());
               sequence_started = false;
             }
+
+	  log_msg ("new addr (6) = ");
+	  log_rtx (new_addr);
+	  log_msg ("\n");
 
           bool mem_update_ok = accs->update_mem (new_addr);
           gcc_assert (mem_update_ok);
