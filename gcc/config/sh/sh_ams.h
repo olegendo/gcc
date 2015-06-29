@@ -214,7 +214,18 @@ public:
   static addr_expr extract_addr_expr
     (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
      access_sequence& as,
-     bool expand, bool collect_mod_insns);
+     std::vector<access*>& inserted_reg_mods,
+     bool expand);
+
+  static addr_expr extract_addr_expr
+    (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
+     access_sequence& as,
+     bool expand)
+  {
+    std::vector<access*> inserted_reg_mods;
+    return extract_addr_expr (x, insn, root_insn, mem_mach_mode, as,
+			      inserted_reg_mods, expand);
+  }
 
   // helper functions to create a particular type of address expression.
   static addr_expr
@@ -334,7 +345,7 @@ public:
 	    addr_expr original_addr_expr, addr_expr addr_expr,
 	    int cost = infinite_costs);
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
-	    rtx addr_rtx, rtx mod_reg, int cost = infinite_costs);
+	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -362,6 +373,13 @@ public:
     // Stores the address if it can't be described with an
     // addr_expr, or NULL_RTX if the address is unknown.
     rtx addr_rtx (void) const { return m_addr_rtx; }
+
+    // For reg_mod accesses, true if the access can be removed during
+    // gen_address_mod.  Set to true for most of the reg_mod accesses
+    // found in the original insn list.
+    bool removable (void) const { return m_removable; }
+
+    void mark_unremovable (void) { m_removable = false; }
 
     // For reg_mod accesses, shows the register rtx that was modified.
     rtx modified_reg (void) const { return m_mod_reg; }
@@ -407,10 +425,24 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
-    void update_address (int new_cost, addr_expr new_addr_expr)
+    void update_original_address (int new_cost, addr_expr new_addr_expr)
     {
       m_cost = new_cost;
       m_original_addr_expr = new_addr_expr;
+      m_addr_rtx = NULL;
+    }
+
+    void update_original_address (int new_cost, rtx new_addr_rtx)
+    {
+      m_cost = new_cost;
+      m_original_addr_expr = make_invalid_addr ();
+      m_addr_rtx = new_addr_rtx;
+    }
+
+    void update_effective_address (addr_expr new_addr_expr)
+    {
+      m_addr_expr = new_addr_expr;
+      m_addr_rtx = NULL;
     }
 
     bool update_mem (rtx new_addr)
@@ -434,6 +466,7 @@ public:
     int m_cost;
     rtx_insn* m_insn;
     rtx* m_mem_ref; // reference to the mem rtx inside the insn.
+    bool m_removable;
     rtx m_addr_rtx;
     rtx m_mod_reg;
     bool m_used;
@@ -469,19 +502,22 @@ public:
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx addr_rtx,
-		 rtx_insn* mod_insn, rtx reg);
+		 rtx_insn* mod_insn, rtx reg, bool removable = false);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
-		 const addr_expr& addr_expr, rtx_insn* mod_insn, rtx reg);
+		 const addr_expr& addr_expr, rtx_insn* mod_insn,
+		 rtx reg, bool removable = false);
 
     access&
-    add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn, rtx reg);
+    add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn,
+		 rtx reg, bool removable = false);
 
     access&
     add_reg_mod (access_sequence::iterator insert_before,
 		 const addr_expr& original_addr_expr,
-		 const addr_expr& addr_expr, rtx_insn* mod_insn, rtx reg);
+		 const addr_expr& addr_expr, rtx_insn* mod_insn,
+		 rtx reg, bool removable = false);
 
     // find the next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
