@@ -1159,10 +1159,12 @@ void sh_ams::access_sequence::update_insn_stream ()
 
   // Remove all the insns that are originally used to arrive at
   // the required addresses.
-  for (std::vector<rtx_insn*>::iterator it = reg_mod_insns ().begin ();
-       it != reg_mod_insns ().end (); ++it)
-    set_insn_deleted (*it);
-  reg_mod_insns ().clear ();
+  // FIXME: The address regs might be used outside of accesses, so
+  // disable this until AMS can handle reg-uses.
+  //for (std::vector<rtx_insn*>::iterator it = reg_mod_insns ().begin ();
+  //     it != reg_mod_insns ().end (); ++it)
+  //  set_insn_deleted (*it);
+  //reg_mod_insns ().clear ();
 
   bool sequence_started = false;
 
