@@ -438,7 +438,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
             return *as_it;
 
         }
-      if (INSN_UID (i) == INSN_UID (mod_insn))
+      if (as_it == rend () || INSN_UID (i) == INSN_UID (mod_insn))
         {
           // We found mod_insn inside the insn list, so we know where to
           // insert the access.
