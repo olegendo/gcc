@@ -496,28 +496,30 @@ public:
 
     void update_insn_stream ();
 
+    int cost ();
+
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx addr_rtx,
-		 rtx_insn* mod_insn, rtx reg, bool removable = false);
+		 rtx_insn* mod_insn, rtx reg, int cost, bool removable = false);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx_insn* mod_insn,
-		 rtx reg, bool removable = false);
+		 rtx reg, int cost, bool removable = false);
 
     access&
     add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn,
-		 rtx reg, bool removable = false);
+		 rtx reg, int cost, bool removable = false);
 
     access&
     add_reg_mod (access_sequence::iterator insert_before,
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx_insn* mod_insn,
-		 rtx reg, bool removable = false);
+		 rtx reg, int cost, bool removable = false);
 
     // find the next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
