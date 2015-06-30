@@ -1805,6 +1805,7 @@ unsigned int sh_ams::execute (function* fun)
         }
 
       as.update_cost (m_delegate);
+      int original_cost = as.cost ();
 
       log_msg ("Access sequence contents:\n\n");
       for (access_sequence::const_iterator it = as.begin ();
@@ -1813,9 +1814,9 @@ unsigned int sh_ams::execute (function* fun)
 	  log_access (*it, false);
 	  log_msg ("\n-----\n");
 	}
+      log_msg ("\nTotal cost: %d\n", original_cost);
 
       log_msg ("\n\n");
-      log_msg ("\nTotal cost: %d\n", as.cost ());
 
       // Fill the sequence's REG_MOD_INSNS with the insns of the reg_mod accesses
       // that can be removed.
@@ -1828,6 +1829,8 @@ unsigned int sh_ams::execute (function* fun)
 
       as.gen_address_mod (m_delegate);
 
+      int new_cost = as.cost ();
+
       log_msg ("\nAccess sequence contents after address mod generation:\n\n");
       for (access_sequence::const_iterator it = as.begin ();
 	   it != as.end (); ++it)
@@ -1835,9 +1838,12 @@ unsigned int sh_ams::execute (function* fun)
 	  log_access (*it, false);
 	  log_msg ("\n-----\n");
 	}
-      log_msg ("\nTotal cost: %d\n", as.cost ());
+      log_msg ("\nTotal cost: %d\n", new_cost);
 
-      as.update_insn_stream ();
+      if (new_cost < original_cost)
+        as.update_insn_stream ();
+      else
+        log_msg ("Insn list not modified\n");
 
       log_msg ("\n\n");
     }
