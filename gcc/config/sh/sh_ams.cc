@@ -94,6 +94,8 @@ const pass_data sh_ams::default_pass_data =
 
 const rtx sh_ams::invalid_regno = (const rtx)0;
 const rtx sh_ams::any_regno = (const rtx)1;
+std::vector<rtx_insn*>
+sh_ams::access_sequence::m_reg_mod_insns = std::vector<rtx_insn*> ();
 
 sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate& dlg)
 : rtl_opt_pass (default_pass_data, ctx),
@@ -1665,7 +1667,7 @@ unsigned int sh_ams::execute (function* fun)
 	   it != as.end (); ++it)
         {
           if (it->removable ())
-            as.reg_mod_insns ().push_back (it->insn ());
+            access_sequence::reg_mod_insns ().push_back (it->insn ());
         }
 
       as.gen_address_mod (m_delegate);

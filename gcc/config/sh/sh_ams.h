@@ -490,7 +490,7 @@ public:
     // The address modifying insns related to this access sequence
     // that are in the insn stream.  Used to delete the original insns
     // in update_insn_stream.
-    std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
+    static std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
 
     void gen_address_mod (delegate& dlg);
 
@@ -622,7 +622,7 @@ public:
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
 
-    std::vector<rtx_insn*> m_reg_mod_insns;
+    static std::vector<rtx_insn*> m_reg_mod_insns;
   };
 
   // a delegate for the ams pass.  usually implemented by the target.
