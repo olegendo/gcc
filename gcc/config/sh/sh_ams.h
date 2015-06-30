@@ -425,6 +425,8 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
+    bool matches_alternative (const alternative* alt) const;
+
     void update_original_address (int new_cost, addr_expr new_addr_expr)
     {
       m_cost = new_cost;
@@ -445,6 +447,8 @@ public:
       m_addr_rtx = NULL;
     }
 
+    void update_cost (int new_cost) { m_cost = new_cost; }
+
     bool update_mem (rtx new_addr)
     {
       return validate_change (m_insn, m_mem_ref,
@@ -455,6 +459,13 @@ public:
     void update_insn (rtx_insn *new_insn)
     {
       m_insn = new_insn;
+    }
+
+    static bool registers_match (rtx reg, rtx alt_reg)
+    {
+      if (alt_reg == any_regno)
+	return (reg != invalid_regno);
+      return (reg == alt_reg);
     }
 
   private:
@@ -496,7 +507,8 @@ public:
 
     void update_insn_stream ();
 
-    int cost ();
+    int cost (void) const;
+    void update_cost (delegate& dlg);
 
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
@@ -504,22 +516,23 @@ public:
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx addr_rtx,
-		 rtx_insn* mod_insn, rtx reg, int cost, bool removable = false);
+		 rtx_insn* mod_insn, rtx reg,
+		 int cost = infinite_costs, bool removable = false);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx_insn* mod_insn,
-		 rtx reg, int cost, bool removable = false);
+		 rtx reg, int cost = infinite_costs, bool removable = false);
 
     access&
     add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn,
-		 rtx reg, int cost, bool removable = false);
+		 rtx reg, int cost = infinite_costs, bool removable = false);
 
     access&
     add_reg_mod (access_sequence::iterator insert_before,
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx_insn* mod_insn,
-		 rtx reg, int cost, bool removable = false);
+		 rtx reg, int cost = infinite_costs, bool removable = false);
 
     // find the next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
@@ -562,6 +575,8 @@ public:
       std::vector<access_sequence::iterator> m_inserted_accs;
       std::vector<access*> m_use_changed_accs;
     };
+
+    int get_clone_cost (access &acc, delegate& dlg);
 
     int gen_min_mod (access_sequence::iterator acc,
 		     delegate& dlg, bool record_in_sequence);

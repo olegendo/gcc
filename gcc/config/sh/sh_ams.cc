@@ -214,7 +214,7 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
     }
 
   if (a.cost () == sh_ams::infinite_costs) log_msg ("\n  cost: infinite\n");
-  else log_msg ("\n  cost: %d\n", a.cost ());
+  else log_msg ("\n  cost: %d", a.cost ());
 
   if (a.removable ()) log_msg ("\n  (removable)");
 
@@ -332,6 +332,32 @@ sh_ams::access::access
   m_mod_reg = mod_reg;
   m_used = false;
   m_alternatives_count = 0;
+}
+
+bool sh_ams::access::
+matches_alternative (const alternative* alt) const
+{
+  const addr_expr &ae = original_address (), &alt_ae = alt->address ();
+
+  if (ae.type () != alt_ae.type ()) return false;
+
+  if (!registers_match (ae.base_reg (), alt_ae.base_reg ())
+      || !registers_match (ae.index_reg (), alt_ae.index_reg ()))
+    return false;
+
+  if (ae.disp () < alt_ae.disp_min () || ae.disp () > alt_ae.disp_max ())
+    return false;
+
+  if (ae.has_index_reg ()
+      && (ae.scale () < alt_ae.scale_min ()
+          || ae.scale () > alt_ae.scale_max ()))
+
+  if (ae.has_index_reg ()
+      && (ae.scale () < alt_ae.scale_min ()
+          || ae.scale () > alt_ae.scale_max ()))
+    return false;
+
+  return true;
 }
 
 // Add a normal access to the end of the access sequence.
@@ -699,7 +725,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                   // generator to find all possible starting addresses.
                   as.add_reg_mod (root_insn,
 				  make_reg_addr (x), make_reg_addr (x),
-				  reg_mod_insn, x, 0);
+				  reg_mod_insn, x);
                   return make_reg_addr (x);
                 }
 
@@ -709,7 +735,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                   {
                     access& a = as.add_reg_mod (
 			root_insn, make_const_addr (reg_value),
-			make_const_addr (reg_value), NULL, x, 0);
+			make_const_addr (reg_value), NULL, x);
 
                     // Mark the access as used so that cloning costs are
                     // always added during address modification generation.
@@ -730,7 +756,6 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                 = extract_addr_expr (reg_value,
                                      reg_mod_insn, reg_mod_insn, mem_mach_mode,
                                      as, inserted_reg_mods, false);
-              // FIXME: Calculate costs of the address modification.
               access* a = &as.add_reg_mod (root_insn,
                                            original_reg_addr_expr,
                                            make_invalid_addr (),
@@ -753,7 +778,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               // Add an (rx = rx) reg_mod access to help the
               // address modification generator.
               as.add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
-			      reg_mod_insn, x, 0);
+			      reg_mod_insn, x);
 
               // Set all reg_mod accesses that were added while expanding this
               // register to "unremovable".
@@ -967,6 +992,16 @@ gen_address_mod (delegate& dlg)
     {
       if (accs->access_type () == reg_mod) continue;
       gen_min_mod (accs, dlg, true);
+    }
+
+  // Mark the reg_mod accesses as "unused" again (except for the
+  // reg <- constant copies, which are always marked used).
+  for (access_sequence::iterator accs = begin ();
+       accs != end (); ++accs)
+    {
+      if (accs->original_address ().has_base_reg ()
+          || accs->original_address ().has_index_reg ())
+        accs->reset_used ();
     }
 }
 
@@ -1332,13 +1367,116 @@ void sh_ams::access_sequence::update_insn_stream ()
 }
 
 // Get the total cost of using this access sequence.
-int sh_ams::access_sequence::cost ()
+int sh_ams::access_sequence::cost (void) const
 {
   int cost = 0;
   for (access_sequence::const_iterator accs = begin ();
        accs != end (); ++accs)
     cost += accs->cost ();
   return cost;
+}
+
+// Recalculate the cost of the accesses in the sequence.
+void sh_ams::access_sequence::update_cost (delegate& dlg)
+{
+  for (access_sequence::iterator accs = begin ();
+       accs != end (); ++accs)
+    {
+      if (accs->access_type () == load || accs->access_type () == store)
+        {
+          // Find the alternative that the access uses and update
+          // its cost accordingly.
+          for (const sh_ams::access::alternative* alt
+                 = accs->begin_alternatives (); ; ++alt)
+            {
+              if (accs->matches_alternative (alt))
+                {
+                  accs->update_cost (alt->costs ());
+                  break;
+                }
+              if (alt == accs->end_alternatives ())
+                gcc_unreachable ();
+            }
+        }
+      else if (accs->access_type () == reg_mod
+               && !accs->original_address ().is_invalid ())
+        {
+          int cost = 0;
+          const addr_expr &ae = accs->original_address ();
+
+          // Scaling costs
+          if (ae.has_no_base_reg () && ae.has_index_reg ()
+              && ae.scale () != 1)
+            cost += dlg.addr_reg_scale_cost (ae.index_reg (), ae.scale ());
+
+          // Costs for adding another reg
+          else if (ae.has_no_disp () && ae.scale () == 1
+                   && ae.has_base_reg () && ae.has_index_reg ())
+            cost += dlg.addr_reg_plus_reg_cost (ae.index_reg (), ae.base_reg ());
+
+          // Constant displacement costs
+          else if (ae.has_base_reg () && ae.has_no_index_reg ()
+                   && ae.has_disp ())
+            cost += dlg.addr_reg_disp_cost (ae.base_reg (), ae.disp ());
+
+          // If none of the previous branches were taken, the reg_mod access
+          // is either a (reg <- reg) or a (reg <- constant) copy, and doesn't
+          // have any modification cost.
+          else
+            {
+              gcc_assert ((ae.has_no_base_reg () && ae.has_no_index_reg ())
+                          || (ae.has_base_reg () && ae.has_no_index_reg ()
+                              && ae.has_no_disp ()));
+              cost = 0;
+            }
+
+          // Cloning costs
+          cost += get_clone_cost (*accs, dlg);
+
+          accs->update_cost (cost);
+        }
+    }
+
+  // Mark the reg_mod accesses as "unused" again (except for the
+  // reg <- constant copies, which are always marked used).
+  for (access_sequence::iterator accs = begin ();
+       accs != end (); ++accs)
+    {
+      if (accs->original_address ().has_base_reg ()
+          || accs->original_address ().has_index_reg ())
+        accs->reset_used ();
+    }
+}
+
+// Get the cloning costs associated with ACC, if any.
+int sh_ams::access_sequence::get_clone_cost (access &acc, delegate& dlg)
+{
+  rtx reused_reg = NULL;
+  if (acc.address ().has_base_reg ())
+    reused_reg = acc.address ().base_reg ();
+  else if (acc.address ().has_index_reg ())
+    reused_reg = acc.address ().index_reg ();
+  else return 0;
+
+  // There's no cloning cost for accesses that set the reg to itself.
+  if (reused_reg == acc.modified_reg ()) return 0;
+
+  for (access_sequence::iterator prev_accs = begin (); ; ++prev_accs)
+    {
+      if (prev_accs->access_type () == reg_mod
+          && prev_accs->modified_reg () == reused_reg)
+        {
+          // If the reused reg is already used by another access,
+          // we'll have to clone it.
+          if (prev_accs->is_used ())
+            return  dlg.addr_reg_clone_cost (reused_reg);
+
+          // Otherwise, we can use it without any cloning penalty.
+          prev_accs->set_used ();
+          return 0;
+        }
+    }
+  gcc_unreachable ();
 }
 
 // Find the cheapest way END_ADDR can be arrived at from one of the addresses
@@ -1460,7 +1598,6 @@ try_modify_addr
       scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
                                    c_end_addr.scale (), 0);
-      prev_cost = cost;
       cost += dlg.addr_reg_scale_cost (start_addr->modified_reg (), scale);
       if (access_place)
         {
@@ -1486,6 +1623,7 @@ try_modify_addr
               mod_tracker->inserted_accs ().push_back (ins_place);
             }
         }
+      prev_cost = cost;
     }
 
   // Add missing base reg.
@@ -1495,7 +1633,6 @@ try_modify_addr
                                    c_start_addr.index_reg (),
                                    c_start_addr.scale (),
                                    c_start_addr.disp ());
-      prev_cost = cost;
       cost += dlg.addr_reg_plus_reg_cost (start_addr->modified_reg (),
                                           c_end_addr.base_reg ());
       if (access_place)
@@ -1521,6 +1658,7 @@ try_modify_addr
               mod_tracker->inserted_accs ().push_back (ins_place);
             }
         }
+      prev_cost = cost;
     }
 
   // Set auto-inc/dec displacement that's added to the base reg.
@@ -1550,7 +1688,6 @@ try_modify_addr
                                    c_start_addr.index_reg (),
                                    c_start_addr.scale (),
                                    c_start_addr.disp () + disp);
-      prev_cost = cost;
       cost += dlg.addr_reg_disp_cost (start_addr->modified_reg (), disp);
       if (access_place)
         {
@@ -1575,6 +1712,7 @@ try_modify_addr
               mod_tracker->inserted_accs ().push_back (ins_place);
             }
         }
+      prev_cost = cost;
     }
 
   // For auto-mod accesses, copy the base reg into a new pseudo that will
@@ -1668,16 +1806,18 @@ unsigned int sh_ams::execute (function* fun)
             m_delegate.mem_access_alternatives (*it);
         }
 
+      as.update_cost (m_delegate);
 
       log_msg ("Access sequence contents:\n\n");
       for (access_sequence::const_iterator it = as.begin ();
 	   it != as.end (); ++it)
 	{
 	  log_access (*it, false);
-	  log_msg("\n-----\n");
+	  log_msg ("\n-----\n");
 	}
 
       log_msg ("\n\n");
+      log_msg ("\nTotal cost: %d\n", as.cost ());
 
       // Fill the sequence's REG_MOD_INSNS with the insns of the reg_mod accesses
       // that can be removed.
@@ -1695,7 +1835,7 @@ unsigned int sh_ams::execute (function* fun)
 	   it != as.end (); ++it)
 	{
 	  log_access (*it, false);
-	  log_msg("\n-----\n");
+	  log_msg ("\n-----\n");
 	}
       log_msg ("\nTotal cost: %d\n", as.cost ());
 
