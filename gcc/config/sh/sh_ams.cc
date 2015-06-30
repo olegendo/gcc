@@ -330,7 +330,12 @@ sh_ams::access::access
   m_addr_rtx =  addr_rtx;
   m_removable = removable;
   m_mod_reg = mod_reg;
-  m_used = false;
+  // Mark reg <- constant accesses  as used so that cloning
+  // costs are always added during address modification generation.
+  // This encourages the generator to reuse the base regs
+  // of previous constant accesses.
+  m_used = (original_addr_expr.has_no_base_reg ()
+            || original_addr_expr.has_no_index_reg ());
   m_alternatives_count = 0;
 }
 
@@ -733,15 +738,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                 // sequence as a reg_mod access.
                 if (CONST_INT_P (reg_value))
                   {
-                    access& a = as.add_reg_mod (
-			root_insn, make_const_addr (reg_value),
-			make_const_addr (reg_value), NULL, x);
-
-                    // Mark the access as used so that cloning costs are
-                    // always added during address modification generation.
-                    // This encourages the generator to reuse the base regs
-                    // of previous constant accesses.
-                    a.set_used ();
+                    as.add_reg_mod (root_insn, make_const_addr (reg_value),
+                                    make_const_addr (reg_value), NULL, x);
                   }
             }
 
