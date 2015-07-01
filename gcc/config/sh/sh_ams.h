@@ -343,7 +343,7 @@ public:
 
     access (rtx_insn* insn, rtx* mem, access_type_t access_type,
 	    addr_expr original_addr_expr, addr_expr addr_expr,
-	    int cost = infinite_costs);
+	    bool should_optimize, int cost = infinite_costs);
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
 	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
 
@@ -380,6 +380,9 @@ public:
     bool removable (void) const { return m_removable; }
 
     void mark_unremovable (void) { m_removable = false; }
+
+    // If false, AMS skips this access when optimizing.
+    bool should_optimize (void) const { return m_should_optimize; }
 
     // For reg_mod accesses, shows the register rtx that was modified.
     rtx modified_reg (void) const { return m_mod_reg; }
@@ -478,6 +481,7 @@ public:
     rtx_insn* m_insn;
     rtx* m_mem_ref; // reference to the mem rtx inside the insn.
     bool m_removable;
+    bool m_should_optimize;
     rtx m_addr_rtx;
     rtx m_mod_reg;
     bool m_used;

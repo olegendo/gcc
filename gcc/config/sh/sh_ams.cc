@@ -300,7 +300,8 @@ next (ForwardIt it,
 
 sh_ams::access::access
 (rtx_insn* insn, rtx* mem, access_type_t access_type,
- addr_expr original_addr_expr, addr_expr addr_expr, int cost)
+ addr_expr original_addr_expr, addr_expr addr_expr,
+ bool should_optimize, int cost)
 {
   m_access_type = access_type;
   m_machine_mode = GET_MODE (*mem);
@@ -312,6 +313,7 @@ sh_ams::access::access
   m_addr_expr = addr_expr;
   m_addr_rtx = NULL_RTX;
   m_removable = false;
+  m_should_optimize = should_optimize;
   m_mod_reg = NULL_RTX;
   m_used = false;
   m_alternatives_count = 0;
@@ -329,6 +331,7 @@ sh_ams::access::access
   m_addr_expr =  addr_expr;
   m_addr_rtx =  addr_rtx;
   m_removable = removable;
+  m_should_optimize = true;
   m_mod_reg = mod_reg;
   // Mark reg <- constant accesses  as used so that cloning
   // costs are always added during address modification generation.
@@ -371,13 +374,33 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
 					 access_type_t access_type)
 {
   machine_mode m_mode = GET_MODE (*mem);
+
   // Create an ADDR_EXPR struct from the address expression of MEM.
   addr_expr original_expr =
     extract_addr_expr ((XEXP (*mem, 0)), insn, insn, m_mode, *this, false);
+
+  std::vector<access*> inserted_reg_mods;
   addr_expr expr =
     extract_addr_expr ((XEXP (*mem, 0)), insn, insn,
-                       m_mode, *this, true);
-  push_back (access (insn, mem, access_type, original_expr, expr));
+                       m_mode, *this, inserted_reg_mods, true);
+
+  // If the effective address doesn't fit into an addr_expr,
+  // don't try to optimize it.
+  bool should_optimize;
+  if (expr.is_invalid ())
+    {
+      expr = original_expr;
+      should_optimize = false;
+
+      // The reg modifications that were used to arrive at the address
+      // shouldn't be removed in this case.
+      for (std::vector<access*>::iterator ins = inserted_reg_mods.begin ();
+           ins != inserted_reg_mods.end (); ++ins)
+        (*ins)->mark_unremovable ();
+    } else should_optimize = true;
+
+  push_back (access (insn, mem, access_type,
+                     original_expr, expr, should_optimize));
   return back ();
 }
 
@@ -492,7 +515,8 @@ sh_ams::access_sequence::next_mem_access (iterator i)
     return i;
 
   for (++i; i != end (); ++i)
-    if (i->access_type () == load || i->access_type () == store)
+    if ((i->access_type () == load || i->access_type () == store)
+        && i->should_optimize ())
       return i;
 
   return end ();
@@ -1007,7 +1031,9 @@ gen_address_mod (delegate& dlg)
 
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
-      if (accs->access_type () == reg_mod) continue;
+      if (accs->access_type () == reg_mod
+          || !accs->should_optimize ())
+        continue;
       gen_min_mod (accs, dlg, true);
     }
 
