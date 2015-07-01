@@ -713,8 +713,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           rtx reg_value;
           rtx_insn *reg_mod_insn = NULL;
 
-          access* inserted_mod
-            = inserted_reg_mods.empty () ? NULL : inserted_reg_mods.back ();
+          access* inserted_mod = NULL;
 
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
           if (reg_value != NULL_RTX)
@@ -771,26 +770,31 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // as an rtx instead of an addr_expr.
           if (reg_addr_expr.is_invalid ())
             {
-              inserted_mod->update_original_address (0, reg_value);
+              if (inserted_mod)
+                {
+                  inserted_mod->update_original_address (0, reg_value);
+
+                  // Set all reg_mod accesses that were added while expanding this
+                  // register to "unremovable".
+                  while (true)
+                    {
+                      access* a = inserted_reg_mods.back ();
+                      a->mark_unremovable ();
+                      inserted_reg_mods.pop_back ();
+                      if (a == inserted_mod) break;
+                    }
+                }
 
               // Add an (rx = rx) reg_mod access to help the
               // address modification generator.
               as.add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
 			      reg_mod_insn, x);
 
-              // Set all reg_mod accesses that were added while expanding this
-              // register to "unremovable".
-              while (true)
-                {
-                  access* a = inserted_reg_mods.back ();
-                  a->mark_unremovable ();
-                  inserted_reg_mods.pop_back ();
-                  if (a == inserted_mod) break;
-                }
-
               return make_reg_addr (x);
             }
-          inserted_mod->update_effective_address (reg_addr_expr);
+
+          if (inserted_mod)
+            inserted_mod->update_effective_address (reg_addr_expr);
 
           return reg_addr_expr;
         }
