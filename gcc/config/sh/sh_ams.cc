@@ -213,7 +213,7 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
       log_addr_expr (a.address ());
     }
 
-  if (a.cost () == sh_ams::infinite_costs) log_msg ("\n  cost: infinite\n");
+  if (a.cost () == sh_ams::infinite_costs) log_msg ("\n  cost: infinite");
   else log_msg ("\n  cost: %d", a.cost ());
 
   if (a.removable ()) log_msg ("\n  (removable)");
@@ -335,7 +335,7 @@ sh_ams::access::access
   // This encourages the generator to reuse the base regs
   // of previous constant accesses.
   m_used = (original_addr_expr.has_no_base_reg ()
-            || original_addr_expr.has_no_index_reg ());
+            && original_addr_expr.has_no_index_reg ());
   m_alternatives_count = 0;
 }
 
