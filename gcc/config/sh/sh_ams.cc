@@ -1795,6 +1795,17 @@ unsigned int sh_ams::execute (function* fun)
   FOR_EACH_BB_FN (bb, fun)
     {
       log_msg ("BB #%d:\n", bb->index);
+      log_msg ("insns:\n");
+      for (rtx_insn* next_i, *i = NEXT_INSN (BB_HEAD (bb));
+           i != NULL_RTX; i = next_i)
+        {
+          next_i = NEXT_INSN (i);
+          if (!INSN_P (i) || !NONDEBUG_INSN_P (i)
+              || bb->index != BLOCK_FOR_INSN (i)->index)
+            continue;
+          log_insn (i);
+        }
+      log_msg ("---\n");
 
       // Construct the access sequence from the access insns.
       access_sequence as;
