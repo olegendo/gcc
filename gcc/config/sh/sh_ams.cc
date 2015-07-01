@@ -648,42 +648,51 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
         return op1;
     }
 
-  // Auto-mod accesses found in the original insn list are changed into
-  // non-modifying accesses by offseting their constant displacement, or by
-  // using the modified expression directly in the case of PRE/POST_MODIFY.
+  // Auto-mod accesses' effective address is found by offseting their constant
+  // displacement, or by using the modified expression directly in the case
+  // of PRE/POST_MODIFY.
   else if (GET_RTX_CLASS (code) == RTX_AUTOINC)
     {
-      bool expanding_reg = (INSN_UID (insn) != INSN_UID (root_insn));
+      addr_type_t mod_type;
+
+      // For post-mod accesses, the displacement is offset only when
+      // tracing back the value of a register, or when extracting the
+      // original address.  Otherwise, we're interested in the effective
+      // address during the memory access, which isn't displaced at that point.
+      bool use_post_disp = (INSN_UID (insn) != INSN_UID (root_insn) || !expand);
 
       switch (code)
         {
-
-        // For post-mod accesses, the displacement is offset only when
-        // tracing back the value of a register.  Otherwise, we're interested
-        // in the value that the address reg has during the memory access,
-        // which isn't modified at that point.
         case POST_DEC:
-          disp = expanding_reg ? -GET_MODE_SIZE (mem_mach_mode) : 0;
+          disp = use_post_disp ? -GET_MODE_SIZE (mem_mach_mode) : 0;
+          mod_type = post_mod;
           break;
         case POST_INC:
-          disp = expanding_reg ? GET_MODE_SIZE (mem_mach_mode) : 0;
+          disp = use_post_disp ? GET_MODE_SIZE (mem_mach_mode) : 0;
+          mod_type = post_mod;
           break;
         case PRE_DEC:
           disp = -GET_MODE_SIZE (mem_mach_mode);
+          mod_type = pre_mod;
           break;
         case PRE_INC:
           disp = GET_MODE_SIZE (mem_mach_mode);
+          mod_type = pre_mod;
           break;
         case POST_MODIFY:
-          return extract_addr_expr
-            (XEXP (x, expanding_reg ? 1 : 0), insn, root_insn,
-             mem_mach_mode, as,
-             inserted_reg_mods, expand);
+          op1 = extract_addr_expr (XEXP (x, use_post_disp ? 1 : 0),
+                                   insn, root_insn,
+                                   mem_mach_mode, as,
+                                   inserted_reg_mods, expand);
+          if (expand) return op1;
+          return post_mod_addr (op1.base_reg (), op1.disp ());
         case PRE_MODIFY:
-          return extract_addr_expr
-            (XEXP (x, 1), insn, root_insn,
-             mem_mach_mode, as,
-             inserted_reg_mods, expand);
+          op1 = extract_addr_expr (XEXP (x, 1),
+                                   insn, root_insn,
+                                   mem_mach_mode, as,
+                                   inserted_reg_mods, expand);
+          if (expand) return op1;
+          return pre_mod_addr (op1.base_reg (), op1.disp ());
         default:
           return make_invalid_addr ();
         }
@@ -692,8 +701,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
         (XEXP (x, 0), insn, root_insn, mem_mach_mode, as,
          inserted_reg_mods, expand);
       disp += op1.disp ();
-      return non_mod_addr
-        (op1.base_reg (), op1.index_reg (), op1.scale (), disp);
+
+      if (expand)
+        return non_mod_addr (op1.base_reg (), invalid_regno, 1, disp);
+
+      if (mod_type == post_mod)
+        return post_mod_addr (op1.base_reg (), disp);
+      else
+        return pre_mod_addr (op1.base_reg (), disp);
     }
 
   switch (code)
