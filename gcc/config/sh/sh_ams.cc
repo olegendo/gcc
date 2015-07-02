@@ -280,6 +280,30 @@ expand_plus (rtx a, HOST_WIDE_INT b)
   return expand_plus (a, GEN_INT (b));
 }
 
+rtx
+expand_minus (rtx a, rtx b)
+{
+  log_msg ("\nexpand_minus ");
+  log_rtx (a);
+  log_msg (" - ");
+  log_rtx (b);
+  log_msg ("\n");
+
+  if (b == const0_rtx)
+    return a;
+
+  return expand_binop (Pmode, sub_optab, a, b, NULL, false, OPTAB_LIB_WIDEN);
+}
+
+rtx
+expand_minus (rtx a, HOST_WIDE_INT b)
+{
+  if (b == 0)
+    return a;
+
+  return expand_minus (a, GEN_INT (b));
+}
+
 } // anonymous namespace
 
 // borrowed from C++11
@@ -643,7 +667,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 {
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
-  disp_t disp, scale;
+  disp_t disp;
+  scale_t scale;
   rtx base_reg, index_reg;
 
   if (x == NULL_RTX) return make_invalid_addr ();
@@ -849,9 +874,15 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       // or base + disp are inverted.
       if (op1.has_index_reg () && op1.scale () != -1)
         break;
-      op1 = non_mod_addr
-        (op1.index_reg (), op1.base_reg (), -op1.scale (), -op1.disp ());
+
+      if (op1.has_index_reg ())
+        scale = op1.scale ();
+      else scale = 1;
+
+      op1 = non_mod_addr (op1.index_reg (), op1.base_reg (),
+                          -scale, -op1.disp ());
       if (code == NEG) return op1;
+
     case PLUS:
       disp = op0.disp () + op1.disp ();
       index_reg = invalid_regno;
@@ -1293,11 +1324,17 @@ void sh_ams::access_sequence::update_insn_stream ()
 	    }
           else if (accs->original_address ().has_index_reg ())
             {
-	      rtx index = expand_mult (accs->original_address ().index_reg (),
-				       accs->original_address ().scale ());
+              bool subtract = (accs->original_address ().has_base_reg ()
+                               && accs->original_address ().scale () == -1);
+	      rtx index = subtract ? accs->original_address ().index_reg ()
+                : expand_mult (accs->original_address ().index_reg (),
+                               accs->original_address ().scale ());
 
               if (accs->original_address ().has_no_base_reg ())
                 new_val = index;
+              else if (subtract)
+                new_val = expand_minus (accs->original_address ().base_reg (),
+                                        index);
               else
 		new_val = expand_plus (accs->original_address ().base_reg (),
 				       index);
@@ -1452,8 +1489,8 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
               && ae.scale () != 1)
             cost += dlg.addr_reg_scale_cost (ae.index_reg (), ae.scale ());
 
-          // Costs for adding another reg
-          else if (ae.has_no_disp () && ae.scale () == 1
+          // Costs for adding or subtracting another reg
+          else if (ae.has_no_disp () && std::abs (ae.scale ()) == 1
                    && ae.has_base_reg () && ae.has_index_reg ())
             cost += dlg.addr_reg_plus_reg_cost (ae.index_reg (), ae.base_reg ());
 
@@ -1615,19 +1652,27 @@ try_modify_addr
         }
     }
 
-  // If the start and end address have different index
-  // registers, give up.
-  if (c_start_addr.index_reg () != c_end_addr.index_reg ())
-    return mod_addr_result (infinite_costs, invalid_regno, 0);
-
-  // Same for base regs, unless the start address doesn't have
-  // a base reg, in which case we can add one.
+  // If the start address has a base reg, and it's different
+  // from that of the end address, give up.
   if (c_start_addr.has_base_reg ()
       && c_start_addr.base_reg () != c_end_addr.base_reg ())
     return mod_addr_result (infinite_costs, invalid_regno, 0);
 
+  // Same for index regs, unless we can get to the end address
+  // by subtracting.
+  if (c_start_addr.index_reg () != c_end_addr.index_reg ())
+    {
+      if (!(c_start_addr.has_no_base_reg ()
+            && c_end_addr.has_index_reg ()
+            && c_start_addr.index_reg () == c_end_addr.base_reg ()
+            && c_start_addr.scale () == 1
+            && c_end_addr.scale () == -1))
+        return mod_addr_result (infinite_costs, invalid_regno, 0);
+    }
+
   // Add scaling.
   if (c_start_addr.has_index_reg ()
+      && c_start_addr.index_reg () == c_end_addr.index_reg ()
       && c_start_addr.scale () != c_end_addr.scale ())
     {
       // We can't scale if the address has displacement or a base reg.
@@ -1657,6 +1702,46 @@ try_modify_addr
 			   non_mod_addr (invalid_regno,
 					 start_addr->modified_reg (), scale, 0),
                            c_start_addr, NULL, new_reg, cost - prev_cost);
+          final_addr_regno = new_reg;
+
+          if (mod_tracker)
+            {
+              ins_place =  *access_place;
+              --ins_place;
+              mod_tracker->inserted_accs ().push_back (ins_place);
+            }
+        }
+      prev_cost = cost;
+    }
+
+  // Try subtracting regs.
+  if (c_start_addr.has_no_base_reg ()
+      && c_end_addr.has_index_reg ()
+      && c_start_addr.index_reg () == c_end_addr.base_reg ()
+      && c_start_addr.scale () == 1
+      && c_end_addr.scale () == -1)
+    {
+      c_start_addr = non_mod_addr (c_start_addr.index_reg (),
+                                   c_end_addr.index_reg (),
+                                   -1,
+                                   c_start_addr.disp ());
+      cost += dlg.addr_reg_plus_reg_cost (start_addr->modified_reg (),
+                                          c_end_addr.index_reg ());
+      if (access_place)
+        {
+          if (!start_addr->is_used ())
+            {
+              start_addr->set_used ();
+              if (mod_tracker)
+                mod_tracker->use_changed_accs ().push_back (start_addr);
+            }
+          new_reg = gen_reg_rtx (Pmode);
+          start_addr = &add_reg_mod (
+                            *access_place,
+                            non_mod_addr (start_addr->modified_reg (),
+                                          c_end_addr.index_reg (),
+                                          -1, 0),
+                            c_start_addr, NULL, new_reg, cost - prev_cost);
           final_addr_regno = new_reg;
 
           if (mod_tracker)
