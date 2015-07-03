@@ -1130,10 +1130,6 @@ int sh_ams::access_sequence::
 gen_min_mod
 (access_sequence::iterator acc, delegate& dlg, bool record_in_sequence)
 {
-  // FIXME: Handle reg_use accesses.
-  if (acc->access_type () == reg_use)
-    return 0;
-
   const addr_expr& ae = acc->address ();
 
   if (record_in_sequence)
@@ -1404,7 +1400,8 @@ void sh_ams::access_sequence::update_insn_stream ()
         }
       else if (accs->access_type () == reg_use)
         {
-          // FIXME: Handle reg_use accesses.
+          gcc_assert (accs->original_address ().has_base_reg ());
+          accs->update_used_reg (accs->original_address ().base_reg ());
         }
       else if (accs->access_type () == load || accs->access_type () == store)
         {
@@ -2068,8 +2065,9 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::iterator it = as.begin ();
 	   it != as.end (); ++it)
         {
-          if (it->access_type () == load || it->access_type () == store)
-            m_delegate.mem_access_alternatives (*it);
+          if (it->access_type () == load || it->access_type () == store
+              || it->access_type () == reg_use)
+            it->update_alternatives (m_delegate);
         }
 
       as.update_cost (m_delegate);

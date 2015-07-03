@@ -268,6 +268,8 @@ public:
   static addr_expr
   make_invalid_addr (void);
 
+  struct delegate;
+
   // a memory access in the insn stream.
   class access
   {
@@ -440,6 +442,16 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
+    void update_alternatives (delegate& dlg)
+    {
+      if (access_type () == reg_use)
+	// Reg_use accesses' address has to be loaded into a
+	// single register.
+	add_alternative (0, sh_ams::make_reg_addr ());
+      else
+	dlg.mem_access_alternatives (*this);
+    }
+
     bool matches_alternative (const alternative* alt) const;
 
     void update_original_address (int new_cost, addr_expr new_addr_expr)
@@ -466,9 +478,17 @@ public:
 
     bool update_mem (rtx new_addr)
     {
-      return validate_change (m_insn, m_mem_ref,
-			      replace_equiv_address (*m_mem_ref, new_addr),
-			      false);
+      bool val = validate_change (m_insn, m_mem_ref,
+				  replace_equiv_address (*m_mem_ref, new_addr),
+				  false);
+      df_insn_rescan (insn ());
+      return val;
+    }
+
+    void update_used_reg (rtx new_reg)
+    {
+      *m_mem_ref = new_reg;
+      df_insn_rescan (insn ());
     }
 
     void update_insn (rtx_insn *new_insn)
@@ -507,8 +527,6 @@ public:
     int m_alternatives_count;
     alternative m_alternatives[MAX_ALTERNATIVES];
   };
-
-  struct delegate;
 
   class access_sequence : public std::list<access>
   {
