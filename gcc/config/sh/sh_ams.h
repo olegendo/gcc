@@ -22,7 +22,7 @@ public:
   // if abs ('disp') == access mode size it's a {PRE,POST}_{INC_DEC}.
 
   enum addr_type_t { non_mod, pre_mod, post_mod };
-  enum access_type_t { load, store, reg_mod };
+  enum access_type_t { load, store, reg_mod, reg_use };
 
   typedef int regno_t;
 
@@ -208,6 +208,10 @@ public:
   find_mem_accesses (rtx& x, OutputIterator out,
 		     access_type_t access_type = load);
 
+  template <typename OutputIterator> static void
+  find_addr_regs (rtx& x, OutputIterator out,
+		  hash_map<rtx, access*> &addr_regs);
+
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
 
@@ -346,6 +350,8 @@ public:
 	    bool should_optimize, int cost = infinite_costs);
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
 	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
+    access (rtx_insn* insn, rtx* reg_ref, addr_expr original_addr_expr,
+	    addr_expr addr_expr, rtx addr_rtx);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -358,8 +364,14 @@ public:
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
 
     // If m_access_type is REG_MOD, this access represents the modification
-    // of an address register.  In that case, m_mod_reg stores the register
+    // of an address register.  In this case, m_mod_reg stores the register
     // that's modified and m_addr_expr is its new address.
+    //
+    // If the type is REG_USE, the access represents the use of an address
+    // reg outside of a memory access.  In this case, m_addr_expr is the
+    // effective address of the address reg during the use and
+    // m_mem_ref is a reference to the address reg rtx inside the insn
+    // where it's used.
     access_type_t access_type (void) const { return m_access_type; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
@@ -514,6 +526,8 @@ public:
     int cost (void) const;
     void update_cost (delegate& dlg);
 
+    void find_reg_uses (basic_block bb);
+
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
 
@@ -537,6 +551,14 @@ public:
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx_insn* mod_insn,
 		 rtx reg, int cost = infinite_costs, bool removable = false);
+
+    access&
+    add_reg_use (access_sequence::iterator insert_before,
+		 const addr_expr& original_addr_expr,
+		 const addr_expr& addr_expr,
+		 rtx addr_rtx,
+		 rtx* reg_ref,
+		 rtx_insn* use_insn);
 
     // find the next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
