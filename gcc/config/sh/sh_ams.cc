@@ -582,7 +582,8 @@ sh_ams::access_sequence::next_mem_access (iterator i)
     return i;
 
   for (++i; i != end (); ++i)
-    if ((i->access_type () == load || i->access_type () == store)
+    if ((i->access_type () == load || i->access_type () == store
+         || i->access_type () == reg_use)
         && i->should_optimize ())
       return i;
 
