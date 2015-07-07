@@ -1453,6 +1453,21 @@ void sh_ams::access_sequence::update_insn_stream ()
 	      log_msg ("\n");
 	    }
 
+	  log_msg ("new addr (6) = ");
+	  log_rtx (new_addr);
+	  log_msg ("\n");
+
+          bool mem_update_ok = accs->update_mem (new_addr);
+          gcc_assert (mem_update_ok);
+
+          sh_check_add_incdec_notes (accs->insn ());
+        }
+
+      access_sequence::iterator next_acc = accs;
+      ++next_acc;
+      if (accs->access_type () == load || accs->access_type () == store
+          || accs->access_type () == reg_use || next_acc == end ())
+        {
           if (sequence_started)
             {
               rtx_insn* new_insns = get_insns ();
@@ -1466,15 +1481,6 @@ void sh_ams::access_sequence::update_insn_stream ()
               log_msg ("\n");
               emit_insn_before (new_insns, accs->insn ());
             }
-
-	  log_msg ("new addr (6) = ");
-	  log_rtx (new_addr);
-	  log_msg ("\n");
-
-          bool mem_update_ok = accs->update_mem (new_addr);
-          gcc_assert (mem_update_ok);
-
-          sh_check_add_incdec_notes (accs->insn ());
         }
 
     }

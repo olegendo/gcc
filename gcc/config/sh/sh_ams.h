@@ -481,14 +481,12 @@ public:
       bool val = validate_change (m_insn, m_mem_ref,
 				  replace_equiv_address (*m_mem_ref, new_addr),
 				  false);
-      df_insn_rescan (insn ());
       return val;
     }
 
     void update_used_reg (rtx new_reg)
     {
       *m_mem_ref = new_reg;
-      df_insn_rescan (insn ());
     }
 
     void update_insn (rtx_insn *new_insn)
