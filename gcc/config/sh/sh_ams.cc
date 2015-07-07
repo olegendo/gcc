@@ -388,7 +388,7 @@ sh_ams::access::access
   m_addr_expr = addr_expr;
   m_addr_rtx = addr_rtx;
   m_removable = false;
-  m_should_optimize = true;
+  m_should_optimize = !addr_expr.is_invalid ();
   m_mod_reg = NULL;
   m_used = false;
   m_alternatives_count = 0;
