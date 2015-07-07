@@ -1077,10 +1077,6 @@ sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
 // Generate the address modifications needed to arrive at the addresses in
 // the access sequence.  They are inserted in the form of reg_mod accesses
 // between the regular accesses.
-//
-// FIXME: The auto-mod alternatives are currently never selected because the
-// insn generating algorithm only tries to optimize one access at a time, and
-// SH's simple base reg access costs the same as the auto-mod accesses.
 void sh_ams::access_sequence::
 gen_address_mod (delegate& dlg)
 {
