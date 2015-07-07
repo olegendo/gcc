@@ -824,30 +824,19 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           access* inserted_mod = NULL;
 
           find_reg_value (x, insn, &reg_value, &reg_mod_insn);
-          if (reg_value != NULL_RTX)
+          // Stop expanding the reg if we reach a hardreg -> pseudo reg
+          // copy, or if the reg can't be expanded any further.
+          if (reg_value != NULL_RTX && REG_P (reg_value)
+              && (REGNO (reg_value) == REGNO (x)
+                  || HARD_REGISTER_P (reg_value)))
             {
-              // Stop expanding the reg if we reach a hardreg -> pseudo reg
-              // copy, or if the reg can't be expanded any further.
-              if (REG_P (reg_value)
-                  && (REGNO (reg_value) == REGNO (x)
-                      || HARD_REGISTER_P (reg_value)))
-                {
-                  // Add a reg_mod access that sets the reg to itself.
-                  // This makes it easier for the address modification
-                  // generator to find all possible starting addresses.
-                  as.add_reg_mod (root_insn,
-				  make_reg_addr (x), make_reg_addr (x),
-				  reg_mod_insn, x);
-                  return make_reg_addr (x);
-                }
-
-                // For constant -> reg copies, add the reg to the
-                // sequence as a reg_mod access.
-                if (CONST_INT_P (reg_value))
-                  {
-                    as.add_reg_mod (root_insn, make_const_addr (reg_value),
-                                    make_const_addr (reg_value), NULL, x);
-                  }
+              // Add a reg_mod access that sets the reg to itself.
+              // This makes it easier for the address modification
+              // generator to find all possible starting addresses.
+              as.add_reg_mod (root_insn,
+                              make_reg_addr (x), make_reg_addr (x),
+                              reg_mod_insn, x);
+              return make_reg_addr (x);
             }
 
           // Place all the insns that are used to arrive at the address
@@ -1635,6 +1624,30 @@ sh_ams::access_sequence
           min_start_addr = &(*it);
         }
     }
+
+  // If the end addr only has a constant displacement, try loading it into
+  // the reg directly.
+  if (end_addr.has_no_base_reg () && end_addr.has_no_index_reg ()
+      && end_addr.has_disp ())
+    {
+      rtx const_reg = gen_reg_rtx (Pmode);
+      add_reg_mod (begin (),
+                   make_const_addr (end_addr.disp ()),
+                   make_const_addr (end_addr.disp ()),
+                   NULL, const_reg, 0);
+      begin ()->set_used ();
+      int cost = try_modify_addr (&(*begin ()), end_addr,
+                                  disp_min, disp_max, addr_type, dlg).cost;
+      if (cost < min_cost)
+        {
+          min_cost = cost;
+          min_start_addr = &(*begin ());
+        }
+      // If this doesn't reduce the costs, remove the newly added
+      // (reg <- const) copy.
+      else pop_front ();
+    }
+
   return min_mod_cost_result (min_cost, min_start_addr);
 }
 
@@ -1915,7 +1928,8 @@ try_modify_addr
           rtx pre_mod_reg = new_reg;
           new_reg = gen_reg_rtx (Pmode);
           start_addr = &add_reg_mod (*access_place, make_reg_addr (pre_mod_reg),
-				     c_start_addr, NULL, new_reg, 0);
+				     c_start_addr, NULL, new_reg,
+                                     cost - prev_cost);
           final_addr_regno = new_reg;
 
           if (mod_tracker)
@@ -1924,6 +1938,7 @@ try_modify_addr
               --ins_place;
               mod_tracker->inserted_accs ().push_back (ins_place);
             }
+          prev_cost = cost;
         }
     }
 
