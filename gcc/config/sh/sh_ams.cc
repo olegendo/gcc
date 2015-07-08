@@ -188,11 +188,20 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
   else if (a.access_type () == sh_ams::reg_mod)
     {
       log_msg ("reg_mod:\n  ");
-      log_rtx (a.modified_reg ());
+      log_rtx (a.address_reg ());
       log_msg (" set\n");
     }
   else if (a.access_type () == sh_ams::reg_use)
     log_msg ("reg_use:\n");
+  else if (a.access_type () == sh_ams::reg_value)
+    {
+      log_msg ("reg_value:\n  value of ");
+      log_rtx (a.address_reg ());
+      log_msg (" should be\n  ");
+      log_addr_expr (a.address ());
+      log_msg ("\n");
+      return;
+    }
   else
     gcc_unreachable ();
 
@@ -346,7 +355,7 @@ sh_ams::access::access
   m_addr_rtx = NULL;
   m_removable = false;
   m_should_optimize = should_optimize;
-  m_mod_reg = NULL;
+  m_addr_reg = NULL;
   m_used = false;
   m_alternatives_count = 0;
 }
@@ -365,7 +374,7 @@ sh_ams::access::access
   m_addr_rtx = addr_rtx;
   m_removable = removable;
   m_should_optimize = true;
-  m_mod_reg = mod_reg;
+  m_addr_reg = mod_reg;
   // Mark reg <- constant accesses  as used so that cloning
   // costs are always added during address modification generation.
   // This encourages the generator to reuse the base regs
@@ -389,7 +398,25 @@ sh_ams::access::access
   m_addr_rtx = addr_rtx;
   m_removable = false;
   m_should_optimize = !addr_expr.is_invalid ();
-  m_mod_reg = NULL;
+  m_addr_reg = NULL;
+  m_used = false;
+  m_alternatives_count = 0;
+}
+
+// Constructor for reg_value accesses.
+sh_ams::access::access
+(rtx addr_reg, addr_expr addr_reg_value)
+{
+  m_access_type = reg_value;
+  m_cost = 0;
+  m_insn = NULL;
+  m_mem_ref = NULL;
+  m_original_addr_expr = make_invalid_addr ();
+  m_addr_expr = addr_reg_value;
+  m_addr_rtx = NULL;
+  m_removable = false;
+  m_should_optimize = true;
+  m_addr_reg = addr_reg;
   m_used = false;
   m_alternatives_count = 0;
 }
@@ -482,7 +509,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
            as_it != end () && !as_it->insn (); ++as_it)
         {
           if (as_it->access_type () == reg_mod
-              && as_it->modified_reg () == reg)
+              && as_it->address_reg () == reg)
             return *as_it;
         }
 
@@ -507,7 +534,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
           // If the reg_mod access is already inside the access
           // sequence, don't add it a second time.
           if (as_it->access_type () == reg_mod
-              && as_it->insn () == mod_insn && as_it->modified_reg () == reg
+              && as_it->insn () == mod_insn && as_it->address_reg () == reg
               && as_it->original_address ().base_reg ()
                   == original_addr_expr.base_reg ())
             return *as_it;
@@ -576,14 +603,49 @@ sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
 }
 
 sh_ams::access_sequence::iterator
+sh_ams::access_sequence::first_mem_access (void)
+{
+  for (iterator i = begin (); i != end (); ++i)
+    if (i->access_type () == load || i->access_type () == store)
+      return i;
+
+  return end ();
+}
+
+sh_ams::access_sequence::iterator
 sh_ams::access_sequence::next_mem_access (iterator i)
 {
   if (i == end ())
     return i;
 
   for (++i; i != end (); ++i)
+    if (i->access_type () == load || i->access_type () == store)
+      return i;
+
+  return end ();
+}
+
+sh_ams::access_sequence::iterator
+sh_ams::access_sequence::first_access_to_optimize (void)
+{
+  for (iterator i = begin (); i != end (); ++i)
     if ((i->access_type () == load || i->access_type () == store
-         || i->access_type () == reg_use)
+         || i->access_type () == reg_use || i->access_type () == reg_value)
+        && i->should_optimize ())
+      return i;
+
+  return end ();
+}
+
+sh_ams::access_sequence::iterator
+sh_ams::access_sequence::next_access_to_optimize (iterator i)
+{
+  if (i == end ())
+    return i;
+
+  for (++i; i != end (); ++i)
+    if ((i->access_type () == load || i->access_type () == store
+         || i->access_type () == reg_use || i->access_type () == reg_value)
         && i->should_optimize ())
       return i;
 
@@ -591,9 +653,27 @@ sh_ams::access_sequence::next_mem_access (iterator i)
 }
 
 sh_ams::access_sequence::const_iterator
+sh_ams::access_sequence::first_mem_access (void) const
+{
+  return const_cast<access_sequence*> (this)->first_mem_access ();
+}
+
+sh_ams::access_sequence::const_iterator
 sh_ams::access_sequence::next_mem_access (const_iterator i) const
 {
   return const_cast<access_sequence*> (this)->next_mem_access (i);
+}
+
+sh_ams::access_sequence::const_iterator
+sh_ams::access_sequence::first_access_to_optimize (void) const
+{
+  return const_cast<access_sequence*> (this)->first_access_to_optimize ();
+}
+
+sh_ams::access_sequence::const_iterator
+sh_ams::access_sequence::next_access_to_optimize (const_iterator i) const
+{
+  return const_cast<access_sequence*> (this)->next_access_to_optimize (i);
 }
 
 // The recursive part of find_reg_value. If REG is modified in INSN,
@@ -1089,13 +1169,9 @@ gen_address_mod (delegate& dlg)
       else ++accs;
     }
 
-  for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
-    {
-      if (accs->access_type () == reg_mod
-          || !accs->should_optimize ())
-        continue;
-      gen_min_mod (accs, dlg, true);
-    }
+  for (access_sequence::iterator accs = first_access_to_optimize ();
+       accs != end (); accs = next_access_to_optimize (accs))
+    gen_min_mod (accs, dlg, true);
 
   // Mark the reg_mod accesses as "unused" again (except for the
   // reg <- constant copies, which are always marked used).
@@ -1131,7 +1207,7 @@ gen_min_mod
   addr_expr min_end_base, min_end_index;
 
   access_sequence::iterator next_acc = record_in_sequence
-				       ? next_mem_access (acc)
+				       ? next_access_to_optimize (acc)
 				       : end ();
 
   // Go through the alternatives for this access and keep
@@ -1291,9 +1367,15 @@ gen_mod_for_alt
     new_addr_expr = post_mod_addr (new_addr_expr.base_reg (),
                                    alternative.address ().disp_min ());
 
-  // Update the original_addr_expr of the access with the
-  // alternative.
-  acc->update_original_address (alternative.costs (), new_addr_expr);
+  if (acc->access_type () == reg_value)
+    // If this is a reg_value access, set the address reg to the register
+    // that now holds its original value.
+    add_reg_mod (acc, new_addr_expr, acc->address (),
+                 NULL, acc->address_reg (), 0);
+  else
+    // Update the original_addr_expr of the access with the
+    // alternative.
+    acc->update_original_address (alternative.costs (), new_addr_expr);
 }
 
 // Write the sequence into the insn stream.
@@ -1311,6 +1393,7 @@ void sh_ams::access_sequence::update_insn_stream ()
   //reg_mod_insns ().clear ();
 
   bool sequence_started = false;
+  rtx_insn* last_insn = NULL;
 
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
@@ -1323,7 +1406,7 @@ void sh_ams::access_sequence::update_insn_stream ()
 	      log_msg ("access original address not valid\n");
 	      continue;
 	    }
-          if (accs->original_address ().base_reg () == accs->modified_reg ()
+          if (accs->original_address ().base_reg () == accs->address_reg ()
               && accs->original_address ().has_no_index_reg ()
               && accs->original_address ().has_no_disp ())
 	    {
@@ -1381,7 +1464,7 @@ void sh_ams::access_sequence::update_insn_stream ()
 
           new_val = expand_plus (new_val, accs->original_address ().disp ());
 
-          accs->update_insn (emit_move_insn (accs->modified_reg (), new_val));
+          accs->update_insn (emit_move_insn (accs->address_reg (), new_val));
           reg_mod_insns ().push_back (accs->insn ());
         }
       else if (accs->access_type () == reg_use)
@@ -1468,18 +1551,23 @@ void sh_ams::access_sequence::update_insn_stream ()
       if (accs->access_type () == load || accs->access_type () == store
           || accs->access_type () == reg_use || next_acc == end ())
         {
+          if (accs->insn ())
+            last_insn = accs->insn ();
           if (sequence_started)
             {
               rtx_insn* new_insns = get_insns ();
               end_sequence ();
               sequence_started = false;
 
+              rtx emit_before_insn = (next_acc == end ()) ? NEXT_INSN (last_insn)
+                                                          : accs->insn ();
+
               log_msg ("emitting new insns = \n");
               log_rtx (new_insns);
               log_msg ("\nbefore insn\n");
-              log_insn (accs->insn ());
+              log_insn (emit_before_insn);
               log_msg ("\n");
-              emit_insn_before (new_insns, accs->insn ());
+              emit_insn_before (new_insns, emit_before_insn);
             }
         }
 
@@ -1579,12 +1667,12 @@ int sh_ams::access_sequence::get_clone_cost (access &acc, delegate& dlg)
   else return 0;
 
   // There's no cloning cost for accesses that set the reg to itself.
-  if (reused_reg == acc.modified_reg ()) return 0;
+  if (reused_reg == acc.address_reg ()) return 0;
 
   for (access_sequence::iterator prev_accs = begin (); ; ++prev_accs)
     {
       if (prev_accs->access_type () == reg_mod
-          && prev_accs->modified_reg () == reused_reg)
+          && prev_accs->address_reg () == reused_reg)
         {
           // If the reused reg is already used by another access,
           // we'll have to clone it.
@@ -1676,12 +1764,12 @@ try_modify_addr
  delegate& dlg)
 {
   access_sequence::iterator ins_place;
-  rtx new_reg = start_addr->modified_reg ();
+  rtx new_reg = start_addr->address_reg ();
   int cost = start_addr->is_used ()
-            ? dlg.addr_reg_clone_cost (start_addr->modified_reg ()) : 0;
+            ? dlg.addr_reg_clone_cost (start_addr->address_reg ()) : 0;
   int prev_cost = 0;
   rtx final_addr_regno = access_place
-                        ? start_addr->modified_reg () : invalid_regno;
+                        ? start_addr->address_reg () : invalid_regno;
 
   // Canonicalize the start and end addresses by converting
   // addresses of the form base+disp into index*1+disp.
@@ -1750,7 +1838,7 @@ try_modify_addr
       scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
                                    c_end_addr.scale (), 0);
-      cost += dlg.addr_reg_scale_cost (start_addr->modified_reg (), scale);
+      cost += dlg.addr_reg_scale_cost (start_addr->address_reg (), scale);
       if (access_place)
         {
           if (!start_addr->is_used ())
@@ -1764,7 +1852,7 @@ try_modify_addr
           start_addr = &add_reg_mod (
 			   *access_place,
 			   non_mod_addr (invalid_regno,
-					 start_addr->modified_reg (), scale, 0),
+					 start_addr->address_reg (), scale, 0),
                            c_start_addr, NULL, new_reg, cost - prev_cost);
           final_addr_regno = new_reg;
 
@@ -1789,7 +1877,7 @@ try_modify_addr
                                    c_end_addr.index_reg (),
                                    -1,
                                    c_start_addr.disp ());
-      cost += dlg.addr_reg_plus_reg_cost (start_addr->modified_reg (),
+      cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
                                           c_end_addr.index_reg ());
       if (access_place)
         {
@@ -1802,7 +1890,7 @@ try_modify_addr
           new_reg = gen_reg_rtx (Pmode);
           start_addr = &add_reg_mod (
                             *access_place,
-                            non_mod_addr (start_addr->modified_reg (),
+                            non_mod_addr (start_addr->address_reg (),
                                           c_end_addr.index_reg (),
                                           -1, 0),
                             c_start_addr, NULL, new_reg, cost - prev_cost);
@@ -1825,7 +1913,7 @@ try_modify_addr
                                    c_start_addr.index_reg (),
                                    c_start_addr.scale (),
                                    c_start_addr.disp ());
-      cost += dlg.addr_reg_plus_reg_cost (start_addr->modified_reg (),
+      cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
                                           c_end_addr.base_reg ());
       if (access_place)
         {
@@ -1839,7 +1927,7 @@ try_modify_addr
           start_addr = &add_reg_mod (
 			    *access_place,
 			    non_mod_addr (c_start_addr.base_reg (),
-					  start_addr->modified_reg (), 1, 0),
+					  start_addr->address_reg (), 1, 0),
 			    c_start_addr, NULL, new_reg, cost - prev_cost);
           final_addr_regno = new_reg;
 
@@ -1880,7 +1968,7 @@ try_modify_addr
                                    c_start_addr.index_reg (),
                                    c_start_addr.scale (),
                                    c_start_addr.disp () + disp);
-      cost += dlg.addr_reg_disp_cost (start_addr->modified_reg (), disp);
+      cost += dlg.addr_reg_disp_cost (start_addr->address_reg (), disp);
       if (access_place)
         {
           if (!start_addr->is_used ())
@@ -1892,7 +1980,7 @@ try_modify_addr
           new_reg = gen_reg_rtx (Pmode);
           start_addr = &add_reg_mod (
 			    *access_place,
-			    non_mod_addr (start_addr->modified_reg (),
+			    non_mod_addr (start_addr->address_reg (),
 					  invalid_regno, 1, disp),
 			    c_start_addr, NULL, new_reg, cost - prev_cost);
           final_addr_regno = new_reg;
@@ -1960,7 +2048,10 @@ sh_ams::access_sequence::try_modify_addr
 // Find all uses of the address registers that aren't mem loads/stores
 // or address modifications, and add them to the sequence
 // as reg_use accesses.
-void sh_ams::access_sequence::find_reg_uses (basic_block bb)
+// Also find the values of all address registers that are still alive
+// after the sequence's last insn, and add them to the sequence as
+// reg_value accesses.
+void sh_ams::access_sequence::find_reg_uses_and_values (basic_block bb)
 {
   hash_map<rtx, access*> addr_regs;
   std::vector<rtx*> used_regs;
@@ -1976,7 +2067,7 @@ void sh_ams::access_sequence::find_reg_uses (basic_block bb)
       while (as_it != end () && (!as_it->insn () || as_it->insn () == i))
         {
           if (as_it->access_type () == reg_mod)
-            addr_regs.put (as_it->modified_reg (), &(*as_it));
+            addr_regs.put (as_it->address_reg (), &(*as_it));
           ++as_it;
         }
 
@@ -1994,6 +2085,30 @@ void sh_ams::access_sequence::find_reg_uses (basic_block bb)
                        addr_reg->addr_rtx (),
                        reg_ref, i);
         }
+
+      // Remove any address reg that's no longer alive after this insn.
+      for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
+        {
+          if (REG_NOTE_KIND (note) == REG_DEAD
+              && addr_regs.get (XEXP (note, 0)))
+            addr_regs.remove (XEXP (note, 0));
+      }
+    }
+
+  // Add reg_value type accesses that force the addr regs to keep
+  // their original values at the end of the sequence, even after new
+  // address modifications are generated.
+  for (hash_map<rtx, access*>::iterator it = addr_regs.begin ();
+       it != addr_regs.end (); ++it)
+    {
+      access* acc = (*it).second;
+
+      // Don't add the addr reg if it wasn't modified during the access.
+      if (!acc->address ().is_invalid ()
+          && !(acc->address ().has_no_index_reg ()
+               && acc->address ().has_no_disp ()
+               && acc->address ().base_reg () == acc->address_reg ()))
+        push_back (access (acc->address_reg (), acc->address ()));
     }
 }
 
@@ -2078,15 +2193,11 @@ unsigned int sh_ams::execute (function* fun)
 	    as.add_mem_access (i, m->first, m->second);
          }
 
-      as.find_reg_uses (bb);
+      as.find_reg_uses_and_values (bb);
 
-      for (access_sequence::iterator it = as.begin ();
-	   it != as.end (); ++it)
-        {
-          if (it->access_type () == load || it->access_type () == store
-              || it->access_type () == reg_use)
-            it->update_alternatives (m_delegate);
-        }
+      for (access_sequence::iterator it = as.first_access_to_optimize ();
+           it != as.end (); it = as.next_access_to_optimize (it))
+        it->update_alternatives (m_delegate);
 
       as.update_cost (m_delegate);
       int original_cost = as.cost ();

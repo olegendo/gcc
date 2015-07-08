@@ -22,7 +22,7 @@ public:
   // if abs ('disp') == access mode size it's a {PRE,POST}_{INC_DEC}.
 
   enum addr_type_t { non_mod, pre_mod, post_mod };
-  enum access_type_t { load, store, reg_mod, reg_use };
+  enum access_type_t { load, store, reg_mod, reg_use, reg_value };
 
   typedef int regno_t;
 
@@ -354,6 +354,7 @@ public:
 	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
     access (rtx_insn* insn, rtx* reg_ref, addr_expr original_addr_expr,
 	    addr_expr addr_expr, rtx addr_rtx);
+    access (rtx addr_reg, addr_expr reg_value);
 
     // the resolved address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
@@ -366,7 +367,7 @@ public:
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
 
     // If m_access_type is REG_MOD, this access represents the modification
-    // of an address register.  In this case, m_mod_reg stores the register
+    // of an address register.  In this case, m_addr_reg stores the register
     // that's modified and m_addr_expr is its new address.
     //
     // If the type is REG_USE, the access represents the use of an address
@@ -374,6 +375,10 @@ public:
     // effective address of the address reg during the use and
     // m_mem_ref is a reference to the address reg rtx inside the insn
     // where it's used.
+    //
+    // An access with type REG_VALUE indicates that at that point in the
+    // access sequence, the effective address of the register stored in
+    // m_addr_reg should be M_ADDR_EXPR.
     access_type_t access_type (void) const { return m_access_type; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
@@ -399,7 +404,7 @@ public:
     bool should_optimize (void) const { return m_should_optimize; }
 
     // For reg_mod accesses, shows the register rtx that was modified.
-    rtx modified_reg (void) const { return m_mod_reg; }
+    rtx address_reg (void) const { return m_addr_reg; }
 
     // For reg_mod accesses, shows whether the register is used
     // in another access. If so, register cloning costs must be
@@ -444,12 +449,13 @@ public:
 
     void update_alternatives (delegate& dlg)
     {
-      if (access_type () == reg_use)
-	// Reg_use accesses' address has to be loaded into a
-	// single register.
-	add_alternative (0, sh_ams::make_reg_addr ());
-      else
+      if (access_type () == load || access_type () == store)
 	dlg.mem_access_alternatives (*this);
+      else
+	// If this isn't a true memory access, the address has to be
+	// loaded into a single register.
+	add_alternative (0, sh_ams::make_reg_addr ());
+
     }
 
     bool matches_alternative (const alternative* alt) const;
@@ -513,7 +519,7 @@ public:
     bool m_removable;
     bool m_should_optimize;
     rtx m_addr_rtx;
-    rtx m_mod_reg;
+    rtx m_addr_reg;
     bool m_used;
 
     // all available alternatives for this access as reported by the target.
@@ -542,7 +548,7 @@ public:
     int cost (void) const;
     void update_cost (delegate& dlg);
 
-    void find_reg_uses (basic_block bb);
+    void find_reg_uses_and_values (basic_block bb);
 
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
@@ -576,12 +582,21 @@ public:
 		 rtx* reg_ref,
 		 rtx_insn* use_insn);
 
-    // find the next true mem access in this access sequence.  returns
+    // find the first/next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
     // FIXME: convert this into an iterator decorator and also add variants
     // to iterate over other things than mem accesses.
+    iterator first_mem_access (void);
     iterator next_mem_access (iterator i);
+    const_iterator first_mem_access (void) const;
     const_iterator next_mem_access (const_iterator i) const;
+
+    // find the first/next access in this sequence that should be
+    // optimized by gen_address_mod.
+    iterator first_access_to_optimize (void);
+    iterator next_access_to_optimize (iterator i);
+    const_iterator first_access_to_optimize (void) const;
+    const_iterator next_access_to_optimize (const_iterator i) const;
 
   private:
 
