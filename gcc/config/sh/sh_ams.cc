@@ -94,8 +94,6 @@ const pass_data sh_ams::default_pass_data =
 
 const rtx sh_ams::invalid_regno = (const rtx)0;
 const rtx sh_ams::any_regno = (const rtx)1;
-std::vector<rtx_insn*>
-sh_ams::access_sequence::m_reg_mod_insns = std::vector<rtx_insn*> ();
 
 sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate& dlg)
 : rtl_opt_pass (default_pass_data, ctx),
@@ -1385,12 +1383,10 @@ void sh_ams::access_sequence::update_insn_stream ()
 
   // Remove all the insns that are originally used to arrive at
   // the required addresses.
-  // FIXME: The address regs might be used outside of accesses, so
-  // disable this until AMS can handle reg-uses.
-  //for (std::vector<rtx_insn*>::iterator it = reg_mod_insns ().begin ();
-  //     it != reg_mod_insns ().end (); ++it)
-  //  set_insn_deleted (*it);
-  //reg_mod_insns ().clear ();
+  for (std::vector<rtx_insn*>::iterator it = reg_mod_insns ().begin ();
+       it != reg_mod_insns ().end (); ++it)
+    set_insn_deleted (*it);
+  reg_mod_insns ().clear ();
 
   bool sequence_started = false;
   rtx_insn* last_insn = NULL;
@@ -2219,7 +2215,7 @@ unsigned int sh_ams::execute (function* fun)
 	   it != as.end (); ++it)
         {
           if (it->removable ())
-            access_sequence::reg_mod_insns ().push_back (it->insn ());
+            as.reg_mod_insns ().push_back (it->insn ());
         }
 
       as.gen_address_mod (m_delegate);

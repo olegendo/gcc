@@ -536,11 +536,6 @@ public:
   {
   public:
 
-    // The address modifying insns related to this access sequence
-    // that are in the insn stream.  Used to delete the original insns
-    // in update_insn_stream.
-    static std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
-
     void gen_address_mod (delegate& dlg);
 
     void update_insn_stream ();
@@ -581,6 +576,13 @@ public:
 		 rtx addr_rtx,
 		 rtx* reg_ref,
 		 rtx_insn* use_insn);
+
+    // The address modifying insns related to this access sequence
+    // that are in the insn stream.  Used to delete the original insns
+    // in update_insn_stream.
+    // FIXME: Make different versions of the same access sequence share
+    // the same reg-mod insn list.
+    std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
 
     // find the first/next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
@@ -696,7 +698,7 @@ public:
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
 
-    static std::vector<rtx_insn*> m_reg_mod_insns;
+    std::vector<rtx_insn*> m_reg_mod_insns;
   };
 
   // a delegate for the ams pass.  usually implemented by the target.
