@@ -1544,8 +1544,10 @@ void sh_ams::access_sequence::update_insn_stream ()
 
       access_sequence::iterator next_acc = accs;
       ++next_acc;
-      if (accs->access_type () == load || accs->access_type () == store
-          || accs->access_type () == reg_use || next_acc == end ())
+      bool insert_before_access = accs->access_type () == load
+                                  || accs->access_type () == store
+                                  || accs->access_type () == reg_use;
+      if (insert_before_access || next_acc == end ())
         {
           if (accs->insn ())
             last_insn = accs->insn ();
@@ -1555,8 +1557,8 @@ void sh_ams::access_sequence::update_insn_stream ()
               end_sequence ();
               sequence_started = false;
 
-              rtx emit_before_insn = (next_acc == end ()) ? NEXT_INSN (last_insn)
-                                                          : accs->insn ();
+              rtx emit_before_insn = insert_before_access ? accs->insn ()
+                                                          : NEXT_INSN (last_insn);
 
               log_msg ("emitting new insns = \n");
               log_rtx (new_insns);

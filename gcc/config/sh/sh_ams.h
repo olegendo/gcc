@@ -493,6 +493,7 @@ public:
     void update_used_reg (rtx new_reg)
     {
       *m_mem_ref = new_reg;
+      df_insn_rescan (insn ());
     }
 
     void update_insn (rtx_insn *new_insn)
