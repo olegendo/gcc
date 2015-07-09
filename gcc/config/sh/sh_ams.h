@@ -217,18 +217,22 @@ public:
 
   static addr_expr extract_addr_expr
     (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
-     access_sequence& as,
-     std::vector<access*>& inserted_reg_mods,
-     bool expand);
+     access_sequence* as,
+     std::vector<access*>& inserted_reg_mods);
 
   static addr_expr extract_addr_expr
     (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
-     access_sequence& as,
-     bool expand)
+     access_sequence* as)
   {
     std::vector<access*> inserted_reg_mods;
     return extract_addr_expr (x, insn, root_insn, mem_mach_mode, as,
-			      inserted_reg_mods, expand);
+			      inserted_reg_mods);
+  }
+
+  static addr_expr extract_addr_expr
+    (rtx x, machine_mode mem_mach_mode = Pmode)
+  {
+    return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL);
   }
 
   // helper functions to create a particular type of address expression.
