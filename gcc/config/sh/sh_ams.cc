@@ -2182,15 +2182,6 @@ unsigned int sh_ams::execute (function* fun)
       rtx_insn* i;
 
       log_msg ("BB #%d:\n", bb->index);
-      log_msg ("insns:\n");
-      FOR_BB_INSNS (bb, i)
-        {
-          if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
-            continue;
-
-          log_insn (i);
-        }
-      log_msg ("---\n");
 
       // Construct the access sequence from the access insns.
       access_sequence as;
