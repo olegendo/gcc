@@ -1468,7 +1468,7 @@ void sh_ams::access_sequence::update_insn_stream ()
       else if (accs->access_type () == reg_use)
         {
           gcc_assert (accs->original_address ().has_base_reg ());
-          accs->update_used_reg (accs->original_address ().base_reg ());
+          accs->update_use_expr (accs->original_address ().base_reg ());
         }
       else if (accs->access_type () == load || accs->access_type () == store)
         {
@@ -2077,13 +2077,21 @@ void sh_ams::access_sequence::find_reg_uses_and_values (basic_block bb)
       for (std::vector<rtx*>::iterator it = used_regs.begin ();
            it != used_regs.end (); ++it)
         {
-          rtx* reg_ref = *it;
-          access *addr_reg = *addr_regs.get (*reg_ref);
-          add_reg_use (as_it,
-                       make_reg_addr (*reg_ref),
-                       addr_reg->address (),
-                       addr_reg->addr_rtx (),
-                       reg_ref, i);
+          rtx* use_ref = *it;
+          addr_expr use_expr = extract_addr_expr (*use_ref);
+          access *addr_reg = *addr_regs.get (use_expr.base_reg ());
+
+          // USE_EXPR can have the form (reg) or (reg+disp),
+          // so the constant disp must be added to get the
+          // effective address.
+          addr_expr effective_addr = addr_reg->address ().is_invalid ()
+            ? addr_reg->address ()
+            : non_mod_addr (addr_reg->address ().base_reg (),
+                            addr_reg->address ().index_reg (),
+                            addr_reg->address ().scale (),
+                            addr_reg->address ().disp () + use_expr.disp ());
+          add_reg_use (as_it, use_expr, effective_addr,
+                       addr_reg->addr_rtx (), use_ref, i);
         }
 
       // Remove any address reg that's no longer alive after this insn.
@@ -2142,8 +2150,16 @@ sh_ams::find_addr_regs (rtx& x, OutputIterator out,
     default:
       if (UNARY_P (x) || ARITHMETIC_P (x))
         {
-          for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
-            find_addr_regs (XEXP (x, i), out, addr_regs);
+          // If the address reg is inside a (plus reg (const_int ...)) rtx,
+          // add the whole rtx instead of just the addr reg.
+          addr_expr use_expr = extract_addr_expr (x);
+          if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
+              && use_expr.has_base_reg () && use_expr.has_disp ()
+              && addr_regs.get (use_expr.base_reg ()))
+            *out++ = &x;
+          else
+            for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
+              find_addr_regs (XEXP (x, i), out, addr_regs);
         }
       break;
     }

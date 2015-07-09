@@ -377,8 +377,7 @@ public:
     // If the type is REG_USE, the access represents the use of an address
     // reg outside of a memory access.  In this case, m_addr_expr is the
     // effective address of the address reg during the use and
-    // m_mem_ref is a reference to the address reg rtx inside the insn
-    // where it's used.
+    // m_mem_ref is a reference to the rtx inside the insn that uses the reg.
     //
     // An access with type REG_VALUE indicates that at that point in the
     // access sequence, the effective address of the register stored in
@@ -494,9 +493,9 @@ public:
       return val;
     }
 
-    void update_used_reg (rtx new_reg)
+    void update_use_expr (rtx new_expr)
     {
-      *m_mem_ref = new_reg;
+      *m_mem_ref = new_expr;
       df_insn_rescan (insn ());
     }
 
