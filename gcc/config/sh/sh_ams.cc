@@ -921,13 +921,13 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // Place all the insns that are used to arrive at the address
           // into AS in the form of reg_mod accesses that can be replaced
           // during address mod generation.
-          // Auto-mod insns don't need to be inserted because they are
-          // already inside the sequence as normal load/store accesses.
-          if (!find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
-              && insn && root_insn)
+          // For auto-mod mem accesses, insert a reg_mod that sets X to itself.
+          if (insn && root_insn)
             {
               addr_expr original_reg_addr_expr
-                = extract_addr_expr (reg_value, mem_mach_mode);
+                = find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
+                  ? make_reg_addr (x)
+                  : extract_addr_expr (reg_value, mem_mach_mode);
               access* a = &as->add_reg_mod (root_insn,
                                             original_reg_addr_expr,
                                             make_invalid_addr (),
@@ -2361,7 +2361,9 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::iterator it = as.begin ();
 	   it != as.end (); ++it)
         {
-          if (it->removable ())
+          if (it->removable ()
+              // Auto-mod mem access insns shouldn't  be removed.
+              && !find_reg_note (it->insn (), REG_INC, NULL_RTX))
             as.reg_mod_insns ().push_back (it->insn ());
         }
 
