@@ -553,12 +553,14 @@ public:
 
     void gen_address_mod (delegate& dlg);
 
-    void update_insn_stream ();
+    void update_insn_stream (void);
 
     int cost (void) const;
     void update_cost (delegate& dlg);
 
     void find_addr_regs (void);
+    void add_missing_reg_mods (basic_block bb);
+
     void find_reg_uses (void);
     void find_reg_end_values (void);
 

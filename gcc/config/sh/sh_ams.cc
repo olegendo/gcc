@@ -2167,7 +2167,7 @@ sh_ams::access_sequence::try_modify_addr
 // was changed by a reg_mod access) and place them into M_ADDR_REGS. Pair them
 // with the last reg_mod access that modified them, or NULL if they are dead
 // at the end of the sequence.
-void sh_ams::access_sequence::find_addr_regs ()
+void sh_ams::access_sequence::find_addr_regs (void)
 {
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
@@ -2198,15 +2198,47 @@ void sh_ams::access_sequence::find_addr_regs ()
     }
 }
 
+// Add to the sequence any address reg modifications in BB that weren't found
+// during the mem address tracing (e.g. the address reg modifications
+// that come after the last memory access in the sequence).
+void sh_ams::access_sequence::add_missing_reg_mods (basic_block bb)
+{
+  find_addr_regs ();
+
+  for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
+       it != addr_regs ().end (); ++it)
+    {
+      rtx reg = (*it).first;
+      std::vector<access*> inserted_reg_mods;
+
+      // Trace back the address reg's value, inserting any missing
+      // modification of this reg to the sequence.
+      addr_expr expr =
+        extract_addr_expr (reg, BB_END (bb), BB_END (bb),
+                           Pmode, this, inserted_reg_mods);
+
+      // If the final expression created by these modifications
+      // is too complicated for AMS to handle, the address mod
+      // generator shouldn't try to replace them.
+      if (expr.is_invalid ())
+        {
+          for (std::vector<access*>::iterator ins = inserted_reg_mods.begin ();
+               ins != inserted_reg_mods.end (); ++ins)
+            (*ins)->mark_unremovable ();
+        }
+    }
+
+  // Update the address regs' final values.
+  find_addr_regs ();
+}
+
+
 // Find all uses of the address registers that aren't mem loads/stores
 // or address modifications, and add them to the sequence
 // as reg_use accesses.
 void sh_ams::access_sequence::find_reg_uses (void)
 {
   std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
-
-  find_addr_regs ();
-
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
       if (!accs->insn ()) continue;
@@ -2239,8 +2271,6 @@ void sh_ams::access_sequence::find_reg_uses (void)
 // generator to keep their original values at the end of the sequence.
 void sh_ams::access_sequence::find_reg_end_values (void)
 {
-  find_addr_regs ();
-
   for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
@@ -2296,6 +2326,8 @@ unsigned int sh_ams::execute (function* fun)
 	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
 	    as.add_mem_access (i, m->first, m->second);
          }
+
+      as.add_missing_reg_mods (bb);
 
       as.find_reg_uses ();
       as.find_reg_end_values ();
