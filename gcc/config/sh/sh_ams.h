@@ -209,8 +209,19 @@ public:
 		     access_type_t access_type = load);
 
   template <typename OutputIterator> static void
-  find_addr_regs (rtx& x, OutputIterator out,
-		  hash_map<rtx, access*> &addr_regs);
+  collect_addr_reg_uses
+    (access_sequence& as, rtx_insn *start_insn,
+     rtx abort_at_insn, OutputIterator out, bool stay_in_curr_bb);
+
+  template <typename OutputIterator> static void
+  collect_addr_reg_uses_1 (access_sequence& as, rtx_insn *start_insn,
+			   basic_block bb, std::vector<basic_block>& visited_bb,
+			   rtx abort_at_insn, OutputIterator out,
+			   bool stay_in_curr_bb);
+
+  template <typename OutputIterator> static bool
+  collect_addr_reg_uses_2 (access_sequence& as, rtx_insn *insn,
+			   rtx& x, OutputIterator out);
 
   static void find_reg_value
     (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
@@ -357,7 +368,7 @@ public:
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
 	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
     access (rtx_insn* insn, rtx* reg_ref, addr_expr original_addr_expr,
-	    addr_expr addr_expr, rtx addr_rtx);
+	    addr_expr addr_expr);
     access (rtx addr_reg, addr_expr reg_value);
 
     // the resolved address expression, i.e. the register and constant value
@@ -547,7 +558,9 @@ public:
     int cost (void) const;
     void update_cost (delegate& dlg);
 
-    void find_reg_uses_and_values (basic_block bb);
+    void find_addr_regs (void);
+    void find_reg_uses (void);
+    void find_reg_end_values (void);
 
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
@@ -577,7 +590,6 @@ public:
     add_reg_use (access_sequence::iterator insert_before,
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr,
-		 rtx addr_rtx,
 		 rtx* reg_ref,
 		 rtx_insn* use_insn);
 
@@ -587,6 +599,10 @@ public:
     // FIXME: Make different versions of the same access sequence share
     // the same reg-mod insn list.
     std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
+
+    // A hash_map containing the address regs of the sequence and the last
+    // reg_mod access that modified them.
+    hash_map<rtx, access*>& addr_regs (void) { return m_addr_regs; }
 
     // find the first/next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
@@ -702,6 +718,7 @@ public:
        disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
        delegate& dlg);
 
+    hash_map<rtx, access*> m_addr_regs;
     std::vector<rtx_insn*> m_reg_mod_insns;
   };
 

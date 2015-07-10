@@ -385,7 +385,7 @@ sh_ams::access::access
 // Constructor for reg_use accesses.
 sh_ams::access::access
 (rtx_insn* insn, rtx* reg_ref, addr_expr original_addr_expr,
- addr_expr addr_expr, rtx addr_rtx)
+ addr_expr addr_expr)
 {
   m_access_type = reg_use;
   m_cost = 0;
@@ -393,9 +393,9 @@ sh_ams::access::access
   m_mem_ref = reg_ref;
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
-  m_addr_rtx = addr_rtx;
+  m_addr_rtx = NULL;
   m_removable = false;
-  m_should_optimize = !addr_expr.is_invalid ();
+  m_should_optimize = true;
   m_addr_reg = NULL;
   m_used = false;
   m_alternatives_count = 0;
@@ -591,12 +591,11 @@ sh_ams::access&
 sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
                                       const addr_expr& original_addr_expr,
                                       const addr_expr& addr_expr,
-                                      rtx addr_rtx,
                                       rtx* reg_ref,
                                       rtx_insn* use_insn)
 {
   insert (insert_before,
-          access (use_insn, reg_ref, original_addr_expr, addr_expr, addr_rtx));
+          access (use_insn, reg_ref, original_addr_expr, addr_expr));
   return *(--insert_before);
 }
 
@@ -832,8 +831,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       // tracing back the value of a register, or when extracting the
       // original address.  Otherwise, we're interested in the effective
       // address during the memory access, which isn't displaced at that point.
-      bool use_post_disp = (!expand_regs
-                            || INSN_UID (insn) != INSN_UID (root_insn));
+      bool use_post_disp = (!expand_regs || insn != root_insn);
 
       switch (code)
         {
@@ -896,8 +894,6 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
     case REG:
       if (expand_regs)
         {
-          gcc_assert (insn && root_insn);
-
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
           rtx reg_value;
@@ -915,9 +911,10 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               // Add a reg_mod access that sets the reg to itself.
               // This makes it easier for the address modification
               // generator to find all possible starting addresses.
-              as->add_reg_mod (root_insn,
-                               make_reg_addr (x), make_reg_addr (x),
-                               reg_mod_insn, x);
+              if (insn && root_insn)
+                as->add_reg_mod (root_insn,
+                                 make_reg_addr (x), make_reg_addr (x),
+                                 reg_mod_insn, x);
               return make_reg_addr (x);
             }
 
@@ -926,7 +923,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // during address mod generation.
           // Auto-mod insns don't need to be inserted because they are
           // already inside the sequence as normal load/store accesses.
-          if (!find_reg_note (reg_mod_insn, REG_INC, NULL_RTX))
+          if (!find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
+              && insn && root_insn)
             {
               addr_expr original_reg_addr_expr
                 = extract_addr_expr (reg_value, mem_mach_mode);
@@ -964,8 +962,9 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
               // Add an (rx = rx) reg_mod access to help the
               // address modification generator.
-              as->add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
-                               reg_mod_insn, x);
+              if (insn && root_insn)
+                as->add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
+                                 reg_mod_insn, x);
 
               return make_reg_addr (x);
             }
@@ -1152,6 +1151,125 @@ sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
         }
       break;
     }
+}
+
+// Internal function of collect_addr_reg_uses.
+template <typename OutputIterator> void
+sh_ams::collect_addr_reg_uses_1
+(access_sequence& as, rtx_insn *start_insn, basic_block bb,
+ std::vector<basic_block>& visited_bb, rtx abort_at_insn, OutputIterator out,
+ bool stay_in_curr_bb)
+{
+  if (bb == NULL)
+    return;
+
+  if (std::find (visited_bb.begin (), visited_bb.end (), bb)
+      != visited_bb.end ())
+    log_return_void ("[bb %d] already visited\n", bb->index);
+
+  visited_bb.push_back (bb);
+
+  if (BB_END (bb) == NULL_RTX)
+    log_return_void ("[bb %d] BB_END is null\n", bb->index);
+
+  if (start_insn == NULL_RTX)
+    log_return_void ("[bb %d] start_insn is null\n", bb->index);
+
+  rtx end_insn = NEXT_INSN (BB_END (bb));
+
+  for (rtx_insn *i = NEXT_INSN (start_insn); i != end_insn; i = NEXT_INSN (i))
+    {
+      if (INSN_P (i) && NONDEBUG_INSN_P (i)
+          && collect_addr_reg_uses_2 (as, i, PATTERN (i), out))
+        {
+          log_msg ("found addr reg use in [bb %d] at insn:\n", bb->index);
+          log_insn (i);
+          log_msg ("\n");
+        }
+
+      if (abort_at_insn != NULL_RTX && abort_at_insn == i)
+	return;
+    }
+
+  if (stay_in_curr_bb) return;
+
+  for (edge_iterator ei = ei_start (bb->succs); !ei_end_p (ei); ei_next (&ei))
+    {
+      basic_block succ_bb = ei_edge (ei)->dest;
+      collect_addr_reg_uses_1 (as, BB_HEAD (succ_bb), succ_bb, visited_bb,
+                               abort_at_insn, out, stay_in_curr_bb);
+    }
+}
+
+// The recursive part of collect_addr_reg_uses.
+template <typename OutputIterator> bool
+sh_ams::collect_addr_reg_uses_2
+(access_sequence& as, rtx_insn *insn, rtx& x, OutputIterator out)
+{
+
+  bool found = false;
+  switch (GET_CODE (x))
+    {
+    case REG:
+      if (as.addr_regs ().get (x))
+        {
+          *out++ = std::pair<rtx*, rtx_insn*> (&x, insn);
+          return true;
+        }
+      break;
+    case MEM:
+      // Don't add regs used in memory accesses.
+      break;
+    case PARALLEL:
+      for (int i = 0; i < XVECLEN (x, 0); i++)
+        found |= collect_addr_reg_uses_2 (as, insn, XVECEXP (x, 0, i), out);
+      break;
+    case SET:
+
+      // If SET_DEST is an address reg, the regs in SET_SRC are
+      // used for address calculation, so don't add them.
+      if (!as.addr_regs ().get (SET_DEST (x)))
+        found |= collect_addr_reg_uses_2 (as, insn, SET_SRC (x), out);
+      break;
+    default:
+      if (UNARY_P (x) || ARITHMETIC_P (x))
+        {
+          // If the address reg is inside a (plus reg (const_int ...)) rtx,
+          // add the whole rtx instead of just the addr reg.
+          addr_expr use_expr = extract_addr_expr (x);
+          if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
+              && use_expr.has_base_reg () && use_expr.has_disp ()
+              && as.addr_regs ().get (use_expr.base_reg ()))
+            {
+              *out++ = std::pair<rtx*, rtx_insn*> (&x, insn);
+              return true;
+            }
+          for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
+            found |= collect_addr_reg_uses_2 (as, insn, XEXP (x, i), out);
+        }
+      break;
+    }
+  return found;
+}
+
+// Collect uses of the address regs of the specified access sequence in all
+// basic blocks that are reachable from the specified insn.  If 'abort_at_insn'
+// is not null, abort at that insn.  If the insn 'abort_at_insn' has a reg-use,
+// it is also collected. If STAY_IN_CURR_BB is true, only the basic block of
+// the starting insn is searched through.
+template <typename OutputIterator> void
+sh_ams::collect_addr_reg_uses
+(access_sequence& as, rtx_insn *start_insn, rtx abort_at_insn, OutputIterator out,
+ bool stay_in_curr_bb)
+{
+  log_msg ("\ncollecting address reg uses\nstart_insn = ");
+  log_insn (start_insn);
+
+  std::vector<basic_block> visited_bb;
+  visited_bb.reserve (32);
+
+  collect_addr_reg_uses_1 (as, start_insn, BLOCK_FOR_INSN (start_insn),
+                           visited_bb, abort_at_insn, out, stay_in_curr_bb);
 }
 
 // Generate the address modifications needed to arrive at the addresses in
@@ -2045,123 +2163,102 @@ sh_ams::access_sequence::try_modify_addr
                           addr_type, NULL, NULL, dlg);
 }
 
-// Find all uses of the address registers that aren't mem loads/stores
-// or address modifications, and add them to the sequence
-// as reg_use accesses.
-// Also find the values of all address registers that are still alive
-// after the sequence's last insn, and add them to the sequence as
-// reg_value accesses.
-void sh_ams::access_sequence::find_reg_uses_and_values (basic_block bb)
+// Find all the address regs in the access sequence (i.e. the regs whose value
+// was changed by a reg_mod access) and place them into M_ADDR_REGS. Pair them
+// with the last reg_mod access that modified them, or NULL if they are dead
+// at the end of the sequence.
+void sh_ams::access_sequence::find_addr_regs ()
 {
-  hash_map<rtx, access*> addr_regs;
-  std::vector<rtx*> used_regs;
-  access_sequence::iterator as_it = begin ();
-  rtx_insn* i;
-  FOR_BB_INSNS (bb, i)
+  for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
-      if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
-        continue;
+      if (accs->access_type () == reg_mod)
+        addr_regs ().put (accs->address_reg (), &(*accs));
 
-      // Keep track of the values of the address regs set before
-      // the current insn.
-      while (as_it != end () && (!as_it->insn () || as_it->insn () == i))
+      // Search for REG_DEAD notes in the insns between this and the next access.
+      access_sequence::iterator next = accs;
+      ++next;
+      if (accs->insn () && next != end ())
         {
-          if (as_it->access_type () == reg_mod)
-            addr_regs.put (as_it->address_reg (), &(*as_it));
-          ++as_it;
+          for (rtx_insn *i = accs->insn (); ; i = NEXT_INSN (i))
+            {
+              if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+                continue;
+
+              for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
+                {
+                  // Set the value of any address reg that's no longer
+                  // alive to NULL.
+                  if (REG_NOTE_KIND (note) == REG_DEAD
+                      && addr_regs ().get (XEXP (note, 0)))
+                    addr_regs ().put (XEXP (note, 0), NULL);
+                }
+              if (i == next->insn ()) break;
+            }
         }
-
-      used_regs.clear ();
-      find_addr_regs (PATTERN (i), std::back_inserter (used_regs), addr_regs);
-
-      for (std::vector<rtx*>::iterator it = used_regs.begin ();
-           it != used_regs.end (); ++it)
-        {
-          rtx* use_ref = *it;
-          addr_expr use_expr = extract_addr_expr (*use_ref);
-          access *addr_reg = *addr_regs.get (use_expr.base_reg ());
-
-          // USE_EXPR can have the form (reg) or (reg+disp),
-          // so the constant disp must be added to get the
-          // effective address.
-          addr_expr effective_addr = addr_reg->address ().is_invalid ()
-            ? addr_reg->address ()
-            : non_mod_addr (addr_reg->address ().base_reg (),
-                            addr_reg->address ().index_reg (),
-                            addr_reg->address ().scale (),
-                            addr_reg->address ().disp () + use_expr.disp ());
-          add_reg_use (as_it, use_expr, effective_addr,
-                       addr_reg->addr_rtx (), use_ref, i);
-        }
-
-      // Remove any address reg that's no longer alive after this insn.
-      for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
-        {
-          if (REG_NOTE_KIND (note) == REG_DEAD
-              && addr_regs.get (XEXP (note, 0)))
-            addr_regs.remove (XEXP (note, 0));
-      }
-    }
-
-  // Add reg_value type accesses that force the addr regs to keep
-  // their original values at the end of the sequence, even after new
-  // address modifications are generated.
-  for (hash_map<rtx, access*>::iterator it = addr_regs.begin ();
-       it != addr_regs.end (); ++it)
-    {
-      access* acc = (*it).second;
-
-      // Don't add the addr reg if it wasn't modified during the access.
-      if (!acc->address ().is_invalid ()
-          && !(acc->address ().has_no_index_reg ()
-               && acc->address ().has_no_disp ()
-               && acc->address ().base_reg () == acc->address_reg ()))
-        push_back (access (acc->address_reg (), acc->address ()));
     }
 }
 
-// Find the address register rtx-es in X that were used for
-// something other than address calculation and memory access,
-// and add them to OUT.
-template <typename OutputIterator> void
-sh_ams::find_addr_regs (rtx& x, OutputIterator out,
-                        hash_map<rtx, access*> &addr_regs)
+// Find all uses of the address registers that aren't mem loads/stores
+// or address modifications, and add them to the sequence
+// as reg_use accesses.
+void sh_ams::access_sequence::find_reg_uses (void)
 {
-  switch (GET_CODE (x))
-    {
-    case REG:
-      if (addr_regs.get (x))
-        *out++ = &x;
-      break;
-    case MEM:
-      // Don't add regs used in memory accesses.
-      break;
-    case PARALLEL:
-      for (int i = 0; i < XVECLEN (x, 0); i++)
-        find_addr_regs (XVECEXP (x, 0, i), out, addr_regs);
-      break;
-    case SET:
+  std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
 
-      // If SET_DEST is an address reg, the regs in SET_SRC are
-      // used for address calculation, so don't add them.
-      if (!addr_regs.get (SET_DEST (x)))
-        find_addr_regs (SET_SRC (x), out, addr_regs);
-      break;
-    default:
-      if (UNARY_P (x) || ARITHMETIC_P (x))
+  find_addr_regs ();
+
+  for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
+    {
+      if (!accs->insn ()) continue;
+      access_sequence::iterator next_acc = accs;
+      ++next_acc;
+      used_regs.clear ();
+      collect_addr_reg_uses (*this, accs->insn (),
+                             next_acc == end () ? NULL : next_acc->insn (),
+                             std::back_inserter (used_regs), true);
+
+      for (std::vector<std::pair<rtx*, rtx_insn*> >::iterator
+             it = used_regs.begin (); it != used_regs.end (); ++it)
         {
-          // If the address reg is inside a (plus reg (const_int ...)) rtx,
-          // add the whole rtx instead of just the addr reg.
-          addr_expr use_expr = extract_addr_expr (x);
-          if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
-              && use_expr.has_base_reg () && use_expr.has_disp ()
-              && addr_regs.get (use_expr.base_reg ()))
-            *out++ = &x;
-          else
-            for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
-              find_addr_regs (XEXP (x, i), out, addr_regs);
+          rtx* use_ref = it->first;
+          rtx_insn* use_insn = it->second;
+          addr_expr use_expr = extract_addr_expr (*use_ref);
+          addr_expr effective_addr
+            = extract_addr_expr (*use_ref, use_insn, NULL, Pmode, this);
+
+          if (!effective_addr.is_invalid ())
+            add_reg_use (next_acc, use_expr, effective_addr,
+                         use_ref, use_insn);
         }
-      break;
+    }
+}
+
+// Find the values of all address registers that are still alive
+// at the end of the access sequence, and add them to the sequence
+// as reg_value type accesses.  This will force the address modification
+// generator to keep their original values at the end of the sequence.
+void sh_ams::access_sequence::find_reg_end_values (void)
+{
+  find_addr_regs ();
+
+  for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
+       it != addr_regs ().end (); ++it)
+    {
+      access* acc = (*it).second;
+
+      // Address regs that have NULL as their value are dead,
+      // so we can skip those.
+      if (!acc) continue;
+
+      // Don't add the addr reg if it wasn't modified during the sequence
+      // (i.e. if its effective address is the address reg itself).
+      if (acc->address ().is_invalid ()
+          || (acc->address ().has_no_index_reg ()
+              && acc->address ().has_no_disp ()
+              && acc->address ().base_reg () == acc->address_reg ()))
+        continue;
+
+      push_back (access (acc->address_reg (), acc->address ()));
     }
 }
 
@@ -2200,7 +2297,8 @@ unsigned int sh_ams::execute (function* fun)
 	    as.add_mem_access (i, m->first, m->second);
          }
 
-      as.find_reg_uses_and_values (bb);
+      as.find_reg_uses ();
+      as.find_reg_end_values ();
 
       for (access_sequence::iterator it = as.first_access_to_optimize ();
            it != as.end (); it = as.next_access_to_optimize (it))
