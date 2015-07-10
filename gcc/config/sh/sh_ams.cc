@@ -1515,8 +1515,9 @@ void sh_ams::access_sequence::update_insn_stream ()
     {
       if (accs->access_type () == reg_mod)
         {
-          // Skip accesses with unknown values and the ones that
-          // don't modify anything.
+          // Skip accesses with unknown values, the ones that
+          // don't modify anything, or those that already have
+          // an insn.
           if (accs->original_address ().is_invalid ())
 	    {
 	      log_msg ("access original address not valid\n");
@@ -1529,6 +1530,11 @@ void sh_ams::access_sequence::update_insn_stream ()
 	      log_msg ("skipping reg mod expr\n");
 	      log_addr_expr (accs->original_address ());
 	      log_msg ("\n");
+	      continue;
+	    }
+          if (accs->insn ())
+	    {
+	      log_msg ("access already has an insn\n");
 	      continue;
 	    }
 
