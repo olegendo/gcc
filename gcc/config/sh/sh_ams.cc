@@ -226,6 +226,7 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
   else log_msg ("\n  cost: %d", a.cost ());
 
   if (a.removable ()) log_msg ("\n  (removable)");
+  if (!a.should_optimize ()) log_msg ("\n  (won't be optimized)");
 
   if (a.access_type () == sh_ams::reg_use)
     {
@@ -1716,6 +1717,13 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
     {
       if (accs->access_type () == load || accs->access_type () == store)
         {
+          // Skip this access if it won't be optimized.
+          if (!accs->should_optimize ())
+            {
+              accs->update_cost (0);
+              continue;
+            }
+
           // Find the alternative that the access uses and update
           // its cost accordingly.
           for (const sh_ams::access::alternative* alt
@@ -1730,9 +1738,16 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
                 gcc_unreachable ();
             }
         }
-      else if (accs->access_type () == reg_mod
-               && !accs->original_address ().is_invalid ())
+      else if (accs->access_type () == reg_mod)
         {
+          // Skip this access if the original address doesn't fit into an
+          // addr_expr.
+          if (accs->original_address ().is_invalid ())
+            {
+              accs->update_cost (0);
+              continue;
+            }
+
           int cost = 0;
           const addr_expr &ae = accs->original_address ();
 
