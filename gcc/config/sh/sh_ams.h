@@ -223,25 +223,24 @@ public:
   collect_addr_reg_uses_2 (access_sequence& as, rtx_insn *insn,
 			   rtx& x, OutputIterator out);
 
-  static void find_reg_value
-    (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn);
+  static void find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
+			      rtx_insn** mod_insn);
 
-  static addr_expr extract_addr_expr
-    (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
-     access_sequence* as,
-     std::vector<access*>& inserted_reg_mods);
+  static addr_expr extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
+				      machine_mode mem_mach_mode,
+				      access_sequence* as,
+				      std::vector<access*>& inserted_reg_mods);
 
-  static addr_expr extract_addr_expr
-    (rtx x, rtx_insn* insn, rtx_insn* root_insn, machine_mode mem_mach_mode,
-     access_sequence* as)
+  static addr_expr extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn* root_insn,
+				      machine_mode mem_mach_mode,
+				      access_sequence* as)
   {
     std::vector<access*> inserted_reg_mods;
     return extract_addr_expr (x, insn, root_insn, mem_mach_mode, as,
 			      inserted_reg_mods);
   }
 
-  static addr_expr extract_addr_expr
-    (rtx x, machine_mode mem_mach_mode = Pmode)
+  static addr_expr extract_addr_expr (rtx x, machine_mode mem_mach_mode = Pmode)
   {
     return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL);
   }
@@ -662,13 +661,14 @@ public:
     int gen_min_mod (access_sequence::iterator acc,
 		     delegate& dlg, bool record_in_sequence);
 
-    void gen_mod_for_alt
-      (access::alternative& alternative,
-       access* start_base, access* start_index,
-       const addr_expr& end_base, const addr_expr& end_index,
-       access_sequence::iterator acc,
-       mod_tracker *mod_tracker,
-       delegate& dlg);
+    void gen_mod_for_alt (access::alternative& alternative,
+			  access* start_base,
+			  access* start_index,
+			  const addr_expr& end_base,
+			  const addr_expr& end_index,
+			  access_sequence::iterator acc,
+			  mod_tracker *mod_tracker,
+			  delegate& dlg);
 
     struct min_mod_cost_result
     {
@@ -707,18 +707,16 @@ public:
     };
 
     mod_addr_result
-    try_modify_addr
-      (access* start_addr, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-       access_sequence::iterator *access_place,
-       mod_tracker *mod_tracker,
-       delegate& dlg);
+    try_modify_addr (access* start_addr, const addr_expr& end_addr,
+		     disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
+		     access_sequence::iterator *access_place,
+		     mod_tracker *mod_tracker,
+		     delegate& dlg);
 
     mod_addr_result
-    try_modify_addr
-      (access* start_addr, const addr_expr& end_addr,
-       disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-       delegate& dlg);
+    try_modify_addr (access* start_addr, const addr_expr& end_addr,
+		     disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
+		     delegate& dlg);
 
     hash_map<rtx, access*> m_addr_regs;
     std::vector<rtx_insn*> m_reg_mod_insns;
