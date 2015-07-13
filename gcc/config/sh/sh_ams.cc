@@ -2250,14 +2250,15 @@ void sh_ams::access_sequence::add_missing_reg_mods (basic_block bb)
 {
   find_addr_regs ();
 
+  std::vector<access*> inserted_reg_mods;
   for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       rtx reg = (*it).first;
-      std::vector<access*> inserted_reg_mods;
 
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
+      inserted_reg_mods.clear ();
       addr_expr expr =
         extract_addr_expr (reg, BB_END (bb), BB_END (bb),
                            Pmode, this, inserted_reg_mods);
