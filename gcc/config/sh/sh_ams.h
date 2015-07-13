@@ -560,6 +560,12 @@ public:
     void find_addr_regs (void);
     void add_missing_reg_mods (basic_block bb);
 
+    bool reg_used_in_sequence (rtx reg, access_sequence::iterator search_start);
+    bool reg_used_in_sequence (rtx reg)
+    {
+      return reg_used_in_sequence (reg, begin ());
+    }
+
     void find_reg_uses (void);
     void find_reg_end_values (void);
 

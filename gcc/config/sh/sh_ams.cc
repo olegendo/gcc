@@ -1311,14 +1311,29 @@ gen_address_mod (delegate& dlg)
        accs != end (); accs = next_access_to_optimize (accs))
     gen_min_mod (accs, dlg, true);
 
-  // Mark the reg_mod accesses as "unused" again (except for the
-  // reg <- constant copies, which are always marked used).
-  for (access_sequence::iterator accs = begin ();
-       accs != end (); ++accs)
+  for (access_sequence::iterator accs = begin (); accs != end ();)
     {
-      if (accs->original_address ().has_base_reg ()
-          || accs->original_address ().has_index_reg ())
-        accs->reset_used ();
+      if (accs->access_type () == reg_mod)
+        {
+          // Mark the reg_mod accesses as "unused" again (except for the
+          // reg <- constant copies, which are always marked used).
+          if (accs->original_address ().has_base_reg ()
+              || accs->original_address ().has_index_reg ())
+            accs->reset_used ();
+          else
+            {
+              // Remove any unused reg <- constant copy that might have been
+              // added while trying different accesses.
+              access_sequence::iterator next_acc = accs;
+              ++next_acc;
+              if (!reg_used_in_sequence (accs->address_reg (), next_acc))
+                {
+                  accs = erase (accs);
+                  continue;
+                }
+            }
+        }
+      ++accs;
     }
 }
 
@@ -2277,6 +2292,19 @@ void sh_ams::access_sequence::add_missing_reg_mods (basic_block bb)
   find_addr_regs ();
 }
 
+// Check whether REG is used in any access after SEARCH_START.
+bool sh_ams::access_sequence::
+reg_used_in_sequence (rtx reg, access_sequence::iterator search_start)
+{
+  for (access_sequence::iterator accs = search_start; accs != end (); ++accs)
+    {
+      if (!accs->original_address ().is_invalid ()
+          && (accs->original_address ().base_reg () == reg
+              || accs->original_address ().index_reg () == reg))
+        return true;
+    }
+  return false;
+}
 
 // Find all uses of the address registers that aren't mem loads/stores
 // or address modifications, and add them to the sequence
