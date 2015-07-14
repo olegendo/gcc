@@ -2320,10 +2320,13 @@ reg_used_in_sequence (rtx reg, access_sequence::iterator search_start)
 void sh_ams::access_sequence::find_reg_uses (void)
 {
   std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
-  for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
+  for (access_sequence::iterator accs = begin (); accs != end (); )
     {
       if (!accs->insn ())
-        continue;
+        {
+          ++accs;
+          continue;
+        }
       access_sequence::iterator next_acc = accs;
       ++next_acc;
       used_regs.clear ();
@@ -2344,6 +2347,7 @@ void sh_ams::access_sequence::find_reg_uses (void)
             add_reg_use (next_acc, use_expr, effective_addr,
                          use_ref, use_insn);
         }
+      accs = next_acc;
     }
 }
 
