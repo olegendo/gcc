@@ -505,8 +505,7 @@ public:
 
     void update_use_expr (rtx new_expr)
     {
-      *m_mem_ref = new_expr;
-      df_insn_rescan (insn ());
+      validate_change (m_insn, m_mem_ref, new_expr, false);
     }
 
     void update_insn (rtx_insn *new_insn)
