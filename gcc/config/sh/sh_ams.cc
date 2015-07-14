@@ -1549,6 +1549,9 @@ void sh_ams::access_sequence::update_insn_stream (void)
 
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
+      if (accs->insn ())
+        last_insn = accs->insn ();
+
       if (accs->access_type () == reg_mod)
         {
           // Skip accesses with unknown values, the ones that
@@ -1707,33 +1710,35 @@ void sh_ams::access_sequence::update_insn_stream (void)
           sh_check_add_incdec_notes (accs->insn ());
         }
 
-      access_sequence::iterator next_acc = accs;
-      ++next_acc;
-      bool insert_before_access = accs->access_type () == load
-                                  || accs->access_type () == store
-                                  || accs->access_type () == reg_use;
-      if (insert_before_access || next_acc == end ())
+      if (sequence_started && (accs->access_type () == load
+                               || accs->access_type () == store
+                               || accs->access_type () == reg_use))
         {
-          if (accs->insn ())
-            last_insn = accs->insn ();
-          if (sequence_started)
-            {
-              rtx_insn* new_insns = get_insns ();
-              end_sequence ();
-              sequence_started = false;
+          rtx_insn* new_insns = get_insns ();
+          end_sequence ();
+          sequence_started = false;
 
-              rtx emit_before_insn = insert_before_access ? accs->insn ()
-                                                          : NEXT_INSN (last_insn);
-
-              log_msg ("emitting new insns = \n");
-              log_rtx (new_insns);
-              log_msg ("\nbefore insn\n");
-              log_insn (emit_before_insn);
-              log_msg ("\n");
-              emit_insn_before (new_insns, emit_before_insn);
-            }
+          log_msg ("emitting new insns = \n");
+          log_rtx (new_insns);
+          log_msg ("\nbefore insn\n");
+          log_insn (accs->insn ());
+          log_msg ("\n");
+          emit_insn_before (new_insns, accs->insn ());
         }
+    }
 
+  // Emit remaining address modifying insns after the last insn in the access.
+  if (sequence_started && last_insn)
+    {
+      rtx_insn* new_insns = get_insns ();
+      end_sequence ();
+
+      log_msg ("emitting new insns = \n");
+      log_rtx (new_insns);
+      log_msg ("\nafter insn\n");
+      log_insn (last_insn);
+      log_msg ("\n");
+      emit_insn_after (new_insns, last_insn);
     }
 }
 
