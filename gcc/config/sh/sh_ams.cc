@@ -1592,35 +1592,38 @@ void sh_ams::access_sequence::update_insn_stream (void)
 	      log_rtx (new_val);
 	      log_msg ("\n");
 	    }
-          else if (accs->original_address ().has_index_reg ())
-            {
-              bool subtract = (accs->original_address ().has_base_reg ()
-                               && accs->original_address ().scale () == -1);
-	      rtx index = subtract ? accs->original_address ().index_reg ()
-                : expand_mult (accs->original_address ().index_reg (),
-                               accs->original_address ().scale ());
-
-              if (accs->original_address ().has_no_base_reg ())
-                new_val = index;
-              else if (subtract)
-                new_val = expand_minus (accs->original_address ().base_reg (),
-                                        index);
-              else
-		new_val = expand_plus (accs->original_address ().base_reg (),
-				       index);
-              log_msg ("reg mod new val (2) = ");
-              log_rtx (new_val);
-              log_msg ("\n");
-            }
           else
             {
-              new_val = accs->original_address ().base_reg ();
-              log_msg ("reg mod new val (3) = ");
-              log_rtx (new_val);
-              log_msg ("\n");
-            }
+              if (accs->original_address ().has_index_reg ())
+                {
+                  bool subtract = (accs->original_address ().has_base_reg ()
+                                   && accs->original_address ().scale () == -1);
+                  rtx index = subtract ? accs->original_address ().index_reg ()
+                    : expand_mult (accs->original_address ().index_reg (),
+                                   accs->original_address ().scale ());
 
-          new_val = expand_plus (new_val, accs->original_address ().disp ());
+                  if (accs->original_address ().has_no_base_reg ())
+                    new_val = index;
+                  else if (subtract)
+                    new_val = expand_minus (accs->original_address ().base_reg (),
+                                            index);
+                  else
+                    new_val = expand_plus (accs->original_address ().base_reg (),
+                                           index);
+                  log_msg ("reg mod new val (2) = ");
+                  log_rtx (new_val);
+                  log_msg ("\n");
+                }
+              else
+                {
+                  new_val = accs->original_address ().base_reg ();
+                  log_msg ("reg mod new val (3) = ");
+                  log_rtx (new_val);
+                  log_msg ("\n");
+                }
+
+              new_val = expand_plus (new_val, accs->original_address ().disp ());
+            }
 
           accs->update_insn (emit_move_insn (accs->address_reg (), new_val));
           reg_mod_insns ().push_back (accs->insn ());
