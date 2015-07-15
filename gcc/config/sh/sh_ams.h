@@ -599,6 +599,9 @@ public:
 		 rtx* reg_ref,
 		 rtx_insn* use_insn);
 
+    access_sequence::iterator
+    remove_access (access_sequence::iterator acc);
+
     // The address modifying insns related to this access sequence
     // that are in the insn stream.  Used to delete the original insns
     // in update_insn_stream.
@@ -609,6 +612,40 @@ public:
     // A hash_map containing the address regs of the sequence and the last
     // reg_mod access that modified them.
     hash_map<rtx, access*>& addr_regs (void) { return m_addr_regs; }
+
+    // A structure used to store the address regs that can be used as a starting
+    // point to arrive at another address during address mod generation.
+    class start_addr_list
+    {
+    public:
+
+      std::list<access*>
+      get_relevant_addresses (const addr_expr& end_addr);
+
+      void add (access* start_addr);
+      void remove (access* start_addr);
+
+    private:
+
+      void add_reg_address (rtx reg, access* start_addr);
+
+      // List of addresses that only have a constant displacement.
+      std::list<access*> m_const_addresses;
+
+      // A hash_map that stores addresses that either have a base or index
+      // reg.  For a given reg rtx REG, m_reg_addresses.get(REG) returns a
+      // list of all addresses that have REG as their base or index reg.
+      hash_map <rtx, std::list<access*>* > m_reg_hashmap;
+
+      // An array storing the actual lists that M_REG_HASHMAP references.
+      std::list<std::list<access*> > m_reg_addresses;
+
+    };
+
+    // A structure storing the reg_mod accesses from the sequence in such way
+    // that they can be searched through efficiently when looking for possible
+    // starting addresses to use for arriving at a given end address.
+    start_addr_list& start_addresses (void)  { return m_start_addr_list; }
 
     // find the first/next true mem access in this access sequence.  returns
     // the end iterator if nothing is found.
@@ -642,10 +679,10 @@ public:
       void reset_changes (access_sequence &as)
       {
 	std::for_each (inserted_accs ().begin (), inserted_accs ().end (),
-		std::bind1st (std::mem_fun (&access_sequence::erase), &as));
+            std::bind1st (std::mem_fun (&access_sequence::remove_access), &as));
 
 	std::for_each (use_changed_accs ().begin (), use_changed_accs ().end (),
-		std::mem_fun (&access::reset_used));
+            std::mem_fun (&access::reset_used));
       }
 
       // List of accesses that were inserted into the sequence.
@@ -724,6 +761,7 @@ public:
 		     delegate& dlg);
 
     hash_map<rtx, access*> m_addr_regs;
+    start_addr_list m_start_addr_list;
     std::vector<rtx_insn*> m_reg_mod_insns;
   };
 
