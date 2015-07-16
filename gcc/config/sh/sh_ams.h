@@ -679,9 +679,11 @@ public:
       {
 	std::for_each (inserted_accs ().begin (), inserted_accs ().end (),
             std::bind1st (std::mem_fun (&access_sequence::remove_access), &as));
+	inserted_accs ().clear ();
 
 	std::for_each (use_changed_accs ().begin (), use_changed_accs ().end (),
             std::mem_fun (&access::reset_used));
+	use_changed_accs ().clear ();
       }
 
       // List of accesses that were inserted into the sequence.
@@ -708,7 +710,7 @@ public:
 			  const addr_expr& end_base,
 			  const addr_expr& end_index,
 			  access_sequence::iterator acc,
-			  mod_tracker *mod_tracker,
+			  mod_tracker& mod_tracker,
 			  delegate& dlg);
 
     struct min_mod_cost_result
@@ -725,6 +727,7 @@ public:
 
     min_mod_cost_result
     find_min_mod_cost (const addr_expr& end_addr,
+		       access_sequence::iterator insert_before,
 		       disp_t disp_min, disp_t disp_max,
 		       addr_type_t addr_type, delegate& dlg);
 
@@ -750,13 +753,8 @@ public:
     mod_addr_result
     try_modify_addr (access* start_addr, const addr_expr& end_addr,
 		     disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-		     access_sequence::iterator *access_place,
-		     mod_tracker *mod_tracker,
-		     delegate& dlg);
-
-    mod_addr_result
-    try_modify_addr (access* start_addr, const addr_expr& end_addr,
-		     disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
+		     access_sequence::iterator &access_place,
+		     mod_tracker &mod_tracker,
 		     delegate& dlg);
 
     hash_map<rtx, access*> m_addr_regs;
