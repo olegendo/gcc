@@ -858,9 +858,9 @@ register_sh_passes (void)
   register_pass (make_pass_sh_optimize_sett_clrt (g, "sh_optimize_sett_clrt"),
 		 PASS_POS_INSERT_BEFORE, "sched2", 1);
 
-  /* Add AMS pass before mode switching.  */
+  /* Add AMS pass after auto-inc-dec.  */
   register_pass (new sh_ams (g, "sh_ams", g_ams_delegate),
-		 PASS_POS_INSERT_BEFORE, "mode_sw", 1);
+         PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 }
 
 /* Implement TARGET_OPTION_OVERRIDE macro.  Validate and override 
