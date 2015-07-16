@@ -191,15 +191,6 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
     }
   else if (a.access_type () == sh_ams::reg_use)
     log_msg ("reg_use:\n");
-  else if (a.access_type () == sh_ams::reg_value)
-    {
-      log_msg ("reg_value:\n  value of ");
-      log_rtx (a.address_reg ());
-      log_msg (" should be\n  ");
-      log_addr_expr (a.address ());
-      log_msg ("\n");
-      return;
-    }
   else
     gcc_unreachable ();
 
@@ -407,23 +398,6 @@ sh_ams::access::access (rtx_insn* insn, rtx* reg_ref,
   m_alternatives_count = 0;
 }
 
-// Constructor for reg_value accesses.
-sh_ams::access::access (rtx addr_reg, addr_expr addr_reg_value)
-{
-  m_access_type = reg_value;
-  m_cost = 0;
-  m_insn = NULL;
-  m_mem_ref = NULL;
-  m_original_addr_expr = make_invalid_addr ();
-  m_addr_expr = addr_reg_value;
-  m_addr_rtx = NULL;
-  m_removable = false;
-  m_should_optimize = true;
-  m_addr_reg = addr_reg;
-  m_used = false;
-  m_alternatives_count = 0;
-}
-
 bool sh_ams::access::
 matches_alternative (const alternative* alt) const
 {
@@ -586,13 +560,14 @@ sh_ams::access_sequence::add_reg_mod (access_sequence::iterator insert_before,
                                       const addr_expr& original_addr_expr,
                                       const addr_expr& addr_expr,
                                       rtx_insn* mod_insn, rtx reg, int cost,
-                                      bool removable)
+                                      bool removable, bool use_as_start_addr)
 {
   insert (insert_before,
           access (mod_insn, original_addr_expr, addr_expr,
                   NULL_RTX, reg, cost, removable));
   access_sequence::iterator inserted = (--insert_before);
-  start_addresses ().add (&(*inserted));
+  if (use_as_start_addr)
+    start_addresses ().add (&(*inserted));
   return *inserted;
 }
 
@@ -648,7 +623,10 @@ sh_ams::access_sequence::first_access_to_optimize (void)
 {
   for (iterator i = begin (); i != end (); ++i)
     if ((i->access_type () == load || i->access_type () == store
-         || i->access_type () == reg_use || i->access_type () == reg_value)
+         || i->access_type () == reg_use
+         || (i->access_type () == reg_mod
+             && i->original_address ().is_invalid ()
+             && !i->address ().is_invalid ()))
         && i->should_optimize ())
       return i;
 
@@ -663,7 +641,10 @@ sh_ams::access_sequence::next_access_to_optimize (iterator i)
 
   for (++i; i != end (); ++i)
     if ((i->access_type () == load || i->access_type () == store
-         || i->access_type () == reg_use || i->access_type () == reg_value)
+         || i->access_type () == reg_use
+         || (i->access_type () == reg_mod
+             && i->original_address ().is_invalid ()
+             && !i->address ().is_invalid ()))
         && i->should_optimize ())
       return i;
 
@@ -1535,12 +1516,6 @@ gen_mod_for_alt (access::alternative& alternative,
     new_addr_expr = post_mod_addr (new_addr_expr.base_reg (),
                                    alternative.address ().disp_min ());
 
-  if (acc->access_type () == reg_value)
-    // If this is a reg_value access, set the address reg to the register
-    // that now holds its original value.
-    add_reg_mod (acc, new_addr_expr, acc->address (),
-                 NULL, acc->address_reg (), 0);
-  else
     // Update the original_addr_expr of the access with the
     // alternative.
     acc->update_original_address (alternative.costs (), new_addr_expr);
@@ -1984,8 +1959,8 @@ int sh_ams::access_sequence::get_clone_cost (access &acc, delegate& dlg)
 
 // Find the cheapest way END_ADDR can be arrived at from one of the addresses
 // in the sequence.
-// Return the reg_value that can be changed into END_ADDR with the least cost
-// and the actual cost.
+// Return the start address that can be changed into END_ADDR with the least
+// cost and the actual cost.
 sh_ams::access_sequence::min_mod_cost_result
 sh_ams::access_sequence::
 find_min_mod_cost (const addr_expr& end_addr,
@@ -2462,9 +2437,9 @@ void sh_ams::access_sequence::find_reg_uses (void)
 }
 
 // Find the values of all address registers that are still alive
-// at the end of the access sequence, and add them to the sequence
-// as reg_value type accesses.  This will force the address modification
-// generator to keep their original values at the end of the sequence.
+// at the end of the access sequence, and set them to their values with
+// reg_mod accesses. This will force the address modification generator
+// to keep their original values at the end of the basic blocks.
 void sh_ams::access_sequence::find_reg_end_values (void)
 {
   for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
@@ -2485,7 +2460,9 @@ void sh_ams::access_sequence::find_reg_end_values (void)
               && acc->address ().base_reg () == acc->address_reg ()))
         continue;
 
-      push_back (access (acc->address_reg (), acc->address ()));
+      add_reg_mod (end (), make_invalid_addr (), acc->address (),
+                   NULL, acc->address_reg (),
+                   0, false, false);
     }
 }
 

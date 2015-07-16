@@ -22,7 +22,7 @@ public:
   // if abs ('disp') == access mode size it's a {PRE,POST}_{INC_DEC}.
 
   enum addr_type_t { non_mod, pre_mod, post_mod };
-  enum access_type_t { load, store, reg_mod, reg_use, reg_value };
+  enum access_type_t { load, store, reg_mod, reg_use };
 
   typedef int regno_t;
 
@@ -383,15 +383,13 @@ public:
     // If m_access_type is REG_MOD, this access represents the modification
     // of an address register.  In this case, m_addr_reg stores the register
     // that's modified and m_addr_expr is its new address.
+    // If m_original_addr_expr is invalid, appropriate reg-mods are inserted
+    // during address mod generation to arrive at the effective address.
     //
     // If the type is REG_USE, the access represents the use of an address
     // reg outside of a memory access.  In this case, m_addr_expr is the
     // effective address of the address reg during the use and
     // m_mem_ref is a reference to the rtx inside the insn that uses the reg.
-    //
-    // An access with type REG_VALUE indicates that at that point in the
-    // access sequence, the effective address of the register stored in
-    // m_addr_reg should be M_ADDR_EXPR.
     access_type_t access_type (void) const { return m_access_type; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
@@ -590,7 +588,8 @@ public:
     add_reg_mod (access_sequence::iterator insert_before,
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr, rtx_insn* mod_insn,
-		 rtx reg, int cost = infinite_costs, bool removable = false);
+		 rtx reg, int cost = infinite_costs, bool removable = false,
+		 bool use_as_start_addr = true);
 
     access&
     add_reg_use (access_sequence::iterator insert_before,
