@@ -820,11 +820,26 @@ extern opt_pass* make_pass_sh_optimize_sett_clrt (gcc::context* ctx,
 
 static struct ams_delegate : public sh_ams::delegate
 {
-  virtual void mem_access_alternatives (sh_ams::access& a);
-  virtual int addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp);
-  virtual int addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale);
-  virtual int addr_reg_plus_reg_cost (const_rtx reg, const_rtx disp_reg);
-  virtual int addr_reg_clone_cost (const_rtx reg);
+  virtual void
+  mem_access_alternatives (sh_ams::access& a,
+			   const sh_ams::access_sequence& as,
+			   sh_ams::access_sequence::const_iterator acc);
+  virtual int
+  addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp,
+		      const sh_ams::access_sequence& as,
+		      sh_ams::access_sequence::const_iterator acc);
+  virtual int
+  addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale,
+		       const sh_ams::access_sequence& as,
+		       sh_ams::access_sequence::const_iterator acc);
+  virtual int
+  addr_reg_plus_reg_cost (const_rtx reg, const_rtx disp_reg,
+			  const sh_ams::access_sequence& as,
+			  sh_ams::access_sequence::const_iterator acc);
+  virtual int
+  addr_reg_clone_cost (const_rtx reg,
+		       const sh_ams::access_sequence& as,
+		       sh_ams::access_sequence::const_iterator acc);
 } g_ams_delegate;
 
 static void
@@ -13690,7 +13705,12 @@ sh_find_equiv_gbr_addr (rtx_insn* insn, rtx mem)
 // AMS delegate functions
 
 // similar to sh_address_cost, but for the AMS pass.
-void ams_delegate::mem_access_alternatives (sh_ams::access& a)
+void ams_delegate::
+mem_access_alternatives (sh_ams::access& a,
+			 const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+			 sh_ams::access_sequence::const_iterator acc
+			 ATTRIBUTE_UNUSED)
+
 {
   // FIXME: determine R0 extra cost dynamically, based on what is happening
   // around the memory access.
@@ -13782,7 +13802,10 @@ void ams_delegate::mem_access_alternatives (sh_ams::access& a)
 }
 
 int
-ams_delegate::addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp)
+ams_delegate::
+addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp,
+		    const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+		    sh_ams::access_sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
   // modifying the GBR is impossible.
   if (sh_ams::get_regno (reg) == GBR_REG)
@@ -13800,8 +13823,12 @@ ams_delegate::addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp)
 }
 
 int
-ams_delegate::addr_reg_plus_reg_cost (const_rtx reg,
-				      const_rtx disp_reg ATTRIBUTE_UNUSED)
+ams_delegate::
+addr_reg_plus_reg_cost (const_rtx reg,
+			const_rtx disp_reg ATTRIBUTE_UNUSED,
+			const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+			sh_ams::access_sequence::const_iterator acc
+			ATTRIBUTE_UNUSED)
 {
   // modifying the GBR is impossible.
   if (sh_ams::get_regno (reg) == GBR_REG)
@@ -13813,7 +13840,11 @@ ams_delegate::addr_reg_plus_reg_cost (const_rtx reg,
 }
 
 int
-ams_delegate::addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale)
+ams_delegate::
+addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale,
+		     const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+		     sh_ams::access_sequence::const_iterator acc
+		     ATTRIBUTE_UNUSED)
 {
   // modifying the GBR is impossible.
   if (sh_ams::get_regno (reg) == GBR_REG)
@@ -13827,7 +13858,11 @@ ams_delegate::addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale)
 }
 
 int
-ams_delegate::addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED)
+ams_delegate::
+addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
+		     const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+		     sh_ams::access_sequence::const_iterator acc
+		     ATTRIBUTE_UNUSED)
 {
   // FIXME: maybe cloning the GBR should be cheaper?
   // FIXME: if register pressure is (expected to be) high, increase the cost

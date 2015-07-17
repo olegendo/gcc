@@ -458,17 +458,6 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
-    void update_alternatives (delegate& dlg)
-    {
-      if (access_type () == load || access_type () == store)
-	dlg.mem_access_alternatives (*this);
-      else
-	// If this isn't a true memory access, the address has to be
-	// loaded into a single register.
-	add_alternative (0, sh_ams::make_reg_addr ());
-
-    }
-
     bool matches_alternative (const alternative* alt) const;
 
     void update_original_address (int new_cost, addr_expr new_addr_expr)
@@ -565,6 +554,17 @@ public:
 
     void find_reg_uses (void);
     void find_reg_end_values (void);
+
+    void update_access_alternatives (delegate& dlg,
+				     access_sequence::iterator acc)
+    {
+      if (acc->access_type () == load || acc->access_type () == store)
+	dlg.mem_access_alternatives (*acc, *this, acc);
+      else
+	// If the access isn't a true memory access, the
+	// address has to be loaded into a single register.
+	acc->add_alternative (0, make_reg_addr ());
+    }
 
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
@@ -699,7 +699,7 @@ public:
       std::vector<access*> m_use_changed_accs;
     };
 
-    int get_clone_cost (access &acc, delegate& dlg);
+    int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
 
     int gen_min_mod (access_sequence::iterator acc,
 		     delegate& dlg, bool record_in_sequence);
@@ -767,28 +767,39 @@ public:
   {
     // provide alternatives for the specified access.
     // use access::add_alternative.
-    virtual void mem_access_alternatives (sh_ams::access& a) = 0;
+    virtual void mem_access_alternatives (sh_ams::access& a,
+                                          const access_sequence& as,
+                                          access_sequence::const_iterator acc) = 0;
 
     // provide the cost for adding a constant to the specified
     // address register.
     // the cost must be somehow relative to the cost provided for access
     // alternatives.
-    virtual int addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp/*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp,
+                                    const access_sequence& as,
+                                    access_sequence::const_iterator acc) = 0;
 
     // provide the cost for multiplying the specified address register
     // by a constant.
-    virtual int addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale/*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale,
+                                     const access_sequence& as,
+                                     access_sequence::const_iterator acc) = 0;
 
     // provide the cost for adding another register to the specified
     // address register.
-    virtual int addr_reg_plus_reg_cost (const_rtx reg, const_rtx disp_reg/*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_plus_reg_cost (const_rtx reg, const_rtx disp_reg,
+                                        const access_sequence& as,
+                                        access_sequence::const_iterator acc) = 0;
 
     // provide the cost for cloning the address register, which is usually
     // required when splitting an access sequence.  if (address) register
     // pressure is high, return a higher cost to avoid splitting.
     //
     // FIXME: alternative would be 'sequence_split_cost'
-    virtual int addr_reg_clone_cost (const_rtx reg /*, const access_sequence& as*/) = 0;
+    virtual int addr_reg_clone_cost (const_rtx reg,
+                                     const access_sequence& as,
+                                     access_sequence::const_iterator acc) = 0;
+
   };
 
   sh_ams (gcc::context* ctx, const char* name, delegate& dlg);

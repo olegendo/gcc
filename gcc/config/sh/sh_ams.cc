@@ -1883,18 +1883,21 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
           // Scaling costs
           if (ae.has_no_base_reg () && ae.has_index_reg ()
               && ae.scale () != 1)
-            cost += dlg.addr_reg_scale_cost (ae.index_reg (), ae.scale ());
-
+            cost += dlg.addr_reg_scale_cost (ae.index_reg (), ae.scale (),
+                                             *this, accs);
+          
           // Costs for adding or subtracting another reg
           else if (ae.has_no_disp () && std::abs (ae.scale ()) == 1
                    && ae.has_base_reg () && ae.has_index_reg ())
-            cost += dlg.addr_reg_plus_reg_cost (ae.index_reg (), ae.base_reg ());
-
+            cost += dlg.addr_reg_plus_reg_cost (ae.index_reg (), ae.base_reg (),
+                                                *this, accs);
+          
           // Constant displacement costs
           else if (ae.has_base_reg () && ae.has_no_index_reg ()
                    && ae.has_disp ())
-            cost += dlg.addr_reg_disp_cost (ae.base_reg (), ae.disp ());
-
+            cost += dlg.addr_reg_disp_cost (ae.base_reg (), ae.disp (),
+                                            *this, accs);
+          
           // If none of the previous branches were taken, the reg_mod access
           // is either a (reg <- reg) or a (reg <- constant) copy, and doesn't
           // have any modification cost.
@@ -1907,7 +1910,7 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
             }
 
           // Cloning costs
-          cost += get_clone_cost (*accs, dlg);
+          cost += get_clone_cost (accs, dlg);
 
           accs->update_cost (cost);
         }
@@ -1925,18 +1928,19 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
 }
 
 // Get the cloning costs associated with ACC, if any.
-int sh_ams::access_sequence::get_clone_cost (access &acc, delegate& dlg)
+int sh_ams::access_sequence::get_clone_cost (access_sequence::iterator &acc,
+                                             delegate& dlg)
 {
   rtx reused_reg = NULL;
-  if (acc.address ().has_base_reg ())
-    reused_reg = acc.address ().base_reg ();
-  else if (acc.address ().has_index_reg ())
-    reused_reg = acc.address ().index_reg ();
+  if (acc->address ().has_base_reg ())
+    reused_reg = acc->address ().base_reg ();
+  else if (acc->address ().has_index_reg ())
+    reused_reg = acc->address ().index_reg ();
   else
     return 0;
 
   // There's no cloning cost for accesses that set the reg to itself.
-  if (reused_reg == acc.address_reg ())
+  if (reused_reg == acc->address_reg ())
     return 0;
 
   for (access_sequence::iterator prev_accs = begin (); ; ++prev_accs)
@@ -1947,8 +1951,8 @@ int sh_ams::access_sequence::get_clone_cost (access &acc, delegate& dlg)
           // If the reused reg is already used by another access,
           // we'll have to clone it.
           if (prev_accs->is_used ())
-            return  dlg.addr_reg_clone_cost (reused_reg);
-
+            return  dlg.addr_reg_clone_cost (reused_reg, *this, acc);
+          
           // Otherwise, we can use it without any cloning penalty.
           prev_accs->set_used ();
           return 0;
@@ -2038,7 +2042,9 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
   access_sequence::iterator ins_place;
   rtx new_reg = start_addr->address_reg ();
   int cost = start_addr->is_used ()
-            ? dlg.addr_reg_clone_cost (start_addr->address_reg ()) : 0;
+             ? dlg.addr_reg_clone_cost (start_addr->address_reg (),
+                                        *this, access_place)
+             : 0;
   int prev_cost = 0;
   rtx final_addr_regno = start_addr->address_reg ();
 
@@ -2109,7 +2115,6 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
       scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
                                    c_end_addr.scale (), 0);
-      cost += dlg.addr_reg_scale_cost (start_addr->address_reg (), scale);
 
       if (!start_addr->is_used ())
         {
@@ -2118,18 +2123,22 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
         }
 
       new_reg = gen_reg_rtx (Pmode);
-      start_addr = &add_reg_mod (
-                       access_place,
-                       non_mod_addr (invalid_regno,
-                                     start_addr->address_reg (), scale, 0),
-                       c_start_addr, NULL, new_reg, cost - prev_cost);
+      access* new_addr = &add_reg_mod (
+                 access_place,
+                 non_mod_addr (invalid_regno,
+                               start_addr->address_reg (), scale, 0),
+                 c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
       ins_place = access_place;
       --ins_place;
       mod_tracker.inserted_accs ().push_back (ins_place);
 
+      cost += dlg.addr_reg_scale_cost (start_addr->address_reg (), scale,
+                                       *this, access_place);
+      new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
+      start_addr = new_addr;
     }
 
   // Try subtracting regs.
@@ -2143,8 +2152,6 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                                    c_end_addr.index_reg (),
                                    -1,
                                    c_start_addr.disp ());
-      cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
-                                          c_end_addr.index_reg ());
 
       if (!start_addr->is_used ())
         {
@@ -2153,19 +2160,24 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
         }
 
       new_reg = gen_reg_rtx (Pmode);
-      start_addr = &add_reg_mod (
-                        access_place,
-                        non_mod_addr (start_addr->address_reg (),
-                                      c_end_addr.index_reg (),
-                                      -1, 0),
-                        c_start_addr, NULL, new_reg, cost - prev_cost);
+      access* new_addr = &add_reg_mod (
+                 access_place,
+                 non_mod_addr (start_addr->address_reg (),
+                               c_end_addr.index_reg (),
+                               -1, 0),
+                 c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
       ins_place = access_place;
       --ins_place;
       mod_tracker.inserted_accs ().push_back (ins_place);
 
+      cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
+                                          c_end_addr.index_reg (),
+                                          *this, access_place);
+      new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
+      start_addr = new_addr;
     }
 
   // Add missing base reg.
@@ -2175,8 +2187,6 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                                    c_start_addr.index_reg (),
                                    c_start_addr.scale (),
                                    c_start_addr.disp ());
-      cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
-                                          c_end_addr.base_reg ());
 
       if (!start_addr->is_used ())
         {
@@ -2185,18 +2195,23 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
         }
 
       new_reg = gen_reg_rtx (Pmode);
-      start_addr = &add_reg_mod (
-                        access_place,
-                        non_mod_addr (c_start_addr.base_reg (),
-                                      start_addr->address_reg (), 1, 0),
-                        c_start_addr, NULL, new_reg, cost - prev_cost);
+      access* new_addr = &add_reg_mod (
+                 access_place,
+                 non_mod_addr (c_start_addr.base_reg (),
+                               start_addr->address_reg (), 1, 0),
+                 c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
       ins_place = access_place;
       --ins_place;
       mod_tracker.inserted_accs ().push_back (ins_place);
 
+      cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
+                                          c_end_addr.base_reg (),
+                                          *this, access_place);
+      new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
+      start_addr = new_addr;
     }
 
   // Set auto-inc/dec displacement that's added to the base reg.
@@ -2227,7 +2242,6 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                                    c_start_addr.index_reg (),
                                    c_start_addr.scale (),
                                    c_start_addr.disp () + disp);
-      cost += dlg.addr_reg_disp_cost (start_addr->address_reg (), disp);
 
       if (!start_addr->is_used ())
         {
@@ -2236,18 +2250,22 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
         }
 
       new_reg = gen_reg_rtx (Pmode);
-      start_addr = &add_reg_mod (
-                        access_place,
-                        non_mod_addr (start_addr->address_reg (),
-                                      invalid_regno, 1, disp),
-                        c_start_addr, NULL, new_reg, cost - prev_cost);
+      access* new_addr = &add_reg_mod (
+                  access_place,
+                  non_mod_addr (start_addr->address_reg (),
+                                invalid_regno, 1, disp),
+                  c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
       ins_place = access_place;
       --ins_place;
       mod_tracker.inserted_accs ().push_back (ins_place);
 
+      cost += dlg.addr_reg_disp_cost (start_addr->address_reg (), disp,
+                                      *this, access_place);
+      new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
+      start_addr = new_addr;
     }
 
   // For auto-mod accesses, copy the base reg into a new pseudo that will
@@ -2270,15 +2288,15 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
 
       rtx pre_mod_reg = new_reg;
       new_reg = gen_reg_rtx (Pmode);
-      start_addr = &add_reg_mod (access_place, make_reg_addr (pre_mod_reg),
-                                 c_start_addr, NULL, new_reg,
-                                 cost - prev_cost);
+      access* new_addr = &add_reg_mod (access_place, make_reg_addr (pre_mod_reg),
+                                       c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
       ins_place = access_place;
       --ins_place;
       mod_tracker.inserted_accs ().push_back (ins_place);
 
+      new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
     }
 
@@ -2478,8 +2496,8 @@ unsigned int sh_ams::execute (function* fun)
 
       for (access_sequence::iterator it = as.first_access_to_optimize ();
            it != as.end (); it = as.next_access_to_optimize (it))
-        it->update_alternatives (m_delegate);
-
+        as.update_access_alternatives (m_delegate, it);
+      
       as.update_cost (m_delegate);
       int original_cost = as.cost ();
 
