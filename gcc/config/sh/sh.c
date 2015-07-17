@@ -13835,6 +13835,24 @@ addr_reg_plus_reg_cost (const_rtx reg,
   if (sh_ams::get_regno (reg) == GBR_REG)
     return sh_ams::infinite_costs;
 
+  // increase the costs if the next mem access that uses this
+  // could also use reg+reg addressing mode instead.
+  sh_ams::access_sequence::const_iterator next_acc = acc;
+  ++next_acc;
+  if (next_acc != as.end () && (next_acc->access_type () == sh_ams::load
+				|| next_acc->access_type () == sh_ams::store)
+      && next_acc->address () == acc->address ())
+    {
+      for (const sh_ams::access::alternative*
+	     alt = next_acc->begin_alternatives ();
+	   alt != next_acc->end_alternatives (); ++alt)
+	{
+	  if (alt->address ().base_reg () == sh_ams::any_regno
+	      && alt->address ().index_reg () == sh_ams::any_regno)
+	    return 5;
+	}
+    }
+
   // the costs for adding a register should be around the same
   // as adding a small constant.
   return 3;

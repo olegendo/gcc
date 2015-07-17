@@ -2525,6 +2525,7 @@ unsigned int sh_ams::execute (function* fun)
 
       as.gen_address_mod (m_delegate);
 
+      as.update_cost (m_delegate);
       int new_cost = as.cost ();
 
       log_msg ("\nAccess sequence contents after address mod generation:\n\n");

@@ -76,6 +76,14 @@ public:
     scale_t scale_min (void) const { return m_scale_min; }
     scale_t scale_max (void) const { return m_scale_max; }
 
+    bool operator==(const addr_expr &other) const
+    {
+      return (base_reg () == other.base_reg ()
+              && (index_reg () == other.index_reg ())
+              && (scale () == other.scale ())
+              && (disp () == other.disp ()));
+    }
+
     // returns true if the original address expression is more complex than
     // what AMS can handle.
     bool is_invalid (void) const
