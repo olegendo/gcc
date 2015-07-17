@@ -225,11 +225,27 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
     log_msg ("\n  (removable)");
   if (!a.should_optimize ())
     log_msg ("\n  (won't be optimized)");
+  if (a.is_trailing ())
+    log_msg ("\n  (trailing)");
 
   if (a.access_type () == sh_ams::reg_use)
     {
-      log_msg ("\n  used in ");
-      log_insn (a.insn ());
+      if (a.is_trailing ())
+        {
+          log_msg ("\n  used in:\n");
+          for (std::vector<rtx_insn*>::const_iterator i
+                 = a.trailing_insns ().begin ();
+               i != a.trailing_insns ().end (); ++i)
+            {
+              log_msg ("  ");
+              log_insn (*i);
+            }
+        }
+      else
+        {
+          log_msg ("\n  used in ");
+          log_insn (a.insn ());
+        }
     }
 
   if (log_alternatives
@@ -381,12 +397,14 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
 }
 
 // Constructor for reg_use accesses.
-sh_ams::access::access (rtx_insn* insn, rtx* reg_ref,
+sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
+                        rtx* reg_ref,
                         addr_expr original_addr_expr, addr_expr addr_expr)
 {
   m_access_type = reg_use;
   m_cost = 0;
   m_insn = insn;
+  m_trailing_insns = trailing_insns;
   m_mem_ref = reg_ref;
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
@@ -397,6 +415,7 @@ sh_ams::access::access (rtx_insn* insn, rtx* reg_ref,
   m_used = false;
   m_alternatives_count = 0;
 }
+
 
 bool sh_ams::access::
 matches_alternative (const alternative* alt) const
@@ -577,12 +596,29 @@ sh_ams::access&
 sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
                                       const addr_expr& original_addr_expr,
                                       const addr_expr& addr_expr,
-                                      rtx* reg_ref,
-                                      rtx_insn* use_insn)
+                                      rtx* reg_ref, rtx_insn* use_insn)
 {
-  insert (insert_before,
-          access (use_insn, reg_ref, original_addr_expr, addr_expr));
-  return *(--insert_before);
+  access_sequence::iterator inserted =
+    insert (insert_before,
+            access (use_insn, std::vector<rtx_insn*> (), reg_ref,
+                    original_addr_expr, addr_expr));
+  return *inserted;
+}
+
+// Create a trailing reg_use access and place it before INSERT_BEFORE
+// in the access sequence.
+sh_ams::access&
+sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
+                                      const addr_expr& original_addr_expr,
+                                      const addr_expr& addr_expr,
+                                      rtx* reg_ref,
+                                      std::vector<rtx_insn*> use_insns)
+{
+  access_sequence::iterator inserted =
+    insert (insert_before,
+            access (NULL, use_insns, reg_ref,
+                    original_addr_expr, addr_expr));
+  return *inserted;
 }
 
 // Remove the access ACC from the sequence. Return an iterator
@@ -627,7 +663,8 @@ sh_ams::access_sequence::first_access_to_optimize (void)
          || (i->access_type () == reg_mod
              && i->original_address ().is_invalid ()
              && !i->address ().is_invalid ()))
-        && i->should_optimize ())
+        && i->should_optimize ()
+        && !i->is_trailing ())
       return i;
 
   return end ();
@@ -645,7 +682,8 @@ sh_ams::access_sequence::next_access_to_optimize (iterator i)
          || (i->access_type () == reg_mod
              && i->original_address ().is_invalid ()
              && !i->address ().is_invalid ()))
-        && i->should_optimize ())
+        && i->should_optimize ()
+        && !i->is_trailing ())
       return i;
 
   return end ();
@@ -1166,17 +1204,18 @@ sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
 
 // Internal function of collect_addr_reg_uses.
 template <typename OutputIterator> void
-sh_ams::collect_addr_reg_uses_1 (access_sequence& as, rtx_insn *start_insn,
-                                 basic_block bb,
+sh_ams::collect_addr_reg_uses_1 (access_sequence& as, rtx addr_reg,
+                                 rtx_insn *start_insn, basic_block bb,
                                  std::vector<basic_block>& visited_bb,
                                  rtx abort_at_insn, OutputIterator out,
-                                 bool stay_in_curr_bb)
+                                 bool stay_in_curr_bb, bool stop_after_first)
 {
   if (bb == NULL)
     return;
 
-  if (std::find (visited_bb.begin (), visited_bb.end (), bb)
-      != visited_bb.end ())
+  if (!stop_after_first
+      && std::find (visited_bb.begin (), visited_bb.end (), bb)
+         != visited_bb.end ())
     log_return_void ("[bb %d] already visited\n", bb->index);
 
   visited_bb.push_back (bb);
@@ -1192,11 +1231,13 @@ sh_ams::collect_addr_reg_uses_1 (access_sequence& as, rtx_insn *start_insn,
   for (rtx_insn *i = NEXT_INSN (start_insn); i != end_insn; i = NEXT_INSN (i))
     {
       if (INSN_P (i) && NONDEBUG_INSN_P (i)
-          && collect_addr_reg_uses_2 (as, i, PATTERN (i), out))
+          && collect_addr_reg_uses_2 (as, addr_reg, i, PATTERN (i), out))
         {
           log_msg ("found addr reg use in [bb %d] at insn:\n", bb->index);
           log_insn (i);
           log_msg ("\n");
+          if (stop_after_first)
+            return;
         }
 
       if (abort_at_insn != NULL_RTX && abort_at_insn == i)
@@ -1209,22 +1250,24 @@ sh_ams::collect_addr_reg_uses_1 (access_sequence& as, rtx_insn *start_insn,
   for (edge_iterator ei = ei_start (bb->succs); !ei_end_p (ei); ei_next (&ei))
     {
       basic_block succ_bb = ei_edge (ei)->dest;
-      collect_addr_reg_uses_1 (as, BB_HEAD (succ_bb), succ_bb, visited_bb,
-                               abort_at_insn, out, stay_in_curr_bb);
+      collect_addr_reg_uses_1 (as, addr_reg, BB_HEAD (succ_bb),
+                               succ_bb, visited_bb,
+                               abort_at_insn, out,
+                               stay_in_curr_bb, stop_after_first);
     }
 }
 
 // The recursive part of collect_addr_reg_uses.
 template <typename OutputIterator> bool
-sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx_insn *insn,
-                                 rtx& x, OutputIterator out)
+sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
+                                 rtx_insn *insn, rtx& x, OutputIterator out)
 {
 
   bool found = false;
   switch (GET_CODE (x))
     {
     case REG:
-      if (as.addr_regs ().get (x))
+      if (x == addr_reg || (!addr_reg && as.addr_regs ().get (x)))
         {
           *out++ = std::make_pair (&x, insn);
           return true;
@@ -1235,14 +1278,19 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx_insn *insn,
       break;
     case PARALLEL:
       for (int i = 0; i < XVECLEN (x, 0); i++)
-        found |= collect_addr_reg_uses_2 (as, insn, XVECEXP (x, 0, i), out);
+        found |= collect_addr_reg_uses_2 (as, addr_reg, insn,
+                                          XVECEXP (x, 0, i), out);
       break;
     case SET:
 
       // If SET_DEST is an address reg, the regs in SET_SRC are
       // used for address calculation, so don't add them.
-      if (!as.addr_regs ().get (SET_DEST (x)))
-        found |= collect_addr_reg_uses_2 (as, insn, SET_SRC (x), out);
+      if (SET_DEST (x) == addr_reg)
+        break;
+      if (!addr_reg && as.addr_regs ().get (SET_DEST (x)))
+        break;
+      
+      found |= collect_addr_reg_uses_2 (as, addr_reg, insn, SET_SRC (x), out);
       break;
     default:
       if (UNARY_P (x) || ARITHMETIC_P (x))
@@ -1252,28 +1300,35 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx_insn *insn,
           addr_expr use_expr = extract_addr_expr (x);
           if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
               && use_expr.has_base_reg () && use_expr.has_disp ()
-              && as.addr_regs ().get (use_expr.base_reg ()))
+              && (use_expr.base_reg () == addr_reg
+                  || (!addr_reg && as.addr_regs ().get (use_expr.base_reg ()))))
             {
               *out++ = std::make_pair (&x, insn);
               return true;
             }
+          
           for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
-            found |= collect_addr_reg_uses_2 (as, insn, XEXP (x, i), out);
+            found |= collect_addr_reg_uses_2 (as, addr_reg, insn,
+                                              XEXP (x, i), out);
         }
       break;
     }
   return found;
 }
 
-// Collect uses of the address regs of the specified access sequence in all
-// basic blocks that are reachable from the specified insn.  If 'abort_at_insn'
-// is not null, abort at that insn.  If the insn 'abort_at_insn' has a reg-use,
-// it is also collected. If STAY_IN_CURR_BB is true, only the basic block of
-// the starting insn is searched through.
+// Collect uses of the address registers in all basic blocks that are reachable
+// from the specified insn. The reg(s) that we search for is ADDR_REG, or the
+// address regs of the access sequence AS if ADDR_REG is null.
+// If 'abort_at_insn' is not null, abort at that insn. If the insn
+// 'abort_at_insn' has a reg-use, it is also collected.
+// If STAY_IN_CURR_BB is true, only the basic block of the starting insn is
+// searched through.  If STOP_AFTER_FIRST is true, we only collect the first
+// addr reg use in a BB.
 template <typename OutputIterator> void
-sh_ams::collect_addr_reg_uses (access_sequence& as, rtx_insn *start_insn,
+sh_ams::collect_addr_reg_uses (access_sequence& as, rtx addr_reg,
+                               rtx_insn *start_insn,
                                rtx abort_at_insn, OutputIterator out,
-                               bool stay_in_curr_bb)
+                               bool stay_in_curr_bb, bool stop_after_first)
 {
   log_msg ("\ncollecting address reg uses\nstart_insn = ");
   log_insn (start_insn);
@@ -1281,13 +1336,15 @@ sh_ams::collect_addr_reg_uses (access_sequence& as, rtx_insn *start_insn,
   std::vector<basic_block> visited_bb;
   visited_bb.reserve (32);
 
-  collect_addr_reg_uses_1 (as, start_insn, BLOCK_FOR_INSN (start_insn),
-                           visited_bb, abort_at_insn, out, stay_in_curr_bb);
+  collect_addr_reg_uses_1 (as, addr_reg, start_insn, BLOCK_FOR_INSN (start_insn),
+                           visited_bb, abort_at_insn, out, stay_in_curr_bb,
+                           stop_after_first);
 }
 
 // Generate the address modifications needed to arrive at the addresses in
 // the access sequence.  They are inserted in the form of reg_mod accesses
 // between the regular accesses.
+// FIXME: Handle trailing reg_mods/uses.
 void sh_ams::access_sequence::
 gen_address_mod (delegate& dlg)
 {
@@ -1870,8 +1927,8 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
       else if (accs->access_type () == reg_mod)
         {
           // Skip this access if the original address doesn't fit into an
-          // addr_expr.
-          if (accs->original_address ().is_invalid ())
+          // addr_expr or if it's a trailing access.
+          if (accs->original_address ().is_invalid () || accs->is_trailing ())
             {
               accs->update_cost (0);
               continue;
@@ -2311,13 +2368,16 @@ void sh_ams::access_sequence::find_addr_regs (void)
 {
   for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
+      if (accs->is_trailing ())
+        break;
+      
       if (accs->access_type () == reg_mod)
         addr_regs ().put (accs->address_reg (), &(*accs));
 
       // Search for REG_DEAD notes in the insns between this and the next access.
       access_sequence::iterator next = accs;
       ++next;
-      if (accs->insn () && next != end ())
+      if (accs->insn () && next != end () && !next->is_trailing ())
         {
           for (rtx_insn *i = accs->insn (); ; i = NEXT_INSN (i))
             {
@@ -2390,6 +2450,8 @@ reg_used_in_sequence (rtx reg, access_sequence::iterator search_start)
 void sh_ams::access_sequence::find_reg_uses (void)
 {
   std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
+  rtx_insn* last_insn = NULL;
+  
   for (access_sequence::iterator accs = begin (); accs != end (); )
     {
       if (!accs->insn ())
@@ -2397,12 +2459,15 @@ void sh_ams::access_sequence::find_reg_uses (void)
           ++accs;
           continue;
         }
+      
+      last_insn = accs->insn ();
+
       access_sequence::iterator next_acc = accs;
       ++next_acc;
       used_regs.clear ();
       collect_addr_reg_uses (*this, accs->insn (),
                              next_acc == end () ? NULL : next_acc->insn (),
-                             std::back_inserter (used_regs), true);
+                             std::back_inserter (used_regs), true, false);
 
       for (std::vector<std::pair<rtx*, rtx_insn*> >::iterator
              it = used_regs.begin (); it != used_regs.end (); ++it)
@@ -2418,6 +2483,48 @@ void sh_ams::access_sequence::find_reg_uses (void)
                          use_ref, use_insn);
         }
       accs = next_acc;
+    }
+
+  if (!last_insn)
+    return;
+
+  // Add trailing address reg uses to the end of the sequence.
+  // FIXME: Do the same for reg_mods.
+  for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
+       it != addr_regs ().end (); ++it)
+    {
+      used_regs.clear ();
+      collect_addr_reg_uses (*this, (*it).first, last_insn, NULL,
+                             std::back_inserter (used_regs), false, true);
+
+      std::vector<rtx_insn*> insns;
+      rtx* trailing_use_ref = NULL;
+
+      for (std::vector<std::pair<rtx*, rtx_insn*> >::iterator
+             it = used_regs.begin (); it != used_regs.end (); ++it)
+        {
+          rtx* use_ref = it->first;
+          rtx_insn* use_insn = it->second;
+          if (!trailing_use_ref)
+            trailing_use_ref = use_ref;
+          else if (!rtx_equal_p (*use_ref, *trailing_use_ref))
+            {
+              // If the trailing uses aren't all the same,
+              // don't add them for this reg.
+              trailing_use_ref = NULL;
+              break;
+            }
+          insns.push_back (use_insn);
+        }
+      
+      if (trailing_use_ref)
+        {
+          // FIXME: Compute the effective address of the reg_use.
+          add_reg_use (end (),
+                       extract_addr_expr (*trailing_use_ref),
+                       make_invalid_addr (),
+                       trailing_use_ref, insns);
+        }
     }
 }
 

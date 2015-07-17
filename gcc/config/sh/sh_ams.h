@@ -218,18 +218,30 @@ public:
 
   template <typename OutputIterator> static void
   collect_addr_reg_uses
-    (access_sequence& as, rtx_insn *start_insn,
-     rtx abort_at_insn, OutputIterator out, bool stay_in_curr_bb);
+    (access_sequence& as, rtx addr_reg, rtx_insn *start_insn,
+     rtx abort_at_insn, OutputIterator out,
+     bool stay_in_curr_bb, bool stop_after_first);
 
   template <typename OutputIterator> static void
-  collect_addr_reg_uses_1 (access_sequence& as, rtx_insn *start_insn,
-			   basic_block bb, std::vector<basic_block>& visited_bb,
+  collect_addr_reg_uses
+    (access_sequence& as, rtx_insn *start_insn,
+     rtx abort_at_insn, OutputIterator out,
+     bool stay_in_curr_bb, bool stop_after_first)
+    {
+      collect_addr_reg_uses (as, NULL, start_insn, abort_at_insn, out,
+                             stay_in_curr_bb, stop_after_first);
+    }
+
+  template <typename OutputIterator> static void
+  collect_addr_reg_uses_1 (access_sequence& as, rtx addr_reg,
+                           rtx_insn *start_insn, basic_block bb,
+                           std::vector<basic_block>& visited_bb,
 			   rtx abort_at_insn, OutputIterator out,
-			   bool stay_in_curr_bb);
+			   bool stay_in_curr_bb, bool stop_after_first);
 
   template <typename OutputIterator> static bool
-  collect_addr_reg_uses_2 (access_sequence& as, rtx_insn *insn,
-			   rtx& x, OutputIterator out);
+  collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
+                           rtx_insn *insn, rtx& x, OutputIterator out);
 
   static void find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
 			      rtx_insn** mod_insn);
@@ -374,7 +386,8 @@ public:
 	    bool should_optimize, int cost = infinite_costs);
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
 	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
-    access (rtx_insn* insn, rtx* reg_ref, addr_expr original_addr_expr,
+    access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
+            rtx* reg_ref, addr_expr original_addr_expr,
 	    addr_expr addr_expr);
     access (rtx addr_reg, addr_expr reg_value);
 
@@ -434,6 +447,20 @@ public:
 
     void set_used () { m_used = true; }
     void reset_used () { m_used = false; }
+
+    // Return true if this is a trailing access, i,e. the first use or
+    // modification of an address reg in the access sequence's successor
+    // BBs. There can be multiple trailing accesses if the addr reg is
+    // set/used in more than one successor BBs.  In this case, AMS only
+    // handles them if they are equivalent, and they're represented by a
+    // single access.
+    bool is_trailing (void) const { return !trailing_insns ().empty (); }
+    
+    // For a trailing access, the insns where the reg use/mod occur. These
+    // can be multiple insns if the access represents multiple equivalent
+    // uses or mods.
+    const std::vector<rtx_insn*>& trailing_insns (void) const
+    { return m_trailing_insns; }
 
     access& add_alternative (int costs, const addr_expr& ae)
     {
@@ -523,6 +550,7 @@ public:
     addr_space_t m_addr_space;
     int m_cost;
     rtx_insn* m_insn;
+    std::vector<rtx_insn*> m_trailing_insns;
     rtx* m_mem_ref; // reference to the mem rtx inside the insn.
     bool m_removable;
     bool m_should_optimize;
@@ -605,6 +633,12 @@ public:
 		 const addr_expr& addr_expr,
 		 rtx* reg_ref,
 		 rtx_insn* use_insn);
+    access&
+    add_reg_use (access_sequence::iterator insert_before,
+		 const addr_expr& original_addr_expr,
+		 const addr_expr& addr_expr,
+		 rtx* reg_ref,
+		 std::vector<rtx_insn*> use_insns);
 
     access_sequence::iterator
     remove_access (access_sequence::iterator acc);
