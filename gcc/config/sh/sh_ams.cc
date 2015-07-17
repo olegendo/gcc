@@ -1885,19 +1885,19 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
               && ae.scale () != 1)
             cost += dlg.addr_reg_scale_cost (ae.index_reg (), ae.scale (),
                                              *this, accs);
-          
+
           // Costs for adding or subtracting another reg
           else if (ae.has_no_disp () && std::abs (ae.scale ()) == 1
                    && ae.has_base_reg () && ae.has_index_reg ())
             cost += dlg.addr_reg_plus_reg_cost (ae.index_reg (), ae.base_reg (),
                                                 *this, accs);
-          
+
           // Constant displacement costs
           else if (ae.has_base_reg () && ae.has_no_index_reg ()
                    && ae.has_disp ())
             cost += dlg.addr_reg_disp_cost (ae.base_reg (), ae.disp (),
                                             *this, accs);
-          
+
           // If none of the previous branches were taken, the reg_mod access
           // is either a (reg <- reg) or a (reg <- constant) copy, and doesn't
           // have any modification cost.
@@ -1952,7 +1952,7 @@ int sh_ams::access_sequence::get_clone_cost (access_sequence::iterator &acc,
           // we'll have to clone it.
           if (prev_accs->is_used ())
             return  dlg.addr_reg_clone_cost (reused_reg, *this, acc);
-          
+
           // Otherwise, we can use it without any cloning penalty.
           prev_accs->set_used ();
           return 0;
@@ -2368,9 +2368,6 @@ void sh_ams::access_sequence::add_missing_reg_mods (basic_block bb)
                    std::mem_fun (&access::mark_unremovable));
         }
     }
-
-  // Update the address regs' final values.
-  find_addr_regs ();
 }
 
 // Check whether REG is used in any access after SEARCH_START.
@@ -2430,6 +2427,9 @@ void sh_ams::access_sequence::find_reg_uses (void)
 // to keep their original values at the end of the basic blocks.
 void sh_ams::access_sequence::find_reg_end_values (void)
 {
+  // Update the address regs' final values.
+  find_addr_regs ();
+
   for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
@@ -2497,7 +2497,7 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::iterator it = as.first_access_to_optimize ();
            it != as.end (); it = as.next_access_to_optimize (it))
         as.update_access_alternatives (m_delegate, it);
-      
+
       as.update_cost (m_delegate);
       int original_cost = as.cost ();
 
