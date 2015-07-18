@@ -174,6 +174,16 @@ log_addr_expr (const sh_ams::addr_expr& ae)
 }
 
 void
+log_access_location (const sh_ams::access& a)
+{
+  if (a.insn () != NULL)
+    log_msg ("at insn %d [bb %d]", INSN_UID (a.insn ()),
+				   BLOCK_FOR_INSN (a.insn ())->index);
+  else
+    log_msg ("at insn: ?");
+}
+
+void
 log_access (const sh_ams::access& a, bool log_alternatives = true)
 {
   if (dump_file == NULL)
@@ -182,23 +192,26 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
   if (a.access_type () == sh_ams::load)
     log_msg ("load ");
   else if (a.access_type () == sh_ams::store)
-    log_msg ("store");
+    log_msg ("store ");
   else if (a.access_type () == sh_ams::reg_mod)
-    {
-      log_msg ("reg_mod:\n  ");
-      log_rtx (a.address_reg ());
-      log_msg (" set\n");
-    }
+    log_msg ("reg_mod ");
   else if (a.access_type () == sh_ams::reg_use)
-    log_msg ("reg_use:\n");
+    log_msg ("reg_use ");
   else
     gcc_unreachable ();
 
-  if (a.access_type () == sh_ams::load || a.access_type () == sh_ams::store)
-    log_msg (" %smode (%d):\n",
-             GET_MODE_NAME (a.mach_mode ()), a.access_size ());
+  log_access_location (a);
 
-  log_msg ("  original addr:   ");
+  if (a.access_type () == sh_ams::load || a.access_type () == sh_ams::store)
+    log_msg ("  %smode (%d):",
+             GET_MODE_NAME (a.mach_mode ()), a.access_size ());
+  else if (a.access_type () == sh_ams::reg_mod)
+    {
+      log_msg ("  set ");
+      log_rtx (a.address_reg ());
+    }
+
+  log_msg ("\n  original addr:   ");
 
   if (a.original_address ().is_invalid ())
     {
@@ -237,8 +250,9 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
                  = a.trailing_insns ().begin ();
                i != a.trailing_insns ().end (); ++i)
             {
-              log_msg ("  ");
+              log_msg ("  [bb %d] ", BLOCK_FOR_INSN (*i)->index);
               log_insn (*i);
+              log_msg ("\n");
             }
         }
       else
@@ -265,6 +279,28 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
           ++alt_count;
         }
     }
+}
+
+void
+log_access_sequence (const sh_ams::access_sequence& as,
+		     bool log_alternatives = true)
+{
+  if (dump_file == NULL)
+    return;
+
+  log_msg ("access sequence:\n\n");
+  for (sh_ams::access_sequence::const_iterator it = as.begin ();
+       it != as.end (); ++it)
+    {
+      log_access (*it, log_alternatives);
+      log_msg ("\n-----\n");
+    }
+
+  int c = as.cost ();
+  if (c == sh_ams::infinite_costs)
+    log_msg ("total cost: infinite");
+  else
+    log_msg ("total cost: %d", as.cost ());
 }
 
 // FIXME: Is it OK to use Pmode for the index reg and signed ops?
@@ -1213,6 +1249,8 @@ sh_ams::collect_addr_reg_uses_1 (access_sequence& as, rtx addr_reg,
   if (bb == NULL)
     return;
 
+  log_msg ("collect_addr_reg_uses_1 [bb %d]\n", bb->index);
+
   if (!stop_after_first
       && std::find (visited_bb.begin (), visited_bb.end (), bb)
          != visited_bb.end ())
@@ -1511,7 +1549,7 @@ gen_min_mod (access_sequence::iterator acc, delegate& dlg,
 
   if (record_in_sequence)
     {
-      log_msg ("min alternative: %d  min costs = %d\n",
+      log_msg ("  min alternative: %d  min costs = %d\n",
                (int)(min_alternative - acc->begin_alternatives ()),
                min_cost);
       gen_mod_for_alt (*min_alternative,
@@ -2578,6 +2616,7 @@ unsigned int sh_ams::execute (function* fun)
       rtx_insn* i;
 
       log_msg ("BB #%d:\n", bb->index);
+      log_msg ("finding mem accesses\n");
 
       // Construct the access sequence from the access insns.
       access_sequence as;
@@ -2596,11 +2635,34 @@ unsigned int sh_ams::execute (function* fun)
 	    as.add_mem_access (i, m->first, m->second);
          }
 
-      as.add_missing_reg_mods (bb);
+      if (as.empty ())
+        {
+          log_msg ("access sequence empty\n\n");
+          continue;
+        }
 
+      log_access_sequence (as, false);
+      log_msg ("\n\n");
+      
+      log_msg ("add_missing_reg_mods\n");
+      as.add_missing_reg_mods (bb);
+      
+      log_access_sequence (as, false);
+      log_msg ("\n\n");
+      
+      log_msg ("find_reg_uses\n");
       as.find_reg_uses ();
+      
+      log_access_sequence (as, false);
+      log_msg ("\n\n");
+
+      log_msg ("find_reg_end_values\n");
       as.find_reg_end_values ();
 
+      log_access_sequence (as, false);
+      log_msg ("\n\n");
+
+      log_msg ("updating access alternatives and costs\n");
       for (access_sequence::iterator it = as.first_access_to_optimize ();
            it != as.end (); it = as.next_access_to_optimize (it))
         as.update_access_alternatives (m_delegate, it);
@@ -2608,17 +2670,10 @@ unsigned int sh_ams::execute (function* fun)
       as.update_cost (m_delegate);
       int original_cost = as.cost ();
 
-      log_msg ("Access sequence contents:\n\n");
-      for (access_sequence::const_iterator it = as.begin ();
-	   it != as.end (); ++it)
-	{
-	  log_access (*it, false);
-	  log_msg ("\n-----\n");
-	}
-      log_msg ("\nTotal cost: %d\n", original_cost);
-
+      log_access_sequence (as);
       log_msg ("\n\n");
 
+      log_msg ("gen_address_mod\n");
       // Fill the sequence's REG_MOD_INSNS with the insns of the reg_mod accesses
       // that can be removed.
       for (access_sequence::iterator it = as.begin ();
@@ -2635,19 +2690,14 @@ unsigned int sh_ams::execute (function* fun)
       as.update_cost (m_delegate);
       int new_cost = as.cost ();
 
-      log_msg ("\nAccess sequence contents after address mod generation:\n\n");
-      for (access_sequence::const_iterator it = as.begin ();
-	   it != as.end (); ++it)
-	{
-	  log_access (*it, false);
-	  log_msg ("\n-----\n");
-	}
-      log_msg ("\nTotal cost: %d\n", new_cost);
+      log_access_sequence (as, false);
+      log_msg ("\n");
 
       if (new_cost < original_cost)
         as.update_insn_stream ();
       else
-        log_msg ("Insn list not modified\n");
+        log_msg ("new_cost (%d) >= original_cost (%d)  not modifying\n",
+		 new_cost, original_cost);
 
       log_msg ("\n\n");
     }
