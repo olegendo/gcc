@@ -1890,7 +1890,7 @@ int sh_ams::access_sequence::cost (void) const
 {
   int cost = 0;
   for (access_sequence::const_iterator accs = begin ();
-       accs != end (); ++accs)
+       accs != end () && cost != infinite_costs; ++accs)
     cost += accs->cost ();
   return cost;
 }
