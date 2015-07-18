@@ -367,3 +367,7 @@ Enable the use of the fsrra instruction
 mlra
 Target Report Var(sh_lra_flag) Init(0) Save
 Use LRA instead of reload (transitional)
+
+mams
+Target Report Var(sh_ams_enable) Init(1)
+Enable or disable AMS pass (transitional)

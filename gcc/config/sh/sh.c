@@ -874,8 +874,9 @@ register_sh_passes (void)
 		 PASS_POS_INSERT_BEFORE, "sched2", 1);
 
   /* Add AMS pass after auto-inc-dec.  */
-  register_pass (new sh_ams (g, "sh_ams", g_ams_delegate),
-         PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
+  if (sh_ams_enable)
+    register_pass (new sh_ams (g, "sh_ams", g_ams_delegate),
+		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 }
 
 /* Implement TARGET_OPTION_OVERRIDE macro.  Validate and override 
