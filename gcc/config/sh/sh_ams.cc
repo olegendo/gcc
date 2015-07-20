@@ -1647,23 +1647,21 @@ get_relevant_addresses (const addr_expr& end_addr)
 
   // Addresses containing registers might be used if they have a
   // register in common with the end address.
-  if (end_addr.has_base_reg ()
-      && m_reg_hashmap.get (end_addr.base_reg ()))
+  std::pair <std::multimap<rtx, access*>::iterator,
+             std::multimap<rtx, access*>::iterator> matching_range;
+  if (end_addr.has_base_reg ())
     {
-      list<access*>* base_start_addrs =
-        *m_reg_hashmap.get (end_addr.base_reg ());
-      start_addrs.insert (start_addrs.end (),
-                          base_start_addrs->begin (),
-                          base_start_addrs->end ());
+      matching_range = m_reg_addresses.equal_range (end_addr.base_reg ());
+      for (std::multimap<rtx, access*>::iterator it = matching_range.first;
+           it != matching_range.second; ++it)
+        start_addrs.push_back (it->second);
     }
-  if (end_addr.has_index_reg ()
-      && m_reg_hashmap.get (end_addr.index_reg ()))
+  if (end_addr.has_index_reg ())
     {
-      list<access*>* index_start_addrs =
-        *m_reg_hashmap.get (end_addr.index_reg ());
-      start_addrs.insert (start_addrs.end (),
-                          index_start_addrs->begin (),
-                          index_start_addrs->end ());
+      matching_range = m_reg_addresses.equal_range (end_addr.index_reg ());
+      for (std::multimap<rtx, access*>::iterator it = matching_range.first;
+           it != matching_range.second; ++it)
+        start_addrs.push_back (it->second);
     }
   return start_addrs;
 }
@@ -1676,12 +1674,13 @@ start_addr_list::add (access* start_addr)
   if (start_addr->address ().is_invalid ())
     return;
 
-  // If the address has a base or index reg, add it to the appropriate
-  // list(s) in M_REG_ADDRESSES.
+  // If the address has a base or index reg, add it to M_REG_ADDRESSES.
   if (start_addr->address ().has_base_reg ())
-    add_reg_address (start_addr->address ().base_reg (), start_addr);
+    m_reg_addresses.insert (std::make_pair (start_addr->address ().base_reg (),
+                                            start_addr));
   if (start_addr->address ().has_index_reg ())
-    add_reg_address (start_addr->address ().index_reg (), start_addr);
+    m_reg_addresses.insert (std::make_pair (start_addr->address ().index_reg (),
+                                            start_addr));
 
   // Otherwise, add it to the constant list.
   if (start_addr->address ().has_no_base_reg ()
@@ -1689,39 +1688,39 @@ start_addr_list::add (access* start_addr)
     m_const_addresses.push_back (start_addr);
 }
 
-// Helper function for start_addr_list::add.  Associates START_ADDR
-// with one of its registers (the base or index) in the hashmap.
-void sh_ams::access_sequence::
-start_addr_list::add_reg_address (rtx reg, access* start_addr)
-{
-  std::list<access*>** addr_list =
-    m_reg_hashmap.get (reg);
-  if (addr_list)
-    (*addr_list)->push_back (start_addr);
-  else
-    {
-      m_reg_addresses.push_back (std::list<access*> (1, start_addr));
-      m_reg_hashmap.put (reg, &m_reg_addresses.back ());
-    };
-}
-
 // Remove START_ADDR from the list of available start addresses.
 void sh_ams::access_sequence::
 start_addr_list::remove (access* start_addr)
 {
+  std::pair <std::multimap<rtx, access*>::iterator,
+             std::multimap<rtx, access*>::iterator> matching_range;
   if (start_addr->address ().has_base_reg ())
     {
-      std::list<access*>** addr_list
-        = m_reg_hashmap.get (start_addr->address ().base_reg ());
-      if (addr_list)
-        (*addr_list)->remove (start_addr);
+      matching_range
+        = m_reg_addresses.equal_range (start_addr->address ().base_reg ());
+      for (std::multimap<rtx, access*>::iterator it = matching_range.first;
+           it != matching_range.second; ++it)
+        {
+          if (it->second == start_addr)
+            {
+              m_reg_addresses.erase (it);
+              break;
+            }
+        }
     }
   if (start_addr->address ().has_index_reg ())
     {
-      std::list<access*>** addr_list
-        = m_reg_hashmap.get (start_addr->address ().index_reg ());
-      if (addr_list)
-        (*addr_list)->remove (start_addr);
+      matching_range
+        = m_reg_addresses.equal_range (start_addr->address ().index_reg ());
+      for (std::multimap<rtx, access*>::iterator it = matching_range.first;
+           it != matching_range.second; ++it)
+        {
+          if (it->second == start_addr)
+            {
+              m_reg_addresses.erase (it);
+              break;
+            }
+        }
     }
 
   if (start_addr->address ().has_no_base_reg ()

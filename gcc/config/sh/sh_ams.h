@@ -7,6 +7,7 @@
 #include <list>
 #include <vector>
 #include <functional>
+#include <map>
 
 class sh_ams : public rtl_opt_pass
 {
@@ -674,19 +675,13 @@ public:
 
     private:
 
-      void add_reg_address (rtx reg, access* start_addr);
-
       // List of addresses that only have a constant displacement.
       std::list<access*> m_const_addresses;
 
-      // A hash_map that stores addresses that either have a base or index
-      // reg.  For a given reg rtx REG, m_reg_addresses.get(REG) returns a
-      // list of all addresses that have REG as their base or index reg.
-      hash_map <rtx, std::list<access*>* > m_reg_hashmap;
-
-      // An array storing the actual lists that M_REG_HASHMAP references.
-      std::list<std::list<access*> > m_reg_addresses;
-
+      // A map for storing addresses that have a base and/or index reg.
+      // The key of each stored address is its base or index reg (the
+      // address is stored twice if it has both).
+      std::multimap<rtx, access*> m_reg_addresses;
     };
 
     // A structure storing the reg_mod accesses from the sequence in such way
