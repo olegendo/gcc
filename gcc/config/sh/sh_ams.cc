@@ -1825,7 +1825,7 @@ void sh_ams::access_sequence::update_insn_stream (void)
           accs->update_insn (emit_move_insn (accs->address_reg (), new_val));
           reg_mod_insns ().push_back (accs->insn ());
         }
-      else if (accs->access_type () == reg_use)
+      else if (accs->access_type () == reg_use && !accs->is_trailing ())
         {
           gcc_assert (accs->original_address ().has_base_reg ());
           accs->update_use_expr (accs->original_address ().base_reg ());
@@ -2503,15 +2503,14 @@ void sh_ams::access_sequence::find_reg_uses (void)
   std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
   rtx_insn* last_insn = NULL;
 
-  for (access_sequence::iterator accs = begin (); accs != end (); )
+  for (access_sequence::iterator accs = begin (); accs != end (); ++accs)
     {
       if (!accs->insn ())
-        {
-          ++accs;
-          continue;
-        }
-
+        continue;
       last_insn = accs->insn ();
+
+      if (accs->access_type () == reg_use)
+        continue;
 
       access_sequence::iterator next_acc = accs;
       ++next_acc;
@@ -2534,7 +2533,6 @@ void sh_ams::access_sequence::find_reg_uses (void)
             add_reg_use (next_acc, use_expr, effective_addr,
                          use_ref, use_insn);
         }
-      accs = next_acc;
     }
 
   if (!last_insn)
