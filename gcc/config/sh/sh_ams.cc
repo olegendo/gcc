@@ -1258,6 +1258,9 @@ sh_ams::collect_addr_reg_uses_1 (access_sequence& as, rtx addr_reg,
   if (start_insn == NULL_RTX)
     log_return_void ("[bb %d] start_insn is null\n", bb->index);
 
+  if (abort_at_insn == start_insn)
+    return;
+
   rtx end_insn = NEXT_INSN (BB_END (bb));
 
   for (rtx_insn *i = NEXT_INSN (start_insn); i != end_insn; i = NEXT_INSN (i))
