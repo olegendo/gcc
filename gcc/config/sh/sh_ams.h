@@ -217,31 +217,37 @@ public:
 		     access_type_t access_type = load);
 
   template <typename OutputIterator> static void
-  collect_addr_reg_uses
-    (access_sequence& as, rtx addr_reg, rtx_insn *start_insn,
-     rtx abort_at_insn, OutputIterator out,
-     bool stay_in_curr_bb, bool stop_after_first);
+  collect_addr_reg_uses (access_sequence& as, rtx addr_reg, rtx_insn *start_insn,
+                         rtx abort_at_insn, OutputIterator out,
+                         bool skip_addr_reg_mods,
+                         bool stay_in_curr_bb,
+                         bool stop_after_first);
 
   template <typename OutputIterator> static void
-  collect_addr_reg_uses
-    (access_sequence& as, rtx_insn *start_insn,
-     rtx abort_at_insn, OutputIterator out,
-     bool stay_in_curr_bb, bool stop_after_first)
+  collect_addr_reg_uses (access_sequence& as, rtx_insn *start_insn,
+                         rtx abort_at_insn, OutputIterator out,
+                         bool skip_addr_reg_mods,
+                         bool stay_in_curr_bb ,
+                         bool stop_after_first)
     {
       collect_addr_reg_uses (as, NULL, start_insn, abort_at_insn, out,
-                             stay_in_curr_bb, stop_after_first);
+                             skip_addr_reg_mods, stay_in_curr_bb,
+                             stop_after_first);
     }
 
   template <typename OutputIterator> static void
   collect_addr_reg_uses_1 (access_sequence& as, rtx addr_reg,
                            rtx_insn *start_insn, basic_block bb,
                            std::vector<basic_block>& visited_bb,
-			   rtx abort_at_insn, OutputIterator out,
-			   bool stay_in_curr_bb, bool stop_after_first);
+                           rtx abort_at_insn, OutputIterator out,
+                           bool skip_addr_reg_mods,
+                           bool stay_in_curr_bb,
+                           bool stop_after_first);
 
   template <typename OutputIterator> static bool
   collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
-                           rtx_insn *insn, rtx& x, OutputIterator out);
+                           rtx_insn *insn, rtx& x, OutputIterator out,
+                           bool skip_addr_reg_mods);
 
   static void find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
 			      rtx_insn** mod_insn);
@@ -455,7 +461,7 @@ public:
     // handles them if they are equivalent, and they're represented by a
     // single access.
     bool is_trailing (void) const { return !trailing_insns ().empty (); }
-    
+
     // For a trailing access, the insns where the reg use/mod occur. These
     // can be multiple insns if the access represents multiple equivalent
     // uses or mods.
