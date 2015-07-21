@@ -2042,10 +2042,10 @@ int sh_ams::access_sequence::get_clone_cost (access_sequence::iterator &acc,
                                              delegate& dlg)
 {
   rtx reused_reg = NULL;
-  if (acc->address ().has_base_reg ())
-    reused_reg = acc->address ().base_reg ();
-  else if (acc->address ().has_index_reg ())
-    reused_reg = acc->address ().index_reg ();
+  if (acc->original_address ().has_base_reg ())
+    reused_reg = acc->original_address ().base_reg ();
+  else if (acc->original_address ().has_index_reg ())
+    reused_reg = acc->original_address ().index_reg ();
   else
     return 0;
 
