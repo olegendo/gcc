@@ -745,7 +745,8 @@ public:
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
 
     int gen_min_mod (access_sequence::iterator acc,
-		     delegate& dlg, bool record_in_sequence);
+                     delegate& dlg, int lookahead_num,
+                     bool record_in_sequence);
 
     void gen_mod_for_alt (access::alternative& alternative,
 			  access* start_base,
@@ -813,6 +814,11 @@ public:
     virtual void mem_access_alternatives (sh_ams::access& a,
                                           const access_sequence& as,
                                           access_sequence::const_iterator acc) = 0;
+
+    // provide the number of subsequent accesses that should be taken into
+    // account when trying to minimize the costs of the specified access.
+    virtual int lookahead_count (const access_sequence& as,
+                                 access_sequence::const_iterator acc) = 0;
 
     // provide the cost for adding a constant to the specified
     // address register.

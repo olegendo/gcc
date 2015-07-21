@@ -1415,8 +1415,8 @@ gen_address_mod (delegate& dlg)
 
   for (access_sequence::iterator accs = first_access_to_optimize ();
        accs != end (); accs = next_access_to_optimize (accs))
-    gen_min_mod (accs, dlg, true);
-
+    gen_min_mod (accs, dlg, dlg.lookahead_count (*this, accs), true);
+  
   for (access_sequence::iterator accs = begin (); accs != end ();)
     {
       if (accs->access_type () == reg_mod)
@@ -1449,7 +1449,7 @@ gen_address_mod (delegate& dlg)
 // in the sequence, only calculate the cost.
 int sh_ams::access_sequence::
 gen_min_mod (access_sequence::iterator acc, delegate& dlg,
-             bool record_in_sequence)
+             int lookahead_num, bool record_in_sequence)
 {
   const addr_expr& ae = acc->address ();
 
@@ -1466,7 +1466,7 @@ gen_min_mod (access_sequence::iterator acc, delegate& dlg,
   addr_expr min_end_base, min_end_index;
   mod_tracker tracker;
 
-  access_sequence::iterator next_acc = record_in_sequence
+  access_sequence::iterator next_acc = lookahead_num
                                      ? next_access_to_optimize (acc)
                                      : end ();
 
@@ -1539,7 +1539,7 @@ gen_min_mod (access_sequence::iterator acc, delegate& dlg,
                            end_base, end_index,
                            acc, tracker, dlg);
 
-          int next_cost = gen_min_mod (next_acc, dlg, false);
+          int next_cost = gen_min_mod (next_acc, dlg, lookahead_num-1, false);
           tracker.reset_changes (*this);
 
           if (next_cost == infinite_costs)
