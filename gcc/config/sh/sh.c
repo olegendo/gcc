@@ -885,6 +885,13 @@ register_sh_passes (void)
   if (sh_ams_enable)
     register_pass (new sh_ams (g, "sh_ams", g_ams_delegate),
 		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
+
+  /* Run AMS again after sh_treg_combine2 as there might be new opportunities
+     for address optimization  */
+  if (sh_ams2_enable)
+    register_pass (new sh_ams (g, "sh_ams", g_ams_delegate),
+		   PASS_POS_INSERT_AFTER, "sh_treg_combine2", 1);
+
 }
 
 /* Implement TARGET_OPTION_OVERRIDE macro.  Validate and override 
