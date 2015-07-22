@@ -382,6 +382,7 @@ public:
 
       const addr_expr& address (void) const { return m_addr_expr; }
       int costs (void) const { return m_costs; }
+      void update_costs (int new_cost) { m_costs = new_cost; }
 
     private:
       addr_expr m_addr_expr;
@@ -547,6 +548,13 @@ public:
       if (alt_reg == any_regno)
 	return (reg != invalid_regno);
       return (reg == alt_reg);
+    }
+
+    static bool adjacent_with_auto_mod (const access& first, const access& second);
+    static bool not_adjacent_with_auto_mod
+      (const access& first, const access& second) 
+    {
+      return !adjacent_with_auto_mod (first, second);
     }
 
   private:
@@ -814,6 +822,13 @@ public:
     virtual void mem_access_alternatives (sh_ams::access& a,
                                           const access_sequence& as,
                                           access_sequence::const_iterator acc) = 0;
+
+    // adjust the costs of the specified alternative of the specified
+    // access.  called after the alternatives of all accesses have
+    // been retrieved.
+    virtual void adjust_alternative_costs (access::alternative& alt,
+                                           const access_sequence& as,
+                                           access_sequence::const_iterator acc) = 0;
 
     // provide the number of subsequent accesses that should be taken into
     // account when trying to minimize the costs of the specified access.

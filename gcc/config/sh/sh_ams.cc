@@ -480,6 +480,34 @@ matches_alternative (const alternative* alt) const
   return true;
 }
 
+// Return true if FIRST has a post-inc/dec alternative that can be used to
+// reach the effective address of SECOND without using any other address
+// modification.
+bool sh_ams::access::
+adjacent_with_auto_mod (const access& first, const access& second)
+{
+  disp_t post_disp = 0;
+  
+  for (const alternative* alt = first.begin_alternatives ();
+       alt != first.end_alternatives (); ++alt)
+    {
+      if (alt->address ().type () == post_mod)
+        {
+          post_disp = alt->address ().disp ();
+          break;
+        }
+    }
+  
+  if (post_disp == 0) return false;
+  
+  const addr_expr& addr1 = first.address ();
+  const addr_expr& addr2 = second.address ();
+  return (addr1.base_reg () == addr2.base_reg ()
+          && addr1.index_reg () == addr2.index_reg ()
+          && (addr1.scale () == addr2.scale () || addr1.has_no_index_reg ())
+          && addr1.disp ()+post_disp == addr2.disp ());
+}
+
 // Add a normal access to the end of the access sequence.
 sh_ams::access&
 sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
@@ -1416,7 +1444,7 @@ gen_address_mod (delegate& dlg)
   for (access_sequence::iterator accs = first_access_to_optimize ();
        accs != end (); accs = next_access_to_optimize (accs))
     gen_min_mod (accs, dlg, dlg.lookahead_count (*this, accs), true);
-  
+
   for (access_sequence::iterator accs = begin (); accs != end ();)
     {
       if (accs->access_type () == reg_mod)
@@ -2680,6 +2708,12 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::iterator it = as.first_access_to_optimize ();
            it != as.end (); it = as.next_access_to_optimize (it))
         as.update_access_alternatives (m_delegate, it);
+
+      for (access_sequence::iterator mem_acc = as.first_mem_access ();
+           mem_acc != as.end (); mem_acc = as.next_mem_access (mem_acc))
+        for (access::alternative* alt = mem_acc->begin_alternatives ();
+             alt != mem_acc->end_alternatives (); ++alt)
+          m_delegate.adjust_alternative_costs (*alt, as, mem_acc);
 
       as.update_cost (m_delegate);
       int original_cost = as.cost ();
