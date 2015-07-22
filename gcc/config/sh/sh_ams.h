@@ -251,7 +251,7 @@ public:
                            bool skip_addr_reg_mods);
 
   static void find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
-			      rtx_insn** mod_insn);
+			      rtx_insn** mod_insn, machine_mode* auto_mod_mode);
 
   static addr_expr extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 				      machine_mode mem_mach_mode,

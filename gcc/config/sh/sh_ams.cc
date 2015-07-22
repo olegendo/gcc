@@ -826,9 +826,12 @@ find_reg_value_1 (rtx reg, rtx pat)
 
 // Find the value that REG was last set to. Write the register value
 // into mod_expr and the modifying insn into mod_insn.
+// If the register was modified because of an auto-inc/dec memory
+// access, set the mode of the access into auto_mod_mode.
 // FIXME: make use of other info such as REG_EQUAL notes.
 void sh_ams::find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
-                             rtx_insn** mod_insn)
+                             rtx_insn** mod_insn,
+                             machine_mode* auto_mod_mode)
 {
   std::vector<std::pair<rtx*, access_type_t> > mems;
 
@@ -868,6 +871,7 @@ void sh_ams::find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
                 {
                   *mod_expr = mem_addr;
                   *mod_insn = i;
+                  *auto_mod_mode = GET_MODE (*(m->first));
                   return;
                 }
             }
@@ -1005,10 +1009,11 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // and convert it to an addr_expr.
           rtx reg_value;
           rtx_insn *reg_mod_insn = NULL;
+          machine_mode auto_mod_mode;
 
           access* inserted_mod = NULL;
 
-          find_reg_value (x, insn, &reg_value, &reg_mod_insn);
+          find_reg_value (x, insn, &reg_value, &reg_mod_insn, &auto_mod_mode);
           // Stop expanding the reg if we reach a hardreg -> pseudo reg
           // copy, or if the reg can't be expanded any further.
           if (reg_value != NULL_RTX && REG_P (reg_value)
@@ -1025,10 +1030,15 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               return make_reg_addr (x);
             }
 
-          // Expand the register's value further.
+          // Expand the register's value further.  If the register was
+          // modified because of an auto-inc/dec memory access, pass
+          // down the machine mode of that access.
           addr_expr reg_addr_expr = extract_addr_expr
             (reg_value, reg_mod_insn, root_insn,
-             mem_mach_mode, as, inserted_reg_mods);
+             find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
+               ? auto_mod_mode
+               : mem_mach_mode,
+             as, inserted_reg_mods);
 
           // Place all the insns that are used to arrive at the address
           // into AS in the form of reg_mod accesses that can be replaced
