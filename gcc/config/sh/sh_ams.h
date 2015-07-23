@@ -552,7 +552,7 @@ public:
 
     static bool adjacent_with_auto_mod (const access& first, const access& second);
     static bool not_adjacent_with_auto_mod
-      (const access& first, const access& second) 
+      (const access& first, const access& second)
     {
       return !adjacent_with_auto_mod (first, second);
     }
@@ -583,9 +583,14 @@ public:
     alternative m_alternatives[MAX_ALTERNATIVES];
   };
 
-  class access_sequence : public std::list<access>
+  class access_sequence
   {
   public:
+
+    typedef std::list<access>::iterator iterator;
+    typedef std::list<access>::const_iterator const_iterator;
+    typedef std::list<access>::reverse_iterator reverse_iterator;
+    typedef std::list<access>::const_reverse_iterator const_reverse_iterator;
 
     void gen_address_mod (delegate& dlg);
 
@@ -600,7 +605,7 @@ public:
     bool reg_used_in_sequence (rtx reg, access_sequence::iterator search_start);
     bool reg_used_in_sequence (rtx reg)
     {
-      return reg_used_in_sequence (reg, begin ());
+      return reg_used_in_sequence (reg, accesses ().begin ());
     }
 
     void find_reg_uses (void);
@@ -657,6 +662,9 @@ public:
 
     access_sequence::iterator
     remove_access (access_sequence::iterator acc);
+
+    std::list<access>& accesses (void) { return m_accs; }
+    const std::list<access>& accesses (void) const { return m_accs; }
 
     // The address modifying insns related to this access sequence
     // that are in the insn stream.  Used to delete the original insns
@@ -809,6 +817,7 @@ public:
 		     mod_tracker &mod_tracker,
 		     delegate& dlg);
 
+    std::list<access> m_accs;
     hash_map<rtx, access*> m_addr_regs;
     start_addr_list m_start_addr_list;
     std::vector<rtx_insn*> m_reg_mod_insns;

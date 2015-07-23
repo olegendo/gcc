@@ -13831,7 +13831,7 @@ adjust_alternative_costs (sh_ams::access::alternative& alt,
       && acc->access_size () < 4)
     {
       sh_ams::access_sequence::const_iterator adj_end =
-        std::adjacent_find (acc, as.end (),
+        std::adjacent_find (acc, as.accesses ().end (),
                             sh_ams::access::not_adjacent_with_auto_mod);
       int dist = std::distance (acc, adj_end);
 
@@ -13840,10 +13840,10 @@ adjust_alternative_costs (sh_ams::access::alternative& alt,
       else
         {
           sh_ams::access_sequence::const_iterator adj_begin = acc;
-          for (; dist < 3 && adj_begin != as.begin (); ++dist)
+          for (; dist < 3 && adj_begin != as.accesses ().begin (); ++dist)
             adj_begin--;
           
-          adj_end = std::adjacent_find (adj_begin, as.end (),
+          adj_end = std::adjacent_find (adj_begin, as.accesses ().end (),
                                    sh_ams::access::not_adjacent_with_auto_mod);
           if (std::distance (adj_begin, adj_end) >= 3)
             alt.update_costs (alt.costs ()+1);
@@ -13857,7 +13857,7 @@ lookahead_count (const sh_ams::access_sequence& as,
 {
   // If the next 2 or more accesses can be reached with post-inc, look
   // a bit further ahead.
-  if (std::distance (acc, std::adjacent_find (acc, as.end (),
+  if (std::distance (acc, std::adjacent_find (acc, as.accesses ().end (),
                                               sh_ams::access::
                                               not_adjacent_with_auto_mod)) >= 3)
     return 2;
@@ -13902,8 +13902,9 @@ addr_reg_plus_reg_cost (const_rtx reg,
   // could also use reg+reg addressing mode instead.
   sh_ams::access_sequence::const_iterator next_acc = acc;
   ++next_acc;
-  if (next_acc != as.end () && (next_acc->access_type () == sh_ams::load
-				|| next_acc->access_type () == sh_ams::store)
+  if (next_acc != as.accesses ().end ()
+      && (next_acc->access_type () == sh_ams::load
+          || next_acc->access_type () == sh_ams::store)
       && next_acc->address () == acc->address ())
     {
       for (const sh_ams::access::alternative*
