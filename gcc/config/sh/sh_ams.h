@@ -600,7 +600,7 @@ public:
     void update_cost (delegate& dlg);
 
     void find_addr_regs (void);
-    void add_missing_reg_mods (basic_block bb);
+    void add_missing_reg_mods (void);
 
     bool reg_used_in_sequence (rtx reg, access_sequence::iterator search_start);
     bool reg_used_in_sequence (rtx reg)
@@ -662,6 +662,17 @@ public:
 
     access_sequence::iterator
     remove_access (access_sequence::iterator acc);
+
+    basic_block bb (void)
+    {
+      for (iterator accs = accesses ().begin (); accs != accesses ().end ();
+           ++accs)
+        {
+          if (accs->insn ())
+            return BLOCK_FOR_INSN (accs->insn ());
+        }
+      gcc_unreachable ();
+    }
 
     std::list<access>& accesses (void) { return m_accs; }
     const std::list<access>& accesses (void) const { return m_accs; }

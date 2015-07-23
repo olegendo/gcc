@@ -2498,7 +2498,7 @@ void sh_ams::access_sequence::find_addr_regs (void)
 // Add to the sequence any address reg modifications in BB that weren't found
 // during the mem address tracing (e.g. the address reg modifications
 // that come after the last memory access in the sequence).
-void sh_ams::access_sequence::add_missing_reg_mods (basic_block bb)
+void sh_ams::access_sequence::add_missing_reg_mods (void)
 {
   find_addr_regs ();
 
@@ -2512,7 +2512,7 @@ void sh_ams::access_sequence::add_missing_reg_mods (basic_block bb)
       // modification of this reg to the sequence.
       inserted_reg_mods.clear ();
       addr_expr expr =
-        extract_addr_expr (reg, BB_END (bb), BB_END (bb),
+        extract_addr_expr (reg, BB_END (bb ()), BB_END (bb ()),
                            Pmode, this, inserted_reg_mods);
 
       // If the final expression created by these modifications
@@ -2669,6 +2669,7 @@ unsigned int sh_ams::execute (function* fun)
   df_note_add_problem ();
   df_analyze ();
 
+  std::list<access_sequence*> sequences;
   std::vector<std::pair<rtx*, access_type_t> > mems;
 
   basic_block bb;
@@ -2680,7 +2681,8 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("finding mem accesses\n");
 
       // Construct the access sequence from the access insns.
-      access_sequence as;
+      sequences.push_back (new access_sequence ());
+      access_sequence& as = *sequences.back ();
       FOR_BB_INSNS (bb, i)
         {
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
@@ -2695,18 +2697,24 @@ unsigned int sh_ams::execute (function* fun)
 	       ::iterator m = mems.begin (); m != mems.end (); ++m)
 	    as.add_mem_access (i, m->first, m->second);
          }
+    }
 
+  for (std::list<access_sequence*>::iterator it = sequences.begin ();
+       it != sequences.end (); ++it)
+    {
+      access_sequence& as = **it;
       if (as.accesses ().empty ())
         {
           log_msg ("access sequence empty\n\n");
           continue;
         }
 
+      log_msg ("BB #%d:\n", as.bb ()->index);
       log_access_sequence (as, false);
       log_msg ("\n\n");
 
       log_msg ("add_missing_reg_mods\n");
-      as.add_missing_reg_mods (bb);
+      as.add_missing_reg_mods ();
 
       log_access_sequence (as, false);
       log_msg ("\n\n");
@@ -2769,6 +2777,10 @@ unsigned int sh_ams::execute (function* fun)
 
       log_msg ("\n\n");
     }
+
+    for (std::list<access_sequence*>::iterator it = sequences.begin ();
+       it != sequences.end (); ++it)
+      delete *it;
 
   log_return (0, "\n\n");
 }
