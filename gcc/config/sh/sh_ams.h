@@ -8,6 +8,7 @@
 #include <vector>
 #include <functional>
 #include <map>
+#include <set>
 
 class sh_ams : public rtl_opt_pass
 {
@@ -271,6 +272,15 @@ public:
   {
     return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL);
   }
+
+  static std::list<access_sequence*>::iterator
+  split_access_sequence (std::list<access_sequence*>::iterator as_it,
+                         std::list<access_sequence*>& sequences);
+
+  static void
+  split_access_sequence_1 (
+    std::map<rtx, std::pair<sh_ams::access_sequence*, std::set<rtx> > >& new_seqs,
+    sh_ams::access &acc, bool add_to_front);
 
   // helper functions to create a particular type of address expression.
   static addr_expr
