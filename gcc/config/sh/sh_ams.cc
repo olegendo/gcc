@@ -110,7 +110,7 @@ sh_ams::~sh_ams (void)
 
 bool sh_ams::gate (function* /*fun*/)
 {
-  return optimize > 0 && flag_auto_inc_dec;
+  return optimize > 0;
 }
 
 namespace
