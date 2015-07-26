@@ -553,13 +553,14 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
 				      const addr_expr& original_addr_expr,
 				      const addr_expr& addr_expr, rtx addr_rtx,
 				      rtx_insn* mod_insn, rtx reg, int cost,
-                                      bool removable)
+                                      bool removable, bool use_as_start_addr)
 {
   if (accesses ().empty ())
     {
       accesses ().push_back (access (mod_insn, original_addr_expr, addr_expr,
                                      addr_rtx, reg, cost, removable));
-      start_addresses ().add (&accesses ().back ());
+      if (use_as_start_addr)
+        start_addresses ().add (&accesses ().back ());
       return accesses ().back ();
     }
 
@@ -578,7 +579,8 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
 
       accesses ().push_front (access (mod_insn, original_addr_expr, addr_expr,
                                       addr_rtx, reg, cost, removable));
-      start_addresses ().add (&accesses ().front ());
+      if (use_as_start_addr)
+        start_addresses ().add (&accesses ().front ());
       return accesses ().front ();
     }
 
@@ -612,7 +614,8 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
           accesses ().insert (as_it.base (),
                               access (mod_insn, original_addr_expr, addr_expr,
                                       addr_rtx, reg, cost, removable));
-          start_addresses ().add (&(*as_it));
+          if (use_as_start_addr)
+            start_addresses ().add (&(*as_it));
           return *as_it;
         }
     }
@@ -624,19 +627,20 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
                                       const addr_expr& original_addr_expr,
                                       const addr_expr& addr_expr,
                                       rtx_insn* mod_insn, rtx reg, int cost,
-                                      bool removable)
+                                      bool removable, bool use_as_start_addr)
 {
   return add_reg_mod (insn, original_addr_expr, addr_expr, NULL, mod_insn,
-                      reg, cost, removable);
+                      reg, cost, removable, use_as_start_addr);
 }
 
 sh_ams::access&
 sh_ams::access_sequence::add_reg_mod (rtx_insn* insn, rtx addr_rtx,
                                       rtx_insn* mod_insn, rtx reg, int cost,
-                                      bool removable)
+                                      bool removable, bool use_as_start_addr)
 {
   return add_reg_mod (insn, make_invalid_addr (), make_invalid_addr (),
-                      addr_rtx, mod_insn, reg, cost, removable);
+                      addr_rtx, mod_insn, reg, cost, removable,
+                      use_as_start_addr);
 }
 // Create a reg_mod access and place it before INSERT_BEFORE
 // in the access sequence.
@@ -1032,16 +1036,6 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               return make_reg_addr (x);
             }
 
-          // Expand the register's value further.  If the register was
-          // modified because of an auto-inc/dec memory access, pass
-          // down the machine mode of that access.
-          addr_expr reg_addr_expr = extract_addr_expr
-            (reg_value, reg_mod_insn, root_insn,
-             find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
-               ? auto_mod_mode
-               : mem_mach_mode,
-             as, inserted_reg_mods);
-
           // Place all the insns that are used to arrive at the address
           // into AS in the form of reg_mod accesses that can be replaced
           // during address mod generation.
@@ -1052,12 +1046,35 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                 = find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
                   ? make_reg_addr (x)
                   : extract_addr_expr (reg_value, mem_mach_mode);
+
+              // The effective address of the register isn't known here
+              // yet, so we can't add it to the list of start addresses.
               access* a = &as->add_reg_mod (root_insn,
                                             original_reg_addr_expr,
-                                            reg_addr_expr,
-                                            reg_mod_insn, x, infinite_costs, true);
+                                            make_invalid_addr (),
+                                            reg_mod_insn, x, infinite_costs,
+                                            true, false);
               inserted_reg_mods.push_back (a);
               inserted_mod = a;
+            }
+
+          // Expand the register's value further.  If the register was
+          // modified because of an auto-inc/dec memory access, pass
+          // down the machine mode of that access.
+          addr_expr reg_addr_expr = extract_addr_expr
+            (reg_value, reg_mod_insn, root_insn,
+             find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
+               ? auto_mod_mode
+               : mem_mach_mode,
+             as, inserted_reg_mods);
+
+          if (inserted_mod)
+            {
+              inserted_mod->update_effective_address (reg_addr_expr);
+
+              // Add the inserted reg_mod to the list of start addresses now
+              // that the effective address is known.
+              as->start_addresses ().add (inserted_mod);
             }
 
           // If the expression is something AMS can't handle, use the original
