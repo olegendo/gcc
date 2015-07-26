@@ -282,6 +282,9 @@ public:
     std::map<rtx, std::pair<sh_ams::access_sequence*, std::set<rtx> > >& new_seqs,
     sh_ams::access &acc, bool add_to_front);
 
+  static void split_access_sequence_2 (std::set<rtx>& addr_regs,
+                                       sh_ams::access& acc);
+
   // helper functions to create a particular type of address expression.
   static addr_expr
   make_reg_addr (rtx base_reg = any_regno);

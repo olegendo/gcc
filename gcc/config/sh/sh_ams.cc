@@ -45,6 +45,7 @@
 #include "varasm.h"
 #include "stmt.h"
 #include "expr.h"
+#include "rtl-iter.h"
 
 #include <algorithm>
 #include <list>
@@ -1478,31 +1479,28 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
       else
         {
           if (last_mem_acc == as.accesses ().end ())
-            last_mem_acc = accs.base ();
+            {
+              last_mem_acc = accs.base ();
+              --last_mem_acc;
+            }
           rtx key = accs->address ().is_invalid () ? NULL
                                                    : accs->address ().base_reg ();
           std::pair<access_sequence*, std::set<rtx> >& new_seq = new_seqs[key];
           access_sequence& as = *new_seq.first;
           std::set<rtx>& addr_regs = new_seq.second;
 
-          if (!accs->original_address ().is_invalid ())
-            {
-              if (accs->original_address ().has_base_reg ())
-                addr_regs.insert (accs->original_address ().base_reg ());
-              if (accs->original_address ().has_index_reg ())
-                addr_regs.insert (accs->original_address ().index_reg ());
-            }
+          split_access_sequence_2 (addr_regs, *accs);
           as.accesses ().push_front (*accs);
         }
     }
 
   // Add remaining reg_mod accesses from the end of the original sequence.
-   for (sh_ams::access_sequence::iterator accs = last_mem_acc;
-        accs != as.accesses ().end (); ++accs)
-     {
-       if (accs->access_type () == reg_mod)
+  for (sh_ams::access_sequence::iterator accs = last_mem_acc;
+       accs != as.accesses ().end (); ++accs)
+    {
+      if (accs->access_type () == reg_mod)
         split_access_sequence_1 (new_seqs, *accs, false);
-     }
+    }
 
   // Add the new access sequences to their list and remove the old one.
   std::list<access_sequence*>::iterator insert_before = as_it;
@@ -1524,7 +1522,7 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
 // those sequences in NEW_SEQS that use it in their address calculations.
 void sh_ams::split_access_sequence_1 (
   std::map<rtx, std::pair<sh_ams::access_sequence*, std::set<rtx> > >& new_seqs,
-  sh_ams::access &acc, bool add_to_front)
+  sh_ams::access& acc, bool add_to_front)
 {
   typedef std::map<rtx, std::pair<access_sequence*, std::set<rtx> > > new_seq_map;
 
@@ -1539,19 +1537,37 @@ void sh_ams::split_access_sequence_1 (
       if (addr_regs.find (acc.address_reg ()) == addr_regs.end ())
         continue;
 
-      if (!acc.original_address ().is_invalid ())
-        {
-
-          if (acc.original_address ().has_base_reg ())
-            addr_regs.insert (acc.original_address ().base_reg ());
-          if (acc.original_address ().has_index_reg ())
-            addr_regs.insert (acc.original_address ().index_reg ());
-        }
+      split_access_sequence_2 (addr_regs, acc);
       if (add_to_front)
         as.accesses ().push_front (acc);
       else
         as.accesses ().push_back (acc);
       as.start_addresses ().add (&as.accesses ().front ());
+    }
+}
+
+// Internal function of split_access_sequence.  Adds all the address registers
+// referenced by ACC to ADDR_REGS.
+void sh_ams::split_access_sequence_2 (std::set<rtx>& addr_regs,
+                                      sh_ams::access& acc)
+{
+  if (!acc.original_address ().is_invalid ())
+    {
+      if (acc.original_address ().has_base_reg ())
+        addr_regs.insert (acc.original_address ().base_reg ());
+      if (acc.original_address ().has_index_reg ())
+        addr_regs.insert (acc.original_address ().index_reg ());
+    }
+  else if (acc.addr_rtx ())
+    {
+      // If the address is stored as an RTX, search it for regs.
+      subrtx_var_iterator::array_type array;
+      FOR_EACH_SUBRTX_VAR (it, array, acc.addr_rtx (), NONCONST)
+        {
+          rtx x = *it;
+          if (REG_P (x))
+            addr_regs.insert (x);
+        }
     }
 }
 
