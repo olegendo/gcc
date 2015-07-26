@@ -4,7 +4,7 @@
 /* { dg-options "-O2" }  */
 
 /* { dg-final { scan-assembler-not "stc\tgbr" } }  */
-/* { dg-final { scan-assembler-times "mov.l\t@\\([0-9]\+,gbr" 3 } }  */
+/* { dg-final { scan-assembler-times "mov.l\t@\\(\[0-9]\+,gbr" 3 } }  */
 
 int
 fun_0 (int x)
