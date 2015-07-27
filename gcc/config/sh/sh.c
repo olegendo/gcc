@@ -13889,10 +13889,9 @@ addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp,
 int
 ams_delegate::
 addr_reg_plus_reg_cost (const_rtx reg,
-			const_rtx disp_reg ATTRIBUTE_UNUSED,
-			const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
-			sh_ams::access_sequence::const_iterator acc
-			ATTRIBUTE_UNUSED)
+                        const_rtx disp_reg ATTRIBUTE_UNUSED,
+                        const sh_ams::access_sequence& as,
+                        sh_ams::access_sequence::const_iterator acc)
 {
   // modifying the GBR is impossible.
   if (sh_ams::get_regno (reg) == GBR_REG)
