@@ -2442,7 +2442,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
       mod_tracker.inserted_accs ().push_back (ins_place);
 
       cost += dlg.addr_reg_scale_cost (start_addr->address_reg (), scale,
-                                       *this, access_place);
+                                       *this, ins_place);
       new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
@@ -2481,7 +2481,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
 
       cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
                                           c_end_addr.index_reg (),
-                                          *this, access_place);
+                                          *this, ins_place);
       new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
@@ -2515,7 +2515,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
 
       cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
                                           c_end_addr.base_reg (),
-                                          *this, access_place);
+                                          *this, ins_place);
       new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
@@ -2569,7 +2569,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
       mod_tracker.inserted_accs ().push_back (ins_place);
 
       cost += dlg.addr_reg_disp_cost (start_addr->address_reg (), disp,
-                                      *this, access_place);
+                                      *this, ins_place);
       new_addr->update_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
