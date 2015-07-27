@@ -1475,7 +1475,7 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
         new_seqs.insert (std::make_pair (
                            key,
                            std::make_pair (
-                             new access_sequence (),
+                             new access_sequence (as.mod_insns ()),
                              std::set<rtx> ())));
     }
 
@@ -1918,16 +1918,30 @@ start_addr_list::remove (access* start_addr)
 }
 
 // Write the sequence into the insn stream.
-void sh_ams::access_sequence::update_insn_stream (void)
+void sh_ams::access_sequence::
+update_insn_stream (std::list<mod_insn_list> sequence_mod_insns)
 {
   log_msg ("Updating insn list\n");
 
-  // Remove all the insns that are originally used to arrive at
-  // the required addresses.
-  for (std::vector<rtx_insn*>::iterator it = reg_mod_insns ().begin ();
-       it != reg_mod_insns ().end (); ++it)
-    set_insn_deleted (*it);
-  reg_mod_insns ().clear ();
+  // The original insns are no longer used by this sequence.
+  mod_insns ()->release ();
+
+  // If the original address modifying insns were only used by this
+  // sequence, remove them.
+  if (!mod_insns ()->is_used ())
+    {
+      for (std::vector<rtx_insn*>::iterator
+             it = mod_insns ()->insns ().begin ();
+           it != mod_insns ()->insns ().end (); ++it)
+        set_insn_deleted (*it);
+      sequence_mod_insns.erase (mod_insns ());
+    }
+
+  // Create a new insn list for this sequence.
+  sequence_mod_insns.push_back (mod_insn_list ());
+  std::list<mod_insn_list>::iterator new_insns = sequence_mod_insns.end ();
+  --new_insns;
+  update_mod_insns (new_insns);
 
   bool sequence_started = false;
   rtx_insn* last_insn = NULL;
@@ -2015,7 +2029,7 @@ void sh_ams::access_sequence::update_insn_stream (void)
             }
 
           accs->update_insn (emit_move_insn (accs->address_reg (), new_val));
-          reg_mod_insns ().push_back (accs->insn ());
+          mod_insns ()->insns ().push_back (accs->insn ());
         }
       else if (accs->access_type () == reg_use && !accs->is_trailing ())
         {
@@ -2819,6 +2833,7 @@ unsigned int sh_ams::execute (function* fun)
   df_analyze ();
 
   std::list<access_sequence*> sequences;
+  std::list<access_sequence::mod_insn_list > sequence_mod_insns;
   std::vector<std::pair<rtx*, access_type_t> > mems;
 
   log_msg ("extracting access sequences\n");
@@ -2831,8 +2846,14 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("finding mem accesses\n");
 
       // Construct the access sequence from the access insns.
-      sequences.push_back (new access_sequence ());
+      sequence_mod_insns.push_back (access_sequence::mod_insn_list ());
+      std::list<access_sequence::mod_insn_list>::iterator mod_insns
+        = sequence_mod_insns.end ();
+      --mod_insns;
+
+      sequences.push_back (new access_sequence (mod_insns));
       access_sequence& as = *sequences.back ();
+
       FOR_BB_INSNS (bb, i)
         {
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
@@ -2882,6 +2903,17 @@ unsigned int sh_ams::execute (function* fun)
       log_access_sequence (as, false);
       log_msg ("\n\n");
 
+      // Fill the sequence's MOD_INSNS with the insns of the accesses
+      // that can be removed.
+      for (access_sequence::iterator it = as.accesses ().begin ();
+           it != as.accesses ().end (); ++it)
+        {
+          if (it->removable ()
+              // Auto-mod mem access insns shouldn't be removed.
+              && !find_reg_note (it->insn (), REG_INC, NULL_RTX))
+            as.mod_insns ()->insns ().push_back (it->insn ());
+        }
+
       log_msg ("split_access_sequence\n");
       as_it = split_access_sequence (as_it, sequences);
     }
@@ -2919,17 +2951,6 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("\n\n");
 
       log_msg ("gen_address_mod\n");
-      // Fill the sequence's REG_MOD_INSNS with the insns of the reg_mod accesses
-      // that can be removed.
-      for (access_sequence::iterator it = as.accesses ().begin ();
-           it != as.accesses ().end (); ++it)
-        {
-          if (it->removable ()
-              // Auto-mod mem access insns shouldn't  be removed.
-              && !find_reg_note (it->insn (), REG_INC, NULL_RTX))
-            as.reg_mod_insns ().push_back (it->insn ());
-        }
-
       as.gen_address_mod (m_delegate);
 
       as.update_cost (m_delegate);
@@ -2939,7 +2960,7 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("\n");
 
       if (new_cost < original_cost)
-        as.update_insn_stream ();
+        as.update_insn_stream (sequence_mod_insns);
       else
         log_msg ("new_cost (%d) >= original_cost (%d)  not modifying\n",
 		 new_cost, original_cost);

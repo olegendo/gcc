@@ -605,9 +605,18 @@ public:
     typedef std::list<access>::reverse_iterator reverse_iterator;
     typedef std::list<access>::const_reverse_iterator const_reverse_iterator;
 
+    class mod_insn_list;
+
+    access_sequence (std::list<mod_insn_list>::iterator mod_insns)
+      {
+        update_mod_insns (mod_insns);
+      }
+
+    ~access_sequence (void) { mod_insns ()->release (); }
+
     void gen_address_mod (delegate& dlg);
 
-    void update_insn_stream (void);
+    void update_insn_stream (std::list<mod_insn_list> sequence_mod_insns);
 
     int cost (void) const;
     void update_cost (delegate& dlg);
@@ -693,12 +702,35 @@ public:
     std::list<access>& accesses (void) { return m_accs; }
     const std::list<access>& accesses (void) const { return m_accs; }
 
-    // The address modifying insns related to this access sequence
-    // that are in the insn stream.  Used to delete the original insns
-    // in update_insn_stream.
-    // FIXME: Make different versions of the same access sequence share
-    // the same reg-mod insn list.
-    std::vector<rtx_insn*>& reg_mod_insns (void) { return m_reg_mod_insns; }
+    // A structure used to store the address modifying insns of this
+    // sequence, which might be shared by other sequences.
+    class mod_insn_list
+    {
+    public:
+      mod_insn_list (void) { m_use_count = 0; }
+
+      void use (void) { ++m_use_count; }
+      void release (void) { --m_use_count; }
+
+      bool is_used (void) { return (m_use_count > 0); }
+
+      std::vector<rtx_insn*>& insns (void) { return m_insns; };
+    private:
+      std::vector<rtx_insn*> m_insns;
+      int m_use_count;
+    };
+
+    // The address modifying insns related to this access sequence.
+    // Used to delete the original insns in update_insn_stream.
+    // Multiple access sequences might share the same insns, so this
+    // is stored externally.
+    std::list<mod_insn_list>::iterator mod_insns (void) { return m_mod_insns; }
+
+    void update_mod_insns (std::list<mod_insn_list>::iterator new_insns)
+    {
+      m_mod_insns = new_insns;
+      m_mod_insns->use ();
+    }
 
     // A hash_map containing the address regs of the sequence and the last
     // reg_mod access that modified them.
@@ -847,7 +879,7 @@ public:
     std::list<access> m_accs;
     hash_map<rtx, access*> m_addr_regs;
     start_addr_list m_start_addr_list;
-    std::vector<rtx_insn*> m_reg_mod_insns;
+    std::list<mod_insn_list>::iterator m_mod_insns;
   };
 
   // a delegate for the ams pass.  usually implemented by the target.
