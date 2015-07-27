@@ -900,6 +900,11 @@ public:
                                      const access_sequence& as,
                                      access_sequence::const_iterator acc) = 0;
 
+    // provide the cost of loading a constant into the address register.
+    virtual int const_load_cost (const_rtx reg, disp_t value,
+                                 const access_sequence& as,
+                                 access_sequence::const_iterator acc) = 0;
+
   };
 
   sh_ams (gcc::context* ctx, const char* name, delegate& dlg);

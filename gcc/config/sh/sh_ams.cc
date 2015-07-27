@@ -425,12 +425,7 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_removable = removable;
   m_should_optimize = true;
   m_addr_reg = mod_reg;
-  // Mark reg <- constant accesses  as used so that cloning
-  // costs are always added during address modification generation.
-  // This encourages the generator to reuse the base regs
-  // of previous constant accesses.
-  m_used = (original_addr_expr.has_no_base_reg ()
-            && original_addr_expr.has_no_index_reg ());
+  m_used = false;
   m_alternatives_count = 0;
 }
 
@@ -1616,15 +1611,14 @@ gen_address_mod (delegate& dlg)
     {
       if (accs->access_type () == reg_mod)
         {
-          // Mark the reg_mod accesses as "unused" again (except for the
-          // reg <- constant copies, which are always marked used).
-          if (accs->original_address ().has_base_reg ()
-              || accs->original_address ().has_index_reg ())
-            accs->reset_used ();
-          else
+          // Mark the reg_mod accesses as "unused" again.
+          accs->reset_used ();
+
+          // Remove any unused reg <- constant copy that might have been
+          // added while trying different accesses.
+          if (accs->original_address ().has_no_base_reg ()
+              && accs->original_address ().has_no_index_reg ())
             {
-              // Remove any unused reg <- constant copy that might have been
-              // added while trying different accesses.
               access_sequence::iterator next_acc = accs;
               ++next_acc;
               if (!reg_used_in_sequence (accs->address_reg (), next_acc))
@@ -2204,14 +2198,17 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
             cost += dlg.addr_reg_disp_cost (ae.base_reg (), ae.disp (),
                                             *this, accs);
 
+          // Constant loading costs
+          else if (ae.has_no_base_reg () && ae.has_no_index_reg ())
+            cost += dlg.const_load_cost (accs->address_reg (), ae.disp (),
+                                         *this, accs);
+
           // If none of the previous branches were taken, the reg_mod access
-          // is either a (reg <- reg) or a (reg <- constant) copy, and doesn't
-          // have any modification cost.
+          // is a (reg <- reg) copy, and doesn't have any modification cost.
           else
             {
-              gcc_assert ((ae.has_no_base_reg () && ae.has_no_index_reg ())
-                          || (ae.has_base_reg () && ae.has_no_index_reg ()
-                              && ae.has_no_disp ()));
+              gcc_assert (ae.has_base_reg () && ae.has_no_index_reg ()
+                          && ae.has_no_disp ());
               cost = 0;
             }
 
@@ -2222,15 +2219,9 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
         }
     }
 
-  // Mark the reg_mod accesses as "unused" again (except for the
-  // reg <- constant copies, which are always marked used).
-  for (access_sequence::iterator accs = accesses ().begin ();
-       accs != accesses ().end (); ++accs)
-    {
-      if (accs->original_address ().has_base_reg ()
-          || accs->original_address ().has_index_reg ())
-        accs->reset_used ();
-    }
+  // Mark the reg_mod accesses as "unused" again.
+  std::for_each (accesses ().begin (), accesses ().end (),
+                 std::mem_fun_ref (&access::reset_used));
 }
 
 // Get the cloning costs associated with ACC, if any.
@@ -2307,10 +2298,12 @@ find_min_mod_cost (const addr_expr& end_addr,
                    make_const_addr (end_addr.disp ()),
                    make_const_addr (end_addr.disp ()),
                    NULL, const_reg, 0);
-      accesses ().begin ()->set_used ();
       int cost = try_modify_addr (&(*accesses ().begin ()), end_addr,
                                   disp_min, disp_max,
                                   addr_type, insert_before, tracker, dlg).cost;
+      cost += dlg.const_load_cost (const_reg, end_addr.disp (),
+                                   *this, accesses ().begin ());
+
       tracker.reset_changes (*this);
       if (cost < min_cost)
         {

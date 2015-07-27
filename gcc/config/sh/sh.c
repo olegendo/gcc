@@ -848,6 +848,11 @@ static struct ams_delegate : public sh_ams::delegate
   addr_reg_clone_cost (const_rtx reg,
 		       const sh_ams::access_sequence& as,
 		       sh_ams::access_sequence::const_iterator acc);
+  
+  virtual int
+  const_load_cost (const_rtx reg, sh_ams::disp_t value,
+                   const sh_ams::access_sequence& as,
+                   sh_ams::access_sequence::const_iterator acc);
 } g_ams_delegate;
 
 static void
@@ -13949,6 +13954,17 @@ addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
   // FIXME: maybe cloning the GBR should be cheaper?
   // FIXME: if register pressure is (expected to be) high, increase the cost
   // a bit to avoid addr reg cloning.
+  return 4;
+}
+
+int
+ams_delegate::
+const_load_cost (const_rtx reg ATTRIBUTE_UNUSED,
+                 sh_ams::disp_t value ATTRIBUTE_UNUSED,
+                 const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+                 sh_ams::access_sequence::const_iterator acc
+                 ATTRIBUTE_UNUSED)
+{
   return 4;
 }
 
