@@ -6,7 +6,7 @@
 /* { dg-final { scan-assembler-times "mov.\[bwl]\t@r\[0-9]\+\\+" 1 } }  */
 /* { dg-final { scan-assembler-times "mov.\[bwl]\tr\[0-9]\+,@-r\[0-9]\+" 5 } }  */
 
-int
+void
 fun_0 (int* arr1, int index, int* arr2)
 {
   arr1[index+1] = 10;
