@@ -1465,7 +1465,9 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
   for (sh_ams::access_sequence::iterator accs = as.accesses ().begin ();
        accs != as.accesses ().end (); ++accs)
     {
-      if (accs->access_type () == reg_mod)
+      if (accs->access_type () == reg_mod
+          && !(accs->original_address ().is_invalid ()
+               && !accs->address ().is_invalid ()))
         continue;
 
       rtx key = accs->address ().is_invalid () ? NULL
@@ -1486,7 +1488,11 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
   for (sh_ams::access_sequence::reverse_iterator accs = as.accesses ().rbegin ();
        accs != as.accesses ().rend (); ++accs)
     {
-      if (accs->access_type () == reg_mod)
+      if (accs->access_type () == reg_mod
+          // reg_mods with no original address are split
+          // like the memory and reg_use accesses.
+          && !(accs->original_address ().is_invalid ()
+               && !accs->address ().is_invalid ()))
         split_access_sequence_1 (new_seqs, *accs, true);
       else
         {
@@ -1510,7 +1516,9 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
   for (sh_ams::access_sequence::iterator accs = last_mem_acc;
        accs != as.accesses ().end (); ++accs)
     {
-      if (accs->access_type () == reg_mod)
+      if (accs->access_type () == reg_mod
+          && !(accs->original_address ().is_invalid ()
+               && !accs->address ().is_invalid ()))
         split_access_sequence_1 (new_seqs, *accs, false);
     }
 
@@ -1563,6 +1571,8 @@ void sh_ams::split_access_sequence_1 (
 void sh_ams::split_access_sequence_2 (std::set<rtx>& addr_regs,
                                       sh_ams::access& acc)
 {
+  if (acc.address_reg ())
+    addr_regs.insert (acc.address_reg ());
   if (!acc.original_address ().is_invalid ())
     {
       if (acc.original_address ().has_base_reg ())
