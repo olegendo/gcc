@@ -649,27 +649,24 @@ public:
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
-		 const addr_expr& addr_expr, rtx addr_rtx,
-		 rtx_insn* mod_insn, rtx reg,
-		 int cost = infinite_costs, bool removable = false,
-                 bool use_as_start_addr = true);
+                 const addr_expr& addr_expr, rtx addr_rtx,
+                 rtx_insn* mod_insn, rtx reg,
+                 int cost = infinite_costs, bool removable = false);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
-		 const addr_expr& addr_expr, rtx_insn* mod_insn,
-		 rtx reg, int cost = infinite_costs, bool removable = false,
-                 bool use_as_start_addr = true);
+                 const addr_expr& addr_expr, rtx_insn* mod_insn,
+                 rtx reg, int cost = infinite_costs, bool removable = false);
 
     access&
     add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn,
-		 rtx reg, int cost = infinite_costs, bool removable = false,
-                 bool use_as_start_addr = true);
+                 rtx reg, int cost = infinite_costs, bool removable = false);
 
     access&
     add_reg_mod (access_sequence::iterator insert_before,
-		 const addr_expr& original_addr_expr,
-		 const addr_expr& addr_expr, rtx_insn* mod_insn,
-		 rtx reg, int cost = infinite_costs, bool removable = false,
+                 const addr_expr& original_addr_expr,
+                 const addr_expr& addr_expr, rtx_insn* mod_insn,
+                 rtx reg, int cost = infinite_costs, bool removable = false,
 		 bool use_as_start_addr = true);
 
     access&
