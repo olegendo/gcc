@@ -1915,7 +1915,7 @@ start_addr_list::remove (access* start_addr)
 
 // Write the sequence into the insn stream.
 void sh_ams::access_sequence::
-update_insn_stream (std::list<mod_insn_list> sequence_mod_insns)
+update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns)
 {
   log_msg ("Updating insn list\n");
 

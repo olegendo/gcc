@@ -616,7 +616,7 @@ public:
 
     void gen_address_mod (delegate& dlg);
 
-    void update_insn_stream (std::list<mod_insn_list> sequence_mod_insns);
+    void update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns);
 
     int cost (void) const;
     void update_cost (delegate& dlg);
