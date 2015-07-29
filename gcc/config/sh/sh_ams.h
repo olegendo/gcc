@@ -273,9 +273,9 @@ public:
     return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL);
   }
 
-  static std::list<access_sequence*>::iterator
-  split_access_sequence (std::list<access_sequence*>::iterator as_it,
-                         std::list<access_sequence*>& sequences);
+  static std::list<access_sequence>::iterator
+  split_access_sequence (std::list<access_sequence>::iterator as_it,
+                         std::list<access_sequence>& sequences);
 
   static void
   split_access_sequence_1 (
@@ -608,11 +608,7 @@ public:
     class mod_insn_list;
 
     access_sequence (std::list<mod_insn_list>::iterator mod_insns)
-      {
-        update_mod_insns (mod_insns);
-      }
-
-    ~access_sequence (void) { mod_insns ()->release (); }
+      : m_mod_insns (mod_insns) {}
 
     void gen_address_mod (delegate& dlg);
 
@@ -726,12 +722,11 @@ public:
     void update_mod_insns (std::list<mod_insn_list>::iterator new_insns)
     {
       m_mod_insns = new_insns;
-      m_mod_insns->use ();
     }
 
-    // A hash_map containing the address regs of the sequence and the last
+    // A map containing the address regs of the sequence and the last
     // reg_mod access that modified them.
-    hash_map<rtx, access*>& addr_regs (void) { return m_addr_regs; }
+    std::map<rtx, access*>& addr_regs (void) { return m_addr_regs; }
 
     // A structure used to store the address regs that can be used as a starting
     // point to arrive at another address during address mod generation.
@@ -874,7 +869,7 @@ public:
 		     delegate& dlg);
 
     std::list<access> m_accs;
-    hash_map<rtx, access*> m_addr_regs;
+    std::map<rtx, access*> m_addr_regs;
     start_addr_list m_start_addr_list;
     std::list<mod_insn_list>::iterator m_mod_insns;
   };

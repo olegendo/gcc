@@ -1354,7 +1354,8 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
   switch (GET_CODE (x))
     {
     case REG:
-      if (x == addr_reg || (!addr_reg && as.addr_regs ().get (x)))
+      if (x == addr_reg || (!addr_reg && as.addr_regs ().find (x)
+                            != as.addr_regs ().end ()))
         {
           *out++ = std::make_pair (&x, insn);
           return true;
@@ -1375,7 +1376,8 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
         {
           if (SET_DEST (x) == addr_reg)
             break;
-          if (!addr_reg && as.addr_regs ().get (SET_DEST (x)))
+          if (!addr_reg && as.addr_regs ().find (SET_DEST (x))
+              != as.addr_regs ().end ())
             break;
         }
 
@@ -1391,7 +1393,8 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
           if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
               && use_expr.has_base_reg () && use_expr.has_disp ()
               && (use_expr.base_reg () == addr_reg
-                  || (!addr_reg && as.addr_regs ().get (use_expr.base_reg ()))))
+                  || (!addr_reg && as.addr_regs ().find (use_expr.base_reg ())
+                      != as.addr_regs ().end ())))
             {
               *out++ = std::make_pair (&x, insn);
               return true;
@@ -1438,14 +1441,14 @@ sh_ams::collect_addr_reg_uses (access_sequence& as, rtx addr_reg,
 // grouping the accesses according to their base register.
 // The new sequences are placed into SEQUENCES in place of the old one.
 // Return an iterator to the next sequence after the newly inserted sequences.
-std::list<sh_ams::access_sequence*>::iterator
-sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
-                               std::list<access_sequence*>& sequences)
+std::list<sh_ams::access_sequence>::iterator
+sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
+                               std::list<access_sequence>& sequences)
 {
   typedef std::map<rtx, std::pair<access_sequence*, std::set<rtx> > > new_seq_map;
 
   new_seq_map new_seqs;
-  access_sequence& as = **as_it;
+  access_sequence& as = *as_it;
 
   // Create a new access sequence for every unique base register of an
   // effective address.  Also create one for unknown/complicated addresses.
@@ -1461,11 +1464,14 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
                                                : accs->address ().base_reg ();
       new_seq_map::iterator new_seq = new_seqs.find (key);
       if (new_seq == new_seqs.end ())
-        new_seqs.insert (std::make_pair (
-                           key,
-                           std::make_pair (
-                             new access_sequence (as.mod_insns ()),
-                             std::set<rtx> ())));
+        {
+          access_sequence& new_as =
+            *sequences.insert (as_it, access_sequence (as.mod_insns ()));
+          new_as.mod_insns ()->use ();
+          new_seqs.insert (std::make_pair (key,
+                                           std::make_pair (&new_as,
+                                                           std::set<rtx> ())));
+        }
     }
 
   // Add each memory and reg_use access from the original sequence to the
@@ -1509,20 +1515,10 @@ sh_ams::split_access_sequence (std::list<access_sequence*>::iterator as_it,
         split_access_sequence_1 (new_seqs, *accs, false);
     }
 
-  // Add the new access sequences to their list and remove the old one.
-  std::list<access_sequence*>::iterator insert_before = as_it;
-  ++insert_before;
-  for (new_seq_map::iterator it = new_seqs.begin ();
-       it != new_seqs.end (); ++it)
-    {
-      access_sequence* new_as = it->second.first;
-      sequences.insert (insert_before, new_as);
-    }
-
-  delete *as_it;
-  sequences.erase(as_it);
-
-  return insert_before;
+  // Remove the old sequence and return the next element after the
+  // newly inserted sequences.
+  as_it->mod_insns ()->release ();
+  return sequences.erase (as_it);
 }
 
 // Internal function of split_access_sequence.  Adds the reg_mod access ACC to
@@ -2626,7 +2622,7 @@ void sh_ams::access_sequence::find_addr_regs (void)
         break;
 
       if (accs->access_type () == reg_mod)
-        addr_regs ().put (accs->address_reg (), &(*accs));
+        addr_regs ()[accs->address_reg ()] = &(*accs);
 
       // Search for REG_DEAD notes in the insns between this and the next access.
       access_sequence::iterator next = accs;
@@ -2643,8 +2639,8 @@ void sh_ams::access_sequence::find_addr_regs (void)
                   // Set the value of any address reg that's no longer
                   // alive to NULL.
                   if (REG_NOTE_KIND (note) == REG_DEAD
-                      && addr_regs ().get (XEXP (note, 0)))
-                    addr_regs ().put (XEXP (note, 0), NULL);
+                      && addr_regs ().find (XEXP (note, 0)) != addr_regs ().end ())
+                    addr_regs ()[XEXP (note, 0)] = NULL;
                 }
               if (i == next->insn ())
                 break;
@@ -2661,10 +2657,10 @@ void sh_ams::access_sequence::add_missing_reg_mods (void)
   find_addr_regs ();
 
   std::vector<access*> inserted_reg_mods;
-  for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
-      rtx reg = (*it).first;
+      rtx reg = it->first;
 
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
@@ -2746,11 +2742,11 @@ void sh_ams::access_sequence::find_reg_uses (void)
     return;
 
   // Add trailing address reg uses to the end of the sequence.
-  for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       used_regs.clear ();
-      collect_addr_reg_uses (*this, (*it).first, last_insn, NULL,
+      collect_addr_reg_uses (*this, it->first, last_insn, NULL,
                              std::back_inserter (used_regs),
                              false, false, true);
 
@@ -2795,10 +2791,10 @@ void sh_ams::access_sequence::find_reg_end_values (void)
   // Update the address regs' final values.
   find_addr_regs ();
 
-  for (hash_map<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
-      access* acc = (*it).second;
+      access* acc = it->second;
 
       // Address regs that have NULL as their value are dead,
       // so we can skip those.
@@ -2828,7 +2824,7 @@ unsigned int sh_ams::execute (function* fun)
   df_note_add_problem ();
   df_analyze ();
 
-  std::list<access_sequence*> sequences;
+  std::list<access_sequence> sequences;
   std::list<access_sequence::mod_insn_list > sequence_mod_insns;
   std::vector<std::pair<rtx*, access_type_t> > mems;
 
@@ -2847,8 +2843,9 @@ unsigned int sh_ams::execute (function* fun)
         = sequence_mod_insns.end ();
       --mod_insns;
 
-      sequences.push_back (new access_sequence (mod_insns));
-      access_sequence& as = *sequences.back ();
+      sequences.push_back (access_sequence (mod_insns));
+      mod_insns->use ();
+      access_sequence& as = sequences.back ();
 
       FOR_BB_INSNS (bb, i)
         {
@@ -2867,10 +2864,10 @@ unsigned int sh_ams::execute (function* fun)
     }
 
   log_msg ("\nprocessing extracted sequences\n");
-  for (std::list<access_sequence*>::iterator as_it = sequences.begin ();
+  for (std::list<access_sequence>::iterator as_it = sequences.begin ();
        as_it != sequences.end ();)
     {
-      access_sequence& as = **as_it;
+      access_sequence& as = *as_it;
       if (as.accesses ().empty ())
         {
           log_msg ("access sequence empty\n\n");
@@ -2915,10 +2912,10 @@ unsigned int sh_ams::execute (function* fun)
     }
 
   log_msg ("\nprocessing split sequences\n");
-  for (std::list<access_sequence*>::iterator as_it = sequences.begin ();
+  for (std::list<access_sequence>::iterator as_it = sequences.begin ();
        as_it != sequences.end (); ++as_it)
     {
-      access_sequence& as = **as_it;
+      access_sequence& as = *as_it;
       if (as.accesses ().empty ())
         {
           log_msg ("access sequence empty\n\n");
@@ -2963,10 +2960,6 @@ unsigned int sh_ams::execute (function* fun)
 
       log_msg ("\n\n");
     }
-
-    for (std::list<access_sequence*>::iterator it = sequences.begin ();
-       it != sequences.end (); ++it)
-      delete *it;
 
   log_return (0, "\n\n");
 }
