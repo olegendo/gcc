@@ -616,6 +616,7 @@ public:
 
     int cost (void) const;
     void update_cost (delegate& dlg);
+    bool cost_already_minimal (void) const;
 
     void find_addr_regs (void);
     void add_missing_reg_mods (void);

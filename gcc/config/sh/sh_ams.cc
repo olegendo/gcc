@@ -2264,6 +2264,29 @@ int sh_ams::access_sequence::get_clone_cost (access_sequence::iterator &acc,
   gcc_unreachable ();
 }
 
+// Return true if the cost of this sequence is already minimal and
+// can't be improved further (i.e. if all memory accesses use the
+// cheapest alternative and there are no reg_mods with nonzero cost).
+bool sh_ams::access_sequence::cost_already_minimal (void) const
+{
+  for (access_sequence::const_iterator accs = accesses ().begin ();
+       accs != accesses ().end (); ++accs)
+    {
+      if (accs->access_type () == load || accs->access_type () == store)
+        {
+          for (const access::alternative* alt = accs->begin_alternatives ();
+               alt != accs->end_alternatives (); ++alt)
+            {
+              if (alt->costs () < accs->cost ())
+                return false;
+            }
+        }
+      else if (accs->access_type () == reg_mod && accs->cost () > 0)
+        return false;
+    }
+  return true;
+}
+
 // Find the cheapest way END_ADDR can be arrived at from one of the addresses
 // in the sequence.
 // Return the start address that can be changed into END_ADDR with the least
@@ -2942,6 +2965,12 @@ unsigned int sh_ams::execute (function* fun)
 
       log_access_sequence (as);
       log_msg ("\n\n");
+
+      if (as.cost_already_minimal ())
+        {
+          log_msg ("costs are already minimal\n");
+          continue;
+        }
 
       log_msg ("gen_address_mod\n");
       as.gen_address_mod (m_delegate);
