@@ -408,7 +408,19 @@ public:
 	    addr_expr addr_expr);
     access (rtx addr_reg, addr_expr reg_value);
 
-    // the resolved address expression, i.e. the register and constant value
+    // If m_access_type is REG_MOD, this access represents the modification
+    // of an address register.  In this case, 'address_reg' returns the
+    // register that's modified and 'address' returns its new address.
+    // If the original address is invalid, appropriate reg-mods are inserted
+    // during address mod generation to arrive at the effective address.
+    //
+    // If the type is REG_USE, the access represents the use of an address
+    // reg outside of a memory access.  In this case, 'address' returns the
+    // effective address of the address reg during the use and m_mem_ref is
+    // a reference to the rtx inside the insn that uses the reg.
+    access_type_t access_type (void) const { return m_access_type; }
+
+    // the effective address expression, i.e. the register and constant value
     // have been traced through reg copies etc and the address expression has
     // been canonicalized.
     const addr_expr& address (void) const { return m_addr_expr; }
@@ -418,18 +430,6 @@ public:
     // ignore it.
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
 
-    // If m_access_type is REG_MOD, this access represents the modification
-    // of an address register.  In this case, m_addr_reg stores the register
-    // that's modified and m_addr_expr is its new address.
-    // If m_original_addr_expr is invalid, appropriate reg-mods are inserted
-    // during address mod generation to arrive at the effective address.
-    //
-    // If the type is REG_USE, the access represents the use of an address
-    // reg outside of a memory access.  In this case, m_addr_expr is the
-    // effective address of the address reg during the use and
-    // m_mem_ref is a reference to the rtx inside the insn that uses the reg.
-    access_type_t access_type (void) const { return m_access_type; }
-
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
     addr_space_t addr_space (void) const { return m_addr_space; }
@@ -438,11 +438,11 @@ public:
     // the insn where this access occurs.
     rtx_insn* insn (void) const { return m_insn; }
 
-    // Stores the address if it can't be described with an
-    // addr_expr, or NULL_RTX if the address is unknown.
+    // Returns the address rtx if the address expression can't be described
+    // with an addr_expr, or null if the address is unknown.
     rtx addr_rtx (void) const { return m_addr_rtx; }
 
-    // For reg_mod accesses, true if the access can be removed during
+    // For reg_mod accesses, returns true if the access can be removed during
     // gen_address_mod.  Set to true for most of the reg_mod accesses
     // found in the original insn list.
     bool removable (void) const { return m_removable; }
@@ -452,30 +452,24 @@ public:
     // If false, AMS skips this access when optimizing.
     bool should_optimize (void) const { return m_should_optimize; }
 
-    // For reg_mod accesses, shows the register rtx that was modified.
+    // For reg_mod accesses, returns the register rtx that is being modified.
     rtx address_reg (void) const { return m_addr_reg; }
 
-    // For reg_mod accesses, shows whether the register is used
-    // in another access. If so, register cloning costs must be
-    // taken into account when using it a second time.
-    // FIXME: It might be better for M_USED to be public instead of having 3
-    // accessing/modifying functions.
+    // For reg_mod accesses, tells whether the register is used in another
+    // access or not.  If so, register cloning costs must be taken into
+    // account when using it a second time.
     bool is_used (void) const { return m_used; }
-
     void set_used () { m_used = true; }
     void reset_used () { m_used = false; }
 
     // Return true if this is a trailing access, i,e. the first use or
-    // modification of an address reg in the access sequence's successor
-    // BBs. There can be multiple trailing accesses if the addr reg is
-    // set/used in more than one successor BBs.  In this case, AMS only
-    // handles them if they are equivalent, and they're represented by a
-    // single access.
+    // modification of an address reg that follows the last access in the
+    // sequence (which could be possibly in another BB). 
+    // There can be multiple trailing accesses if the addr reg is
+    // set/used in more than one successor BBs.
     bool is_trailing (void) const { return !trailing_insns ().empty (); }
 
-    // For a trailing access, the insns where the reg use/mod occur. These
-    // can be multiple insns if the access represents multiple equivalent
-    // uses or mods.
+    // For a trailing access, the insns where the reg use/mod occur.
     const std::vector<rtx_insn*>& trailing_insns (void) const
     { return m_trailing_insns; }
 
