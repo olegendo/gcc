@@ -13783,10 +13783,6 @@ mem_access_alternatives (sh_ams::access& a,
   // FIXME: also mac.w and mac.l insns (post-inc loads only).
   a.add_alternative (1 + gbr_extra_cost, sh_ams::make_reg_addr ());
 
-  // indexed addressing has to use R0 for either base or index reg.
-  a.add_alternative (1 + gbr_extra_cost + r0_extra_cost,
-		     sh_ams::make_index_addr ());
-
   if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
@@ -13804,6 +13800,10 @@ mem_access_alternatives (sh_ams::access& a,
 	  1 + (a.access_size () < 4 ? r0_extra_cost : 0) + gbr_extra_cost,
 	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), false)));
     }
+
+  // indexed addressing has to use R0 for either base or index reg.
+  a.add_alternative (1 + gbr_extra_cost + r0_extra_cost,
+		     sh_ams::make_index_addr ());
 
   // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
   // everything.
