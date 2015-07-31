@@ -86,6 +86,16 @@ public:
               && (disp () == other.disp ()));
     }
 
+    std::pair<disp_t, bool> operator-(const addr_expr &other) const
+    {
+      if (base_reg () == other.base_reg ()
+          && index_reg () == other.index_reg ()
+          && (scale () == other.scale () || has_no_index_reg ()))
+        return std::make_pair (disp () - other.disp (), true);
+
+      return std::make_pair (0, false);
+    }
+
     // returns true if the original address expression is more complex than
     // what AMS can handle.
     bool is_invalid (void) const
@@ -464,10 +474,18 @@ public:
 
     // Return true if this is a trailing access, i,e. the first use or
     // modification of an address reg that follows the last access in the
-    // sequence (which could be possibly in another BB). 
+    // sequence (which could be possibly in another BB).
     // There can be multiple trailing accesses if the addr reg is
     // set/used in more than one successor BBs.
     bool is_trailing (void) const { return !trailing_insns ().empty (); }
+
+    // If the access is part of an increasing/decreasing chain of adjacent
+    // accesses, return the length of that chain.
+    int inc_chain_length (void) const { return m_inc_chain_length; }
+    int dec_chain_length (void) const { return m_dec_chain_length; }
+
+    void set_inc_chain_length (int len) { m_inc_chain_length = len; }
+    void set_dec_chain_length (int len) { m_dec_chain_length = len; }
 
     // For a trailing access, the insns where the reg use/mod occur.
     const std::vector<rtx_insn*>& trailing_insns (void) const
@@ -553,11 +571,20 @@ public:
       return (reg == alt_reg);
     }
 
-    static bool adjacent_with_auto_mod (const access& first, const access& second);
-    static bool not_adjacent_with_auto_mod
-      (const access& first, const access& second)
+    // Return true if the effective address of FIRST and SECOND only differs in
+    // the constant displacement and the difference is the access size of FIRST.
+    static bool adjacent_inc (const access& first, const access& second)
     {
-      return !adjacent_with_auto_mod (first, second);
+      std::pair<disp_t, bool> distance = second.address () - first.address ();
+      return (distance.second && distance.first == first.access_size ());
+    }
+
+    // Same as adjacent_inc, except that the displacement of SECOND should
+    // be the smaller one.
+    static bool adjacent_dec (const access& first, const access& second)
+    {
+      std::pair<disp_t, bool> distance = first.address () - second.address ();
+      return (distance.second && distance.first == first.access_size ());
     }
 
   private:
@@ -575,6 +602,8 @@ public:
     rtx m_addr_rtx;
     rtx m_addr_reg;
     bool m_used;
+    int m_inc_chain_length;
+    int m_dec_chain_length;
 
     // all available alternatives for this access as reported by the target.
     enum
@@ -619,6 +648,8 @@ public:
 
     void find_reg_uses (void);
     void find_reg_end_values (void);
+
+    void get_adjacency_info (void);
 
     void update_access_alternatives (delegate& dlg,
 				     access_sequence::iterator acc)

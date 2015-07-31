@@ -13824,7 +13824,7 @@ mem_access_alternatives (sh_ams::access& a,
 
 void ams_delegate::
 adjust_alternative_costs (sh_ams::access::alternative& alt,
-                          const sh_ams::access_sequence& as,
+                          const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
                           sh_ams::access_sequence::const_iterator acc)
 {
   // For QImode and HImode accesses, increase the base+disp alternative's cost
@@ -13835,38 +13835,29 @@ adjust_alternative_costs (sh_ams::access::alternative& alt,
       && (alt.address ().disp_min () != 0 || alt.address ().disp_max () != 0)
       && acc->access_size () < 4)
     {
-      sh_ams::access_sequence::const_iterator adj_end =
-        std::adjacent_find (acc, as.accesses ().end (),
-                            sh_ams::access::not_adjacent_with_auto_mod);
-      int dist = std::distance (acc, adj_end);
-
-      if (dist >= 3)
-        alt.update_costs (alt.costs ()+1);
-      else
+      for (const sh_ams::access::alternative*
+             alts = acc->begin_alternatives (); ; ++alts)
         {
-          sh_ams::access_sequence::const_iterator adj_begin = acc;
-          for (; dist < 3 && adj_begin != as.accesses ().begin (); ++dist)
-            adj_begin--;
-          
-          adj_end = std::adjacent_find (adj_begin, as.accesses ().end (),
-                                   sh_ams::access::not_adjacent_with_auto_mod);
-          if (std::distance (adj_begin, adj_end) >= 3)
-            alt.update_costs (alt.costs ()+1);
+          if (alts == acc->end_alternatives ())
+            return;
+          if (alts->address ().type () == sh_ams::post_mod)
+            break;
         }
+
+      if (acc->inc_chain_length () >= 3)
+        alt.update_costs (alt.costs () + 1);
     }
 }
 
 int ams_delegate::
-lookahead_count (const sh_ams::access_sequence& as,
+lookahead_count (const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
                  sh_ams::access_sequence::const_iterator acc)
 {
   // If the next 2 or more accesses can be reached with post-inc, look
   // a bit further ahead.
-  if (std::distance (acc, std::adjacent_find (acc, as.accesses ().end (),
-                                              sh_ams::access::
-                                              not_adjacent_with_auto_mod)) >= 3)
+  if (acc->inc_chain_length () >= 3)
     return 2;
-  
+
   return 1;
 }
 

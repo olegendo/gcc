@@ -208,6 +208,10 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
     log_msg ("\n  (won't be optimized)");
   if (a.is_trailing ())
     log_msg ("\n  (trailing)");
+  if (a.inc_chain_length () > 1)
+    log_msg ("\n  (chain length:  %d [inc] )", a.inc_chain_length ());
+  if (a.dec_chain_length () > 1)
+    log_msg ("\n  (chain length:  %d [dec] )", a.dec_chain_length ());
 
   if (a.access_type () == sh_ams::reg_use)
     {
@@ -443,6 +447,8 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_should_optimize = should_optimize;
   m_addr_reg = NULL;
   m_used = false;
+  m_inc_chain_length = 1;
+  m_dec_chain_length = 1;
   m_alternatives_count = 0;
 }
 
@@ -462,6 +468,8 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_should_optimize = true;
   m_addr_reg = mod_reg;
   m_used = false;
+  m_inc_chain_length = 1;
+  m_dec_chain_length = 1;
   m_alternatives_count = 0;
 }
 
@@ -482,6 +490,8 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_should_optimize = true;
   m_addr_reg = NULL;
   m_used = false;
+  m_inc_chain_length = 1;
+  m_dec_chain_length = 1;
   m_alternatives_count = 0;
 }
 
@@ -511,34 +521,6 @@ matches_alternative (const alternative* alt) const
     return false;
 
   return true;
-}
-
-// Return true if FIRST has a post-inc/dec alternative that can be used to
-// reach the effective address of SECOND without using any other address
-// modification.
-bool sh_ams::access::
-adjacent_with_auto_mod (const access& first, const access& second)
-{
-  disp_t post_disp = 0;
-
-  for (const alternative* alt = first.begin_alternatives ();
-       alt != first.end_alternatives (); ++alt)
-    {
-      if (alt->address ().type () == post_mod)
-        {
-          post_disp = alt->address ().disp ();
-          break;
-        }
-    }
-
-  if (post_disp == 0) return false;
-
-  const addr_expr& addr1 = first.address ();
-  const addr_expr& addr2 = second.address ();
-  return (addr1.base_reg () == addr2.base_reg ()
-          && addr1.index_reg () == addr2.index_reg ()
-          && (addr1.scale () == addr2.scale () || addr1.has_no_index_reg ())
-          && addr1.disp ()+post_disp == addr2.disp ());
 }
 
 // Add a normal access to the end of the access sequence.
@@ -2841,6 +2823,48 @@ void sh_ams::access_sequence::find_reg_end_values (void)
     }
 }
 
+// Fill the m_inc/dec_chain_length field of the accesses in the sequence.
+void sh_ams::access_sequence::get_adjacency_info (void)
+{
+  for (sh_ams::access_sequence::iterator accs = first_mem_access ();
+       accs != accesses ().end (); )
+    {
+      int dist = 0;
+      sh_ams::access_sequence::iterator adj_end = accs;
+      while (true)
+        {
+          sh_ams::access_sequence::iterator prev = adj_end;
+          adj_end = next_mem_access (adj_end);
+          dist++;
+          if (adj_end == accesses ().end ()
+              || !access::adjacent_inc (*prev, *adj_end))
+            break;
+        }
+
+      for (; accs != adj_end; accs = next_mem_access (accs))
+        accs->set_inc_chain_length (dist);
+    }
+
+  for (sh_ams::access_sequence::iterator accs = first_mem_access ();
+       accs != accesses ().end (); )
+    {
+      int dist = 0;
+      sh_ams::access_sequence::iterator adj_end = accs;
+      while (true)
+        {
+          sh_ams::access_sequence::iterator prev = adj_end;
+          adj_end = next_mem_access (adj_end);
+          dist++;
+          if (adj_end == accesses ().end ()
+              || !access::adjacent_dec (*prev, *adj_end))
+            break;
+        }
+
+      for (; accs != adj_end; accs = next_mem_access (accs))
+        accs->set_dec_chain_length (dist);
+    }
+}
+
 unsigned int sh_ams::execute (function* fun)
 {
   log_msg ("sh-ams pass\n");
@@ -2951,10 +2975,15 @@ unsigned int sh_ams::execute (function* fun)
       log_access_sequence (as, false);
       log_msg ("\n\n");
 
-      log_msg ("updating access alternatives and costs\n");
+      log_msg ("updating access alternatives\n");
       for (access_sequence::iterator it = as.first_access_to_optimize ();
            it != as.accesses ().end (); it = as.next_access_to_optimize (it))
         as.update_access_alternatives (m_delegate, it);
+
+      log_msg ("doing adjacency analysis\n");
+      as.get_adjacency_info ();
+
+      log_msg ("updating costs\n");
 
       for (access_sequence::iterator mem_acc = as.first_mem_access ();
            mem_acc != as.accesses ().end ();
