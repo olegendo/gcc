@@ -372,6 +372,41 @@ expand_minus (rtx a, HOST_WIDE_INT b)
   return expand_minus (a, GEN_INT (b));
 }
 
+
+// Find the memory accesses in X and add them to OUT, together with their
+// access mode. ACCESS_TYPE indicates whether the next mem that we find is read
+// or written to.
+template <typename OutputIterator> void
+find_mem_accesses (rtx& x, OutputIterator out,
+		   sh_ams::access_type_t access_type = sh_ams::load)
+{
+  switch (GET_CODE (x))
+    {
+    case MEM:
+      *out++ = std::make_pair (&x, access_type);
+      break;
+    case PARALLEL:
+      for (int i = 0; i < XVECLEN (x, 0); i++)
+        find_mem_accesses (XVECEXP (x, 0, i), out, access_type);
+      break;
+    case SET:
+      find_mem_accesses (SET_DEST (x), out, sh_ams::store);
+      find_mem_accesses (SET_SRC (x), out, sh_ams::load);
+      break;
+    case CALL:
+      find_mem_accesses (XEXP (x, 0), out, sh_ams::load);
+      break;
+    default:
+      if (UNARY_P (x) || ARITHMETIC_P (x))
+        {
+          for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
+            find_mem_accesses (XEXP (x, i), out, access_type);
+        }
+      break;
+    }
+}
+
+
 } // anonymous namespace
 
 // borrowed from C++11
@@ -1242,39 +1277,6 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       break;
     }
   return make_invalid_addr ();
-}
-
-// Find the memory accesses in X and add them to OUT, together with their
-// access mode. ACCESS_TYPE indicates whether the next mem that we find is read
-// or written to.
-template <typename OutputIterator> void
-sh_ams::find_mem_accesses (rtx& x, OutputIterator out,
-			   access_type_t access_type)
-{
-  switch (GET_CODE (x))
-    {
-    case MEM:
-      *out++ = std::make_pair (&x, access_type);
-      break;
-    case PARALLEL:
-      for (int i = 0; i < XVECLEN (x, 0); i++)
-        find_mem_accesses (XVECEXP (x, 0, i), out, access_type);
-      break;
-    case SET:
-      find_mem_accesses (SET_DEST (x), out, store);
-      find_mem_accesses (SET_SRC (x), out, load);
-      break;
-    case CALL:
-      find_mem_accesses (XEXP (x, 0), out, load);
-      break;
-    default:
-      if (UNARY_P (x) || ARITHMETIC_P (x))
-        {
-          for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
-            find_mem_accesses (XEXP (x, i), out, access_type);
-        }
-      break;
-    }
 }
 
 // Internal function of collect_addr_reg_uses.

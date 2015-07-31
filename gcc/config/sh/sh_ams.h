@@ -215,10 +215,6 @@ public:
   class access_sequence;
 
   template <typename OutputIterator> static void
-  find_mem_accesses (rtx& x, OutputIterator out,
-		     access_type_t access_type = load);
-
-  template <typename OutputIterator> static void
   collect_addr_reg_uses (access_sequence& as, rtx addr_reg, rtx_insn *start_insn,
                          rtx abort_at_insn, OutputIterator out,
                          bool skip_addr_reg_mods,
