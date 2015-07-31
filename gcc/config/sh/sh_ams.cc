@@ -78,40 +78,6 @@
   do { if (dump_file != NULL) fprintf (dump_file, __VA_ARGS__); \
        return; } while (0)
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-// RTL pass class
-
-const pass_data sh_ams::default_pass_data =
-{
-  RTL_PASS,		// type
-  "",			// name (overwritten by the constructor)
-  OPTGROUP_NONE,	// optinfo_flags
-  TV_AUTO_INC_DEC,	// tv_id
-  0,			// properties_required
-  0,			// properties_provided
-  0,			// properties_destroyed
-  0,			// todo_flags_start
-  TODO_df_finish	// todo_flags_finish
-};
-
-const rtx sh_ams::invalid_regno = (const rtx)0;
-const rtx sh_ams::any_regno = (const rtx)1;
-
-sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate& dlg)
-: rtl_opt_pass (default_pass_data, ctx),
-  m_delegate (dlg)
-{
-  this->name = name;
-}
-
-sh_ams::~sh_ams (void)
-{
-}
-
-bool sh_ams::gate (function* /*fun*/)
-{
-  return optimize > 0;
-}
 
 namespace
 {
@@ -424,6 +390,41 @@ next (ForwardIt it,
 
 } // namespace stdx
 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// RTL pass class
+
+const pass_data sh_ams::default_pass_data =
+{
+  RTL_PASS,		// type
+  "",			// name (overwritten by the constructor)
+  OPTGROUP_NONE,	// optinfo_flags
+  TV_AUTO_INC_DEC,	// tv_id
+  0,			// properties_required
+  0,			// properties_provided
+  0,			// properties_destroyed
+  0,			// todo_flags_start
+  TODO_df_finish	// todo_flags_finish
+};
+
+const rtx sh_ams::invalid_regno = (const rtx)0;
+const rtx sh_ams::any_regno = (const rtx)1;
+
+sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate& dlg)
+: rtl_opt_pass (default_pass_data, ctx),
+  m_delegate (dlg)
+{
+  this->name = name;
+}
+
+sh_ams::~sh_ams (void)
+{
+}
+
+bool sh_ams::gate (function* /*fun*/)
+{
+  return optimize > 0;
+}
 
 sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
                         addr_expr original_addr_expr, addr_expr addr_expr,
