@@ -792,6 +792,17 @@ sh_ams::access_sequence::next_access_to_optimize (const_iterator i) const
   return const_cast<access_sequence*> (this)->next_access_to_optimize (i);
 }
 
+basic_block
+sh_ams::access_sequence::start_bb (void) const
+{
+  for (const_iterator a = accesses ().begin (); a != accesses ().end (); ++a)
+    {
+      if (a->insn ())
+        return BLOCK_FOR_INSN (a->insn ());
+    }
+  gcc_unreachable ();
+}
+
 // The recursive part of find_reg_value. If REG is modified in INSN,
 // set VALUE to REG's value and return true. Otherwise, return false.
 //
@@ -2673,8 +2684,9 @@ void sh_ams::access_sequence::add_missing_reg_mods (void)
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
       inserted_reg_mods.clear ();
+      basic_block bb = start_bb ();
       addr_expr expr =
-        extract_addr_expr (reg, BB_END (bb ()), BB_END (bb ()),
+        extract_addr_expr (reg, BB_END (bb), BB_END (bb),
                            Pmode, this, inserted_reg_mods);
 
       // If the final expression created by these modifications

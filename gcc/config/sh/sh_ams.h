@@ -78,44 +78,22 @@ public:
     scale_t scale_min (void) const { return m_scale_min; }
     scale_t scale_max (void) const { return m_scale_max; }
 
-    bool operator==(const addr_expr &other) const
-    {
-      return (base_reg () == other.base_reg ()
-              && (index_reg () == other.index_reg ())
-              && (scale () == other.scale ())
-              && (disp () == other.disp ()));
-    }
+    bool operator == (const addr_expr& other) const;
+    bool operator != (const addr_expr& other) const;
 
-    std::pair<disp_t, bool> operator-(const addr_expr &other) const
-    {
-      if (base_reg () == other.base_reg ()
-          && index_reg () == other.index_reg ()
-          && (scale () == other.scale () || has_no_index_reg ()))
-        return std::make_pair (disp () - other.disp (), true);
-
-      return std::make_pair (0, false);
-    }
+    std::pair<disp_t, bool> operator - (const addr_expr& other) const;
 
     // returns true if the original address expression is more complex than
     // what AMS can handle.
-    bool is_invalid (void) const
-    {
-      return disp_min () > disp_max ();
-    }
+    bool is_invalid (void) const { return disp_min () > disp_max (); }
 
     // displacement relative to the base reg before the actual memory access.
     // e.g. a pre-dec access will have a pre-disp of -mode_size.
-    disp_t entry_disp (void) const
-    {
-      return type () == pre_mod ? disp () : 0;
-    }
+    disp_t entry_disp (void) const { return type () == pre_mod ? disp () : 0; }
 
     // displacement relative to the base reg after the actual memory access.
     // e.g. a post-inc access will have a post-disp of +mode_size.
-    disp_t exit_disp (void) const
-    {
-      return type () == post_mod ? disp () : 0;
-    }
+    disp_t exit_disp (void) const { return type () == post_mod ? disp () : 0; }
 
   protected:
     addr_type_t m_type;
@@ -703,16 +681,8 @@ public:
     access_sequence::iterator
     remove_access (access_sequence::iterator acc);
 
-    basic_block bb (void)
-    {
-      for (iterator accs = accesses ().begin (); accs != accesses ().end ();
-           ++accs)
-        {
-          if (accs->insn ())
-            return BLOCK_FOR_INSN (accs->insn ());
-        }
-      gcc_unreachable ();
-    }
+    // returns the basic block of the first insn in the access sequence.
+    basic_block start_bb (void) const;
 
     std::list<access>& accesses (void) { return m_accs; }
     const std::list<access>& accesses (void) const { return m_accs; }
@@ -964,7 +934,6 @@ private:
   delegate& m_delegate;
 };
 
-
 inline sh_ams::addr_expr
 sh_ams::make_reg_addr (rtx base_reg)
 {
@@ -1040,6 +1009,26 @@ inline sh_ams::addr_expr
 sh_ams::make_invalid_addr (void)
 {
   return make_disp_addr (-1, -2);
+}
+
+inline bool
+sh_ams::addr_expr::operator == (const addr_expr& other) const
+{
+  return base_reg () == other.base_reg ()
+	 && index_reg () == other.index_reg ()
+	 && scale () == other.scale ()
+	 && disp () == other.disp ();
+}
+
+inline std::pair<sh_ams::disp_t, bool>
+sh_ams::addr_expr::operator - (const addr_expr& other) const
+{
+  if (base_reg () == other.base_reg ()
+      && index_reg () == other.index_reg ()
+      && (scale () == other.scale () || has_no_index_reg ()))
+    return std::make_pair (disp () - other.disp (), true);
+
+  return std::make_pair (0, false);
 }
 
 #endif // includeguard_gcc_sh_ams_includeguard
