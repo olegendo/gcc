@@ -118,85 +118,23 @@ public:
   public:
     non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale,
                   scale_t scale_min, scale_t scale_max,
-                  disp_t disp, disp_t disp_min, disp_t disp_max)
-    {
-      m_type = non_mod;
-      m_base_reg = base_reg;
-      m_disp = disp;
-      m_disp_min = disp_min;
-      m_disp_max = disp_max;
-      m_index_reg = index_reg;
-      m_scale = scale;
-      m_scale_min = scale_min;
-      m_scale_max = scale_max;
-    }
+                  disp_t disp, disp_t disp_min, disp_t disp_max);
 
-    non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp)
-    {
-      m_type = non_mod;
-      m_base_reg = base_reg;
-      m_disp = disp;
-      m_disp_min = disp;
-      m_disp_max = disp;
-      m_index_reg = index_reg;
-      m_scale = scale;
-      m_scale_min = scale;
-      m_scale_max = scale;
-    }
-
-//   non_mod_addr (regno_t base_reg, disp_t disp, disp_t min_disp, disp_t max_disp)
+    non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp);
   };
 
   class pre_mod_addr : public addr_expr
   {
   public:
-    pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
-    {
-      m_type = pre_mod;
-      m_base_reg = base_reg;
-      m_disp = disp;
-      m_disp_min = disp_min;
-      m_disp_max = disp_max;
-      m_index_reg = invalid_regno;
-      m_scale = m_scale_min = m_scale_max = 0;
-    }
-
-    pre_mod_addr (rtx base_reg, disp_t disp)
-    {
-      m_type = pre_mod;
-      m_base_reg = base_reg;
-      m_disp = disp;
-      m_disp_min = disp;
-      m_disp_max = disp;
-      m_index_reg = invalid_regno;
-      m_scale = m_scale_min = m_scale_max = 0;
-    }
+    pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max);
+    pre_mod_addr (rtx base_reg, disp_t disp);
   };
 
   class post_mod_addr : public addr_expr
   {
   public:
-    post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
-    {
-      m_type = post_mod;
-      m_base_reg = base_reg;
-      m_disp = disp;
-      m_disp_min = disp_min;
-      m_disp_max = disp_max;
-      m_index_reg = invalid_regno;
-      m_scale = m_scale_min = m_scale_max = 0;
-    }
-
-    post_mod_addr (rtx base_reg, disp_t disp)
-    {
-      m_type = post_mod;
-      m_base_reg = base_reg;
-      m_disp = disp;
-      m_disp_min = disp;
-      m_disp_max = disp;
-      m_index_reg = invalid_regno;
-      m_scale = m_scale_min = m_scale_max = 0;
-    }
+    post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max);
+    post_mod_addr (rtx base_reg, disp_t disp);
   };
 
   class access;
@@ -996,5 +934,84 @@ sh_ams::addr_expr::operator - (const addr_expr& other) const
 
   return std::make_pair (0, false);
 }
+
+inline sh_ams::non_mod_addr
+::non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale,
+		scale_t scale_min, scale_t scale_max,
+		disp_t disp, disp_t disp_min, disp_t disp_max)
+{
+  m_type = non_mod;
+  m_base_reg = base_reg;
+  m_disp = disp;
+  m_disp_min = disp_min;
+  m_disp_max = disp_max;
+  m_index_reg = index_reg;
+  m_scale = scale;
+  m_scale_min = scale_min;
+  m_scale_max = scale_max;
+}
+
+inline sh_ams::non_mod_addr
+::non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp)
+{
+  m_type = non_mod;
+  m_base_reg = base_reg;
+  m_disp = disp;
+  m_disp_min = disp;
+  m_disp_max = disp;
+  m_index_reg = index_reg;
+  m_scale = scale;
+  m_scale_min = scale;
+  m_scale_max = scale;
+}
+
+inline sh_ams::pre_mod_addr
+::pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
+{
+  m_type = pre_mod;
+  m_base_reg = base_reg;
+  m_disp = disp;
+  m_disp_min = disp_min;
+  m_disp_max = disp_max;
+  m_index_reg = invalid_regno;
+  m_scale = m_scale_min = m_scale_max = 0;
+}
+
+inline sh_ams::pre_mod_addr
+::pre_mod_addr (rtx base_reg, disp_t disp)
+{
+  m_type = pre_mod;
+  m_base_reg = base_reg;
+  m_disp = disp;
+  m_disp_min = disp;
+  m_disp_max = disp;
+  m_index_reg = invalid_regno;
+  m_scale = m_scale_min = m_scale_max = 0;
+}
+
+inline sh_ams::post_mod_addr
+::post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
+{
+  m_type = post_mod;
+  m_base_reg = base_reg;
+  m_disp = disp;
+  m_disp_min = disp_min;
+  m_disp_max = disp_max;
+  m_index_reg = invalid_regno;
+  m_scale = m_scale_min = m_scale_max = 0;
+}
+
+inline sh_ams::post_mod_addr
+::post_mod_addr (rtx base_reg, disp_t disp)
+{
+  m_type = post_mod;
+  m_base_reg = base_reg;
+  m_disp = disp;
+  m_disp_min = disp;
+  m_disp_max = disp;
+  m_index_reg = invalid_regno;
+  m_scale = m_scale_min = m_scale_max = 0;
+}
+
 
 #endif // includeguard_gcc_sh_ams_includeguard
