@@ -576,7 +576,7 @@ public:
     static bool adjacent_inc (const access& first, const access& second)
     {
       std::pair<disp_t, bool> distance = second.address () - first.address ();
-      return (distance.second && distance.first == first.access_size ());
+      return distance.second && distance.first == first.access_size ();
     }
 
     // Same as adjacent_inc, except that the displacement of SECOND should
@@ -584,7 +584,7 @@ public:
     static bool adjacent_dec (const access& first, const access& second)
     {
       std::pair<disp_t, bool> distance = first.address () - second.address ();
-      return (distance.second && distance.first == first.access_size ());
+      return distance.second && distance.first == first.access_size ();
     }
 
   private:
@@ -649,7 +649,7 @@ public:
     void find_reg_uses (void);
     void find_reg_end_values (void);
 
-    void get_adjacency_info (void);
+    void calculate_adjacency_info (void);
 
     void update_access_alternatives (delegate& dlg,
 				     access_sequence::iterator acc)

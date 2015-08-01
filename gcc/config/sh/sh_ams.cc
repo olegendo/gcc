@@ -2824,7 +2824,27 @@ void sh_ams::access_sequence::find_reg_end_values (void)
 }
 
 // Fill the m_inc/dec_chain_length field of the accesses in the sequence.
-void sh_ams::access_sequence::get_adjacency_info (void)
+//
+// FIXME: this is quadratic.
+//
+// for cases such as
+//    (1) @(reg + 0)
+//    (2) @(reg + 4)
+//    (3) @(reg + 40)
+//    (4) @(reg + 8)
+//
+// it will not see that (2) and (4) are adjacent, which is the hypothetical
+// adjacency as opposed to the actual adjacency.  it might be interesting
+// to also add a function that calculates the hypothetical adjacency.
+// it should do something like this
+//    (1) @(reg + 0)     hyp adj = 3 (chain 1,2,6)
+//    (2) @(reg + 4)     hyp adj = 3 (chain 1,2,6)
+//    (3) @(reg + 40)    hyp adj = 3 (chain 3,4,5)
+//    (4) @(reg + 44)    hyp adj = 3 (chain 3,4,5)
+//    (5) @(reg + 48)    hyp adj = 3 (chain 3,4,5)
+//    (6) @(reg + 8)     hyp adj = 3 (chain 1,2,6)
+//
+void sh_ams::access_sequence::calculate_adjacency_info (void)
 {
   for (sh_ams::access_sequence::iterator accs = first_mem_access ();
        accs != accesses ().end (); )
@@ -2981,7 +3001,7 @@ unsigned int sh_ams::execute (function* fun)
         as.update_access_alternatives (m_delegate, it);
 
       log_msg ("doing adjacency analysis\n");
-      as.get_adjacency_info ();
+      as.calculate_adjacency_info ();
 
       log_msg ("updating costs\n");
 
