@@ -500,7 +500,7 @@ public:
       return begin_alternatives () + m_alternatives_count;
     }
 
-    bool matches_alternative (const alternative* alt) const;
+    bool matches_alternative (const alternative& alt) const;
 
     void update_original_address (int new_cost, addr_expr new_addr_expr)
     {
@@ -540,13 +540,6 @@ public:
     void update_insn (rtx_insn *new_insn)
     {
       m_insn = new_insn;
-    }
-
-    static bool registers_match (rtx reg, rtx alt_reg)
-    {
-      if (alt_reg == any_regno)
-	return (reg != invalid_regno);
-      return (reg == alt_reg);
     }
 
     // Return true if the effective address of FIRST and SECOND only differs in

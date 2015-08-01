@@ -376,6 +376,30 @@ find_mem_accesses (rtx& x, OutputIterator out,
     }
 }
 
+// check if register a and b match, where both could be any_regno or
+// invalid_regno.
+//          a         |      b        |  match
+//     invalid_regno  | invalid_regno |  false
+//     invalid_regno  |   any_regno   |  false
+//     invalid_regno  |      reg      |  false
+//       any_regno    | invalid_regno |  false
+//       any_regno    |   any_regno   |  true
+//       any_regno    |      reg      |  true
+//          reg       | invalid_regno |  false
+//          reg       |   any_regno   |  true
+//          reg       |      reg      |  REGNO (reg) == REGNO (reg)
+bool
+registers_match (rtx a, rtx b)
+{
+  if (a == sh_ams::invalid_regno || b == sh_ams::invalid_regno)
+    return false;
+
+  if (a == sh_ams::any_regno || b == sh_ams::any_regno)
+    return true;
+
+  return REGNO (a) == REGNO (b);
+}
+
 
 } // anonymous namespace
 
@@ -495,30 +519,31 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_alternatives_count = 0;
 }
 
-
-bool sh_ams::access::
-matches_alternative (const alternative* alt) const
+bool
+sh_ams::access::matches_alternative (const alternative& alt) const
 {
-  const addr_expr &ae = original_address (), &alt_ae = alt->address ();
+  const addr_expr& ae = original_address ();
+  const addr_expr& alt_ae = alt.address ();
 
   if (ae.type () != alt_ae.type ())
     return false;
 
-  if (!registers_match (ae.base_reg (), alt_ae.base_reg ())
-      || !registers_match (ae.index_reg (), alt_ae.index_reg ()))
+  if (!registers_match (ae.base_reg (), alt_ae.base_reg ()))
     return false;
 
   if (ae.disp () < alt_ae.disp_min () || ae.disp () > alt_ae.disp_max ())
     return false;
 
-  if (ae.has_index_reg ()
-      && (ae.scale () < alt_ae.scale_min ()
-          || ae.scale () > alt_ae.scale_max ()))
+  if (ae.has_index_reg ())
+    {
+      if (!alt_ae.has_index_reg ())
+	return false;
 
-  if (ae.has_index_reg ()
-      && (ae.scale () < alt_ae.scale_min ()
-          || ae.scale () > alt_ae.scale_max ()))
-    return false;
+      if (ae.scale () < alt_ae.scale_min ()
+	  || ae.scale () > alt_ae.scale_max ()
+	  || !registers_match (ae.index_reg (), alt_ae.index_reg ()))
+	return false;
+    }
 
   return true;
 }
@@ -2157,10 +2182,13 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
 
           // Find the alternative that the access uses and update
           // its cost accordingly.
+          // FIXME: when selecting an alternative, remember the alternative
+          // iterator as the "currently selected alternative".  then we don't
+          // need to find it over and over again.
           for (const sh_ams::access::alternative* alt
                  = accs->begin_alternatives (); ; ++alt)
             {
-              if (accs->matches_alternative (alt))
+              if (accs->matches_alternative (*alt))
                 {
                   accs->update_cost (alt->costs ());
                   break;
