@@ -11,6 +11,76 @@
 #include <set>
 #include <iterator>
 
+
+template <typename Iter, typename Cond>
+class cond_iterator
+  : public std::iterator<std::forward_iterator_tag,
+  			 typename std::iterator_traits<Iter>::value_type,
+  			 typename std::iterator_traits<Iter>::difference_type,
+  			 typename std::iterator_traits<Iter>::pointer,
+  			 typename std::iterator_traits<Iter>::reference>				   
+{
+public:
+  enum make_begin_tag { make_begin };
+  enum make_end_tag { make_end };
+
+  cond_iterator (void) { }
+
+  cond_iterator (Iter i, Iter iend, make_begin_tag)
+  {
+    Cond cond;
+    for (; i != iend && !cond (*i); ++i);
+
+    m_i = i;
+    m_end = iend;
+  }
+
+  cond_iterator (Iter iend, make_end_tag)
+  : m_i (iend), m_end (iend) { }
+
+  operator Iter (void) const { return m_i; }
+
+  void swap (cond_iterator& other)
+  {
+    std::swap (m_i, other.m_i);
+    std::swap (m_end, other.m_end);
+  }
+  
+  cond_iterator& operator ++ (void)
+  {
+    Cond cond;
+    Iter i = m_i;
+    ++i;
+    for (; i != m_end && !cond (*i); ++i);
+    
+    m_i = i;
+    return *this;  
+  }
+
+  cond_iterator operator ++ (int)
+  {
+    cond_iterator r = *this;
+    operator++ ();
+    return r;
+  }
+
+  bool operator == (const cond_iterator& rhs) const { return m_i == rhs.m_i; }
+  bool operator != (const cond_iterator& rhs) const { return m_i != rhs.m_i; }
+
+  typename std::iterator_traits<Iter>::reference
+  operator * (void) const { return *m_i; }
+
+  typename std::iterator_traits<Iter>::pointer
+  operator -> (void) const { return m_i.operator -> (); }
+
+  // FIXME: conversion to const_iterator is probably not working.
+
+private:
+  Iter m_i;
+  Iter m_end;
+};
+
+
 class sh_ams : public rtl_opt_pass
 {
 public:
@@ -474,12 +544,16 @@ public:
     bool is_trailing (void) const { return !trailing_insns ().empty (); }
 
     // If the access is part of an increasing/decreasing chain of adjacent
-    // accesses, return the length of that chain.
+    // accesses, return the length of that chain and its position in the
+    // chain.
     int inc_chain_length (void) const { return m_inc_chain_length; }
+    int inc_chain_pos (void) const { return m_inc_chain_pos; }
+    
     int dec_chain_length (void) const { return m_dec_chain_length; }
+    int dec_chain_pos (void) const { return m_dec_chain_pos; }
 
-    void set_inc_chain_length (int len) { m_inc_chain_length = len; }
-    void set_dec_chain_length (int len) { m_dec_chain_length = len; }
+    void set_inc_chain (int pos, int len) { m_inc_chain_length = len; m_inc_chain_pos = pos; }
+    void set_dec_chain (int pos, int len) { m_dec_chain_length = len; m_dec_chain_pos = pos; }
 
     // For a trailing access, the insns where the reg use/mod occur.
     const std::vector<rtx_insn*>& trailing_insns (void) const
@@ -501,22 +575,6 @@ public:
     bool set_insn_use_rtx (rtx new_expr);
     void set_insn (rtx_insn* new_insn);
 
-    // Return true if the effective address of FIRST and SECOND only differs in
-    // the constant displacement and the difference is the access size of FIRST.
-    static bool adjacent_inc (const access& first, const access& second)
-    {
-      std::pair<disp_t, bool> distance = second.address () - first.address ();
-      return distance.second && distance.first == first.access_size ();
-    }
-
-    // Same as adjacent_inc, except that the displacement of SECOND should
-    // be the smaller one.
-    static bool adjacent_dec (const access& first, const access& second)
-    {
-      std::pair<disp_t, bool> distance = first.address () - second.address ();
-      return distance.second && distance.first == first.access_size ();
-    }
-
   private:
     addr_expr m_original_addr_expr;
     addr_expr m_addr_expr;
@@ -533,10 +591,33 @@ public:
     rtx m_addr_reg;
     bool m_used;
     int m_inc_chain_length;
+    int m_inc_chain_pos;
     int m_dec_chain_length;
+    int m_dec_chain_pos;
 
     alternative_set m_alternatives;
   };
+
+  template <access_type_t T1, access_type_t T2 = T1, access_type_t T3 = T1>
+  struct access_type_matches
+  {
+    bool operator () (const access& a) const
+    {
+      return a.access_type () == T1 || a.access_type () == T2
+	     || a.access_type () == T3;
+    }
+  };
+
+
+  // Return true if the effective address of FIRST and SECOND only differs in
+  // the constant displacement and the difference is the access size of FIRST.
+  static bool adjacent_inc (const access& first, const access& second);
+  static bool not_adjacent_inc (const access& first, const access& second);
+
+  // Same as adjacent_inc, except that the displacement of SECOND should
+  // be the smaller one.
+  static bool adjacent_dec (const access& first, const access& second);
+  static bool not_adjacent_dec (const access& first, const access& second);
 
   class access_sequence
   {
@@ -694,10 +775,46 @@ public:
     // starting addresses to use for arriving at a given end address.
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
 
-    // find the first/next true mem access in this access sequence.  returns
-    // the end iterator if nothing is found.
-    // FIXME: convert this into an iterator decorator and also add variants
-    // to iterate over other things than mem accesses.
+
+    // iterator decorator for iterating over memory accesses in the sequence.
+    typedef cond_iterator<iterator,
+		access_type_matches<load, store> > mems_iterator;
+    typedef cond_iterator<const_iterator,
+		access_type_matches<load, store> > const_mems_iterator;
+
+    mems_iterator mems_begin (void);
+    mems_iterator mems_end (void);
+    const_mems_iterator mems_begin (void) const;
+    const_mems_iterator mems_end (void) const;
+
+    // iterator decorator for iterating over address reg uses in the sequence.
+    typedef cond_iterator<iterator,
+			  access_type_matches<reg_use> > uses_iterator;
+    typedef cond_iterator<const_iterator,
+			  access_type_matches<reg_use> > const_uses_iterator;
+    
+    uses_iterator uses_begin (void);
+    uses_iterator uses_end (void);
+
+    const_uses_iterator uses_begin (void) const;
+    const_uses_iterator uses_end (void) const;
+    
+    // iterator decorator for iterating over memory accesses or address reg
+    // uses in the sequence.
+    typedef cond_iterator<iterator,
+	access_type_matches<load, store, reg_use> > mem_use_iterator;
+
+    typedef cond_iterator<const_iterator,
+	access_type_matches<load, store, reg_use> > const_mem_use_iterator;
+    
+    mem_use_iterator mem_use_begin (void);
+    mem_use_iterator mem_use_end (void);
+
+    const_mem_use_iterator mem_use_begin (void) const;
+    const_mem_use_iterator mem_use_end (void) const;
+    
+
+
     iterator first_mem_access (void);
     iterator next_mem_access (iterator i);
     const_iterator first_mem_access (void) const;
@@ -1074,6 +1191,86 @@ sh_ams::access::alternative_set::push_back (const value_type& e)
 {
   gcc_assert (size () < max_size ());
   m_data[m_size++] = e;
+}
+
+inline bool
+sh_ams::adjacent_inc (const access& first, const access& second)
+{
+  std::pair<disp_t, bool> distance = second.address () - first.address ();
+  return distance.second && distance.first == first.access_size ();
+}
+
+inline bool
+sh_ams::not_adjacent_inc (const access& first, const access& second)
+{
+  return !adjacent_inc (first, second);
+}
+
+inline bool
+sh_ams::adjacent_dec (const access& first, const access& second)
+{
+  std::pair<disp_t, bool> distance = first.address () - second.address ();
+  return distance.second && distance.first == first.access_size ();
+}
+
+inline bool
+sh_ams::not_adjacent_dec (const access& first, const access& second)
+{
+  return !adjacent_dec (first, second);
+}
+
+
+
+inline sh_ams::access_sequence::mems_iterator
+sh_ams::access_sequence::mems_begin (void)
+{
+  return mems_iterator (m_accs.begin (), m_accs.end (),
+			mems_iterator::make_begin);
+}
+
+inline sh_ams::access_sequence::mems_iterator
+sh_ams::access_sequence::mems_end (void)
+{
+  return mems_iterator (m_accs.end (), mems_iterator::make_end);
+}
+
+inline sh_ams::access_sequence::const_mems_iterator
+sh_ams::access_sequence::mems_begin (void) const
+{
+  return const_mems_iterator (m_accs.begin (), m_accs.end (),
+			      const_mems_iterator::make_begin);
+}
+
+inline sh_ams::access_sequence::const_mems_iterator
+sh_ams::access_sequence::mems_end (void) const
+{
+  return const_mems_iterator (m_accs.end (), const_mems_iterator::make_end);
+}
+
+inline sh_ams::access_sequence::uses_iterator
+sh_ams::access_sequence::uses_begin (void)
+{
+  return uses_iterator (m_accs.begin (), m_accs.end (),
+  			uses_iterator::make_begin);
+}
+
+inline sh_ams::access_sequence::uses_iterator
+sh_ams::access_sequence::uses_end (void)
+{
+  return uses_iterator (m_accs.end (), uses_iterator::make_end);
+}
+
+inline sh_ams::access_sequence::const_uses_iterator
+sh_ams::access_sequence::uses_begin (void) const
+{
+  return const_uses_iterator (m_accs.begin (), m_accs.end (),
+			      const_uses_iterator::make_begin);
+}
+
+inline sh_ams::access_sequence::const_uses_iterator
+sh_ams::access_sequence::uses_end (void) const
+{
+  return const_uses_iterator (m_accs.end (), const_uses_iterator::make_end);
 }
 
 #endif // includeguard_gcc_sh_ams_includeguard

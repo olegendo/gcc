@@ -473,7 +473,9 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_addr_reg = NULL;
   m_used = false;
   m_inc_chain_length = 1;
+  m_inc_chain_pos = 0;
   m_dec_chain_length = 1;
+  m_dec_chain_pos = 0;
 }
 
 // Constructor for reg_mod accesses.
@@ -493,7 +495,9 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_addr_reg = mod_reg;
   m_used = false;
   m_inc_chain_length = 1;
+  m_inc_chain_pos = 0;
   m_dec_chain_length = 1;
+  m_dec_chain_pos = 0;
 }
 
 // Constructor for reg_use accesses.
@@ -514,7 +518,9 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_addr_reg = NULL;
   m_used = false;
   m_inc_chain_length = 1;
+  m_inc_chain_pos = 0;
   m_dec_chain_length = 1;
+  m_dec_chain_pos = 0;
 }
 
 bool
@@ -624,7 +630,6 @@ sh_ams::access::set_insn (rtx_insn* new_insn)
   // FIXME: maybe add some consistency checks here?
   m_insn = new_insn; 
 }
-
 
 // Create a reg_mod access and add it to the access sequence.
 // This function traverses the insn list backwards starting from INSN to
@@ -2932,42 +2937,28 @@ void sh_ams::access_sequence::find_reg_end_values (void)
 //
 void sh_ams::access_sequence::calculate_adjacency_info (void)
 {
-  for (sh_ams::access_sequence::iterator accs = first_mem_access ();
-       accs != accesses ().end (); )
+  for (mems_iterator m = mems_begin (), mend = mems_end (); m != mend; )
     {
-      int dist = 0;
-      sh_ams::access_sequence::iterator adj_end = accs;
-      while (true)
-        {
-          sh_ams::access_sequence::iterator prev = adj_end;
-          adj_end = next_mem_access (adj_end);
-          dist++;
-          if (adj_end == accesses ().end ()
-              || !access::adjacent_inc (*prev, *adj_end))
-            break;
-        }
+      mems_iterator inc_end = std::adjacent_find (m, mend, not_adjacent_inc);
+      const int inc_len = std::max (1, (int)std::distance (m, inc_end));
 
-      for (; accs != adj_end; accs = next_mem_access (accs))
-        accs->set_inc_chain_length (dist);
+      for (int i = 0; i < inc_len; ++i)
+	{
+	  m->set_inc_chain (i, inc_len);
+	  ++m;
+	}
     }
 
-  for (sh_ams::access_sequence::iterator accs = first_mem_access ();
-       accs != accesses ().end (); )
+  for (mems_iterator m = mems_begin (), mend = mems_end (); m != mend; )
     {
-      int dist = 0;
-      sh_ams::access_sequence::iterator adj_end = accs;
-      while (true)
-        {
-          sh_ams::access_sequence::iterator prev = adj_end;
-          adj_end = next_mem_access (adj_end);
-          dist++;
-          if (adj_end == accesses ().end ()
-              || !access::adjacent_dec (*prev, *adj_end))
-            break;
-        }
+      mems_iterator dec_end = std::adjacent_find (m, mend, not_adjacent_dec);
+      const int dec_len = std::max (1, (int)std::distance (m, dec_end));
 
-      for (; accs != adj_end; accs = next_mem_access (accs))
-        accs->set_dec_chain_length (dist);
+      for (int i = 0; i < dec_len; ++i)
+	{
+	  m->set_dec_chain (i, dec_len);
+	  ++m;
+	}
     }
 }
 
