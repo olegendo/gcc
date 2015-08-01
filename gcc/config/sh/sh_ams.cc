@@ -208,10 +208,12 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
     log_msg ("\n  (won't be optimized)");
   if (a.is_trailing ())
     log_msg ("\n  (trailing)");
-  if (a.inc_chain_length () > 1)
-    log_msg ("\n  (chain length:  %d [inc] )", a.inc_chain_length ());
-  if (a.dec_chain_length () > 1)
-    log_msg ("\n  (chain length:  %d [dec] )", a.dec_chain_length ());
+  if (a.inc_chain ().length () > 1)
+    log_msg ("\n  (inc chain pos: %d  length: %d)", a.inc_chain ().pos (),
+						    a.inc_chain ().length ());
+  if (a.dec_chain ().length () > 1)
+    log_msg ("\n  (dec chain pos: %d  length: %d)", a.dec_chain ().pos (),
+						    a.dec_chain ().length ());
 
   if (a.access_type () == sh_ams::reg_use)
     {
@@ -472,10 +474,6 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_should_optimize = should_optimize;
   m_addr_reg = NULL;
   m_used = false;
-  m_inc_chain_length = 1;
-  m_inc_chain_pos = 0;
-  m_dec_chain_length = 1;
-  m_dec_chain_pos = 0;
 }
 
 // Constructor for reg_mod accesses.
@@ -494,10 +492,6 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_should_optimize = true;
   m_addr_reg = mod_reg;
   m_used = false;
-  m_inc_chain_length = 1;
-  m_inc_chain_pos = 0;
-  m_dec_chain_length = 1;
-  m_dec_chain_pos = 0;
 }
 
 // Constructor for reg_use accesses.
@@ -517,10 +511,6 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_should_optimize = true;
   m_addr_reg = NULL;
   m_used = false;
-  m_inc_chain_length = 1;
-  m_inc_chain_pos = 0;
-  m_dec_chain_length = 1;
-  m_dec_chain_pos = 0;
 }
 
 bool
@@ -2944,7 +2934,7 @@ void sh_ams::access_sequence::calculate_adjacency_info (void)
 
       for (int i = 0; i < inc_len; ++i)
 	{
-	  m->set_inc_chain (i, inc_len);
+	  m->set_inc_chain (access::adjacent_chain (i, inc_len));
 	  ++m;
 	}
     }
@@ -2956,7 +2946,7 @@ void sh_ams::access_sequence::calculate_adjacency_info (void)
 
       for (int i = 0; i < dec_len; ++i)
 	{
-	  m->set_dec_chain (i, dec_len);
+	  m->set_dec_chain (access::adjacent_chain (i, dec_len));
 	  ++m;
 	}
     }

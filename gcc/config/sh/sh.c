@@ -13819,8 +13819,13 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   // for QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
   // are part of adjacent chains of 3 or more insns.  this will make AMS
   // prefer them over displacement alternatives.
-  const int inc_cost = acc_size < 4 && acc->inc_chain_length () >= 3 ? -1 : 0;
-  const int dec_cost = acc_size < 4 && acc->dec_chain_length () >= 3 ? -1 : 0;
+  const int inc_cost = acc_size < 4
+		       && acc->inc_chain ().length () >= 3
+		       && !acc->inc_chain ().last () ? -1 : 0;
+
+  const int dec_cost = acc_size < 4
+		       && acc->dec_chain ().length () >= 3
+		       && acc->dec_chain ().first () ? -1 : 0;
 
   if (acc->access_type () == sh_ams::load)
     *alts++ = alternative (1 + gbr_extra_cost + inc_cost,
@@ -13854,7 +13859,7 @@ lookahead_count (const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
 {
   // If the next 2 or more accesses can be reached with post-inc, look
   // a bit further ahead.
-  if (acc->inc_chain_length () >= 3)
+  if (acc->inc_chain ().length () >= 3)
     return 2;
 
   return 1;

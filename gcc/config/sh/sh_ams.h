@@ -472,6 +472,23 @@ public:
       alternative m_data[max_data_size];
     };
 
+    class adjacent_chain
+    {
+    public:
+      adjacent_chain (void) : m_pos (0), m_len (1) { }
+      adjacent_chain (int p, int l) : m_pos (p), m_len (l) { }
+
+      int pos (void) const { return m_pos; }
+      int length (void) const { return m_len; }
+
+      bool first (void) const { return m_pos == 0; }
+      bool last (void) const { return m_pos == m_len - 1; }
+
+    private:
+      int m_pos;
+      int m_len;
+    };
+
     access (rtx_insn* insn, rtx* mem, access_type_t access_type,
 	    addr_expr original_addr_expr, addr_expr addr_expr,
 	    bool should_optimize, int cost = infinite_costs);
@@ -546,14 +563,11 @@ public:
     // If the access is part of an increasing/decreasing chain of adjacent
     // accesses, return the length of that chain and its position in the
     // chain.
-    int inc_chain_length (void) const { return m_inc_chain_length; }
-    int inc_chain_pos (void) const { return m_inc_chain_pos; }
+    const adjacent_chain& inc_chain (void) const { return m_inc_chain; }
+    const adjacent_chain& dec_chain (void) const { return m_dec_chain; }
     
-    int dec_chain_length (void) const { return m_dec_chain_length; }
-    int dec_chain_pos (void) const { return m_dec_chain_pos; }
-
-    void set_inc_chain (int pos, int len) { m_inc_chain_length = len; m_inc_chain_pos = pos; }
-    void set_dec_chain (int pos, int len) { m_dec_chain_length = len; m_dec_chain_pos = pos; }
+    void set_inc_chain (const adjacent_chain& c) { m_inc_chain = c; }
+    void set_dec_chain (const adjacent_chain& c) { m_dec_chain = c; }
 
     // For a trailing access, the insns where the reg use/mod occur.
     const std::vector<rtx_insn*>& trailing_insns (void) const
@@ -590,10 +604,9 @@ public:
     rtx m_addr_rtx;
     rtx m_addr_reg;
     bool m_used;
-    int m_inc_chain_length;
-    int m_inc_chain_pos;
-    int m_dec_chain_length;
-    int m_dec_chain_pos;
+
+    adjacent_chain m_inc_chain;
+    adjacent_chain m_dec_chain;
 
     alternative_set m_alternatives;
   };
