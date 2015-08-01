@@ -2927,9 +2927,12 @@ void sh_ams::access_sequence::find_reg_end_values (void)
 //
 void sh_ams::access_sequence::calculate_adjacency_info (void)
 {
-  for (mems_iterator m = mems_begin (), mend = mems_end (); m != mend; )
+  typedef access_type_matches<load, store> match;
+  typedef cond_iterator<iterator, match> iter;
+
+  for (iter m = begin<match> (), mend = end<match> (); m != mend; )
     {
-      mems_iterator inc_end = std::adjacent_find (m, mend, not_adjacent_inc);
+      iter inc_end = std::adjacent_find (m, mend, not_adjacent_inc);
       const int inc_len = std::max (1, (int)std::distance (m, inc_end));
 
       for (int i = 0; i < inc_len; ++i)
@@ -2938,10 +2941,10 @@ void sh_ams::access_sequence::calculate_adjacency_info (void)
 	  ++m;
 	}
     }
-
-  for (mems_iterator m = mems_begin (), mend = mems_end (); m != mend; )
+  
+  for (iter m = begin<match> (), mend = end<match> (); m != mend; )
     {
-      mems_iterator dec_end = std::adjacent_find (m, mend, not_adjacent_dec);
+      iter dec_end = std::adjacent_find (m, mend, not_adjacent_dec);
       const int dec_len = std::max (1, (int)std::distance (m, dec_end));
 
       for (int i = 0; i < dec_len; ++i)

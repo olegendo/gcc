@@ -788,44 +788,36 @@ public:
     // starting addresses to use for arriving at a given end address.
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
 
-
-    // iterator decorator for iterating over memory accesses in the sequence.
-    typedef cond_iterator<iterator,
-		access_type_matches<load, store> > mems_iterator;
-    typedef cond_iterator<const_iterator,
-		access_type_matches<load, store> > const_mems_iterator;
-
-    mems_iterator mems_begin (void);
-    mems_iterator mems_end (void);
-    const_mems_iterator mems_begin (void) const;
-    const_mems_iterator mems_end (void) const;
-
-    // iterator decorator for iterating over address reg uses in the sequence.
-    typedef cond_iterator<iterator,
-			  access_type_matches<reg_use> > uses_iterator;
-    typedef cond_iterator<const_iterator,
-			  access_type_matches<reg_use> > const_uses_iterator;
+    // iterator decorator for iterating over different types of elements
+    // in the access sequence.
+    template <typename Match>
+    cond_iterator<iterator, Match> begin (void)
+    {
+      typedef cond_iterator<iterator, Match> iter;
+      return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
+    }
     
-    uses_iterator uses_begin (void);
-    uses_iterator uses_end (void);
+    template <typename Match>
+    cond_iterator<iterator, Match> end (void)
+    {
+      typedef cond_iterator<iterator, Match> iter;
+      return iter (m_accs.end (), iter::make_end);
+    }
 
-    const_uses_iterator uses_begin (void) const;
-    const_uses_iterator uses_end (void) const;
+    template <typename Match>
+    cond_iterator<const_iterator, Match> begin (void) const
+    {
+      typedef cond_iterator<const_iterator, Match> iter;
+      return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
+    }
     
-    // iterator decorator for iterating over memory accesses or address reg
-    // uses in the sequence.
-    typedef cond_iterator<iterator,
-	access_type_matches<load, store, reg_use> > mem_use_iterator;
-
-    typedef cond_iterator<const_iterator,
-	access_type_matches<load, store, reg_use> > const_mem_use_iterator;
-    
-    mem_use_iterator mem_use_begin (void);
-    mem_use_iterator mem_use_end (void);
-
-    const_mem_use_iterator mem_use_begin (void) const;
-    const_mem_use_iterator mem_use_end (void) const;
-    
+    template <typename Match>
+    cond_iterator<const_iterator, Match> end (void) const
+    {
+      typedef cond_iterator<const_iterator, Match> iter;
+      return iter (m_accs.end (), iter::make_end);
+    }
+        
 
 
     iterator first_mem_access (void);
@@ -1230,60 +1222,6 @@ inline bool
 sh_ams::not_adjacent_dec (const access& first, const access& second)
 {
   return !adjacent_dec (first, second);
-}
-
-
-
-inline sh_ams::access_sequence::mems_iterator
-sh_ams::access_sequence::mems_begin (void)
-{
-  return mems_iterator (m_accs.begin (), m_accs.end (),
-			mems_iterator::make_begin);
-}
-
-inline sh_ams::access_sequence::mems_iterator
-sh_ams::access_sequence::mems_end (void)
-{
-  return mems_iterator (m_accs.end (), mems_iterator::make_end);
-}
-
-inline sh_ams::access_sequence::const_mems_iterator
-sh_ams::access_sequence::mems_begin (void) const
-{
-  return const_mems_iterator (m_accs.begin (), m_accs.end (),
-			      const_mems_iterator::make_begin);
-}
-
-inline sh_ams::access_sequence::const_mems_iterator
-sh_ams::access_sequence::mems_end (void) const
-{
-  return const_mems_iterator (m_accs.end (), const_mems_iterator::make_end);
-}
-
-inline sh_ams::access_sequence::uses_iterator
-sh_ams::access_sequence::uses_begin (void)
-{
-  return uses_iterator (m_accs.begin (), m_accs.end (),
-  			uses_iterator::make_begin);
-}
-
-inline sh_ams::access_sequence::uses_iterator
-sh_ams::access_sequence::uses_end (void)
-{
-  return uses_iterator (m_accs.end (), uses_iterator::make_end);
-}
-
-inline sh_ams::access_sequence::const_uses_iterator
-sh_ams::access_sequence::uses_begin (void) const
-{
-  return const_uses_iterator (m_accs.begin (), m_accs.end (),
-			      const_uses_iterator::make_begin);
-}
-
-inline sh_ams::access_sequence::const_uses_iterator
-sh_ams::access_sequence::uses_end (void) const
-{
-  return const_uses_iterator (m_accs.end (), const_uses_iterator::make_end);
 }
 
 #endif // includeguard_gcc_sh_ams_includeguard
