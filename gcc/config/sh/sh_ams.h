@@ -449,8 +449,8 @@ public:
     // access or not.  If so, register cloning costs must be taken into
     // account when using it a second time.
     bool is_used (void) const { return m_used; }
-    void set_used () { m_used = true; }
-    void reset_used () { m_used = false; }
+    void set_used (void) { m_used = true; }
+    void reset_used (void) { m_used = false; }
 
     // Return true if this is a trailing access, i,e. the first use or
     // modification of an address reg that follows the last access in the
@@ -504,46 +504,16 @@ public:
 
     bool matches_alternative (const alternative& alt) const;
 
-    void update_original_address (int new_cost, addr_expr new_addr_expr)
-    {
-      m_cost = new_cost;
-      m_original_addr_expr = new_addr_expr;
-      m_addr_rtx = NULL;
-    }
-
-    void update_original_address (int new_cost, rtx new_addr_rtx)
-    {
-      m_cost = new_cost;
-      m_original_addr_expr = make_invalid_addr ();
-      m_addr_rtx = new_addr_rtx;
-    }
-
-    void update_effective_address (addr_expr new_addr_expr)
-    {
-      m_addr_expr = new_addr_expr;
-      m_addr_rtx = NULL;
-    }
+    void set_original_address (int new_cost, const addr_expr& new_addr_expr);
+    void set_original_address (int new_cost, rtx new_addr_rtx);
+    void set_effective_address (const addr_expr& new_addr_expr);
 
     void set_cost (int new_cost) { m_cost = new_cost; }
     void adjust_cost (int d) { m_cost += d; }
 
-    bool update_mem (rtx new_addr)
-    {
-      bool val = validate_change (m_insn, m_mem_ref,
-				  replace_equiv_address (*m_mem_ref, new_addr),
-				  false);
-      return val;
-    }
-
-    void update_use_expr (rtx new_expr)
-    {
-      validate_change (m_insn, m_mem_ref, new_expr, false);
-    }
-
-    void update_insn (rtx_insn *new_insn)
-    {
-      m_insn = new_insn;
-    }
+    bool set_insn_mem_rtx (rtx new_addr);
+    bool set_insn_use_rtx (rtx new_expr);
+    void set_insn (rtx_insn* new_insn);
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.

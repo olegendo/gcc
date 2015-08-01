@@ -583,6 +583,51 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
   return accesses ().back ();
 }
 
+void
+sh_ams::access::set_original_address (int new_cost,
+				      const addr_expr& new_addr_expr)
+{
+  m_cost = new_cost;
+  m_original_addr_expr = new_addr_expr;
+  m_addr_rtx = NULL;
+}
+
+void
+sh_ams::access::set_original_address (int new_cost, rtx new_addr_rtx)
+{
+  m_cost = new_cost;
+  m_original_addr_expr = make_invalid_addr ();
+  m_addr_rtx = new_addr_rtx;
+}
+
+void
+sh_ams::access::set_effective_address (const addr_expr& new_addr_expr)
+{
+  m_addr_expr = new_addr_expr;
+  m_addr_rtx = NULL;
+}
+
+bool
+sh_ams::access::set_insn_mem_rtx (rtx new_addr)
+{
+  return validate_change (m_insn, m_mem_ref,
+			  replace_equiv_address (*m_mem_ref, new_addr), false);
+}
+
+bool
+sh_ams::access::set_insn_use_rtx (rtx new_expr)
+{
+  return validate_change (m_insn, m_mem_ref, new_expr, false);
+}
+
+void
+sh_ams::access::set_insn (rtx_insn* new_insn)
+{
+  // FIXME: maybe add some consistency checks here?
+  m_insn = new_insn; 
+}
+
+
 // Create a reg_mod access and add it to the access sequence.
 // This function traverses the insn list backwards starting from INSN to
 // find the correct place inside AS where the access needs to be inserted.
@@ -1120,7 +1165,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
             {
               if (new_reg_mod)
                 {
-                  new_reg_mod->update_original_address (0, reg_value);
+                  new_reg_mod->set_original_address (0, reg_value);
 
                   // Set all reg_mod accesses that were added while expanding this
                   // register to "unremovable".
@@ -1832,7 +1877,7 @@ gen_mod_for_alt (access::alternative& alternative,
 
   // Update the original_addr_expr of the access with the
   // alternative.
-  acc->update_original_address (alternative.cost (), new_addr_expr);
+  acc->set_original_address (alternative.cost (), new_addr_expr);
 }
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
@@ -2041,13 +2086,15 @@ update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns)
               new_val = expand_plus (new_val, accs->original_address ().disp ());
             }
 
-          accs->update_insn (emit_move_insn (accs->address_reg (), new_val));
+          accs->set_insn (emit_move_insn (accs->address_reg (), new_val));
           mod_insns ()->insns ().push_back (accs->insn ());
         }
       else if (accs->access_type () == reg_use && !accs->is_trailing ())
         {
           gcc_assert (accs->original_address ().has_base_reg ());
-          accs->update_use_expr (accs->original_address ().base_reg ());
+          bool r = accs->set_insn_use_rtx (
+			accs->original_address ().base_reg ());
+	  gcc_assert (r);
         }
       else if (accs->access_type () == load || accs->access_type () == store)
         {
@@ -2117,7 +2164,7 @@ update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns)
 	  log_rtx (new_addr);
 	  log_msg ("\n");
 
-          bool mem_update_ok = accs->update_mem (new_addr);
+          bool mem_update_ok = accs->set_insn_mem_rtx (new_addr);
           gcc_assert (mem_update_ok);
 
           sh_check_add_incdec_notes (accs->insn ());
@@ -2788,7 +2835,7 @@ void sh_ams::access_sequence::find_reg_uses (void)
 
   if (!last_insn)
     return;
-
+    
   // Add trailing address reg uses to the end of the sequence.
   for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
