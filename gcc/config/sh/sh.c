@@ -13845,7 +13845,7 @@ adjust_alternative_costs (sh_ams::access::alternative& alt,
         }
 
       if (acc->inc_chain_length () >= 3)
-        alt.update_costs (alt.costs () + 1);
+        alt.adjust_cost (+1);
     }
 }
 

@@ -372,18 +372,20 @@ public:
     class alternative
     {
     public:
-      alternative (const addr_expr& ae, int costs)
-      : m_addr_expr (ae), m_costs (costs) { }
+      alternative (void) { }
 
-      alternative () {  }
+      alternative (const addr_expr& ae, int cost)
+      : m_addr_expr (ae), m_cost (cost) { }
 
       const addr_expr& address (void) const { return m_addr_expr; }
-      int costs (void) const { return m_costs; }
-      void update_costs (int new_cost) { m_costs = new_cost; }
+
+      int cost (void) const { return m_cost; }
+      void set_cost (int val) { m_cost = val; }
+      void adjust_cost (int val) { m_cost += val; }
 
     private:
       addr_expr m_addr_expr;
-      int m_costs;
+      int m_cost;
     };
 
     access (rtx_insn* insn, rtx* mem, access_type_t access_type,
@@ -522,7 +524,8 @@ public:
       m_addr_rtx = NULL;
     }
 
-    void update_cost (int new_cost) { m_cost = new_cost; }
+    void set_cost (int new_cost) { m_cost = new_cost; }
+    void adjust_cost (int d) { m_cost += d; }
 
     bool update_mem (rtx new_addr)
     {

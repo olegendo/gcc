@@ -246,7 +246,7 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
           if (alt_count > 0)
             log_msg ("\n");
 
-          log_msg ("    alt %d, costs %d: ", alt_count, alt->costs ());
+          log_msg ("    alt %d, cost %d: ", alt_count, alt->cost ());
           log_addr_expr (alt->address ());
           ++alt_count;
         }
@@ -1706,7 +1706,7 @@ gen_min_mod (access_sequence::iterator acc, delegate& dlg,
         }
 
       // Get the costs for using this alternative.
-      int alt_min_cost = alt->costs ();
+      int alt_min_cost = alt->cost ();
 
       min_mod_cost_result base_mod_cost =
         find_min_mod_cost (end_base, acc,
@@ -1832,7 +1832,7 @@ gen_mod_for_alt (access::alternative& alternative,
 
   // Update the original_addr_expr of the access with the
   // alternative.
-  acc->update_original_address (alternative.costs (), new_addr_expr);
+  acc->update_original_address (alternative.cost (), new_addr_expr);
 }
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
@@ -2176,7 +2176,7 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
           // Skip this access if it won't be optimized.
           if (!accs->should_optimize ())
             {
-              accs->update_cost (0);
+              accs->set_cost (0);
               continue;
             }
 
@@ -2190,7 +2190,7 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
             {
               if (accs->matches_alternative (*alt))
                 {
-                  accs->update_cost (alt->costs ());
+                  accs->set_cost (alt->cost ());
                   break;
                 }
               if (alt == accs->end_alternatives ())
@@ -2203,7 +2203,7 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
           // addr_expr or if it's a trailing access.
           if (accs->original_address ().is_invalid () || accs->is_trailing ())
             {
-              accs->update_cost (0);
+              accs->set_cost (0);
               continue;
             }
 
@@ -2245,7 +2245,7 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
           // Cloning costs
           cost += get_clone_cost (accs, dlg);
 
-          accs->update_cost (cost);
+          accs->set_cost (cost);
         }
     }
 
@@ -2301,7 +2301,7 @@ bool sh_ams::access_sequence::cost_already_minimal (void) const
           for (const access::alternative* alt = accs->begin_alternatives ();
                alt != accs->end_alternatives (); ++alt)
             {
-              if (alt->costs () < accs->cost ())
+              if (alt->cost () < accs->cost ())
                 return false;
             }
         }
@@ -2489,7 +2489,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
 
       cost += dlg.addr_reg_scale_cost (start_addr->address_reg (), scale,
                                        *this, ins_place);
-      new_addr->update_cost (cost - prev_cost);
+      new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
     }
@@ -2528,7 +2528,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
       cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
                                           c_end_addr.index_reg (),
                                           *this, ins_place);
-      new_addr->update_cost (cost - prev_cost);
+      new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
     }
@@ -2562,7 +2562,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
       cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
                                           c_end_addr.base_reg (),
                                           *this, ins_place);
-      new_addr->update_cost (cost - prev_cost);
+      new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
     }
@@ -2616,7 +2616,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
 
       cost += dlg.addr_reg_disp_cost (start_addr->address_reg (), disp,
                                       *this, ins_place);
-      new_addr->update_cost (cost - prev_cost);
+      new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
     }
@@ -2649,7 +2649,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
       --ins_place;
       mod_tracker.inserted_accs ().push_back (ins_place);
 
-      new_addr->update_cost (cost - prev_cost);
+      new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
     }
 
