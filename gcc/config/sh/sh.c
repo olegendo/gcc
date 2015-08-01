@@ -13821,11 +13821,11 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   // prefer them over displacement alternatives.
   const int inc_cost = acc_size < 4
 		       && acc->inc_chain ().length () >= 3
-		       && !acc->inc_chain ().last () ? -1 : 0;
+		       && !acc->inc_chain ().last () ? -2 : 0;
 
   const int dec_cost = acc_size < 4
 		       && acc->dec_chain ().length () >= 3
-		       && acc->dec_chain ().first () ? -1 : 0;
+		       && acc->dec_chain ().first () ? -2 : 0;
 
   if (acc->access_type () == sh_ams::load)
     *alts++ = alternative (1 + gbr_extra_cost + inc_cost,

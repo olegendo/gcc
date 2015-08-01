@@ -2927,7 +2927,7 @@ void sh_ams::access_sequence::find_reg_end_values (void)
 //
 void sh_ams::access_sequence::calculate_adjacency_info (void)
 {
-  typedef access_type_matches<load, store> match;
+  typedef access_type_matches<load, store, reg_use> match;
   typedef cond_iterator<iterator, match> iter;
 
   for (iter m = begin<match> (), mend = end<match> (); m != mend; )
