@@ -13816,11 +13816,17 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
 
   // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
   // everything.
+  // for QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
+  // are part of adjacent chains of 3 or more insns.  this will make AMS
+  // prefer them over displacement alternatives.
+  const int inc_cost = acc_size < 4 && acc->inc_chain_length () >= 3 ? -1 : 0;
+  const int dec_cost = acc_size < 4 && acc->dec_chain_length () >= 3 ? -1 : 0;
+
   if (acc->access_type () == sh_ams::load)
-   *alts++ = alternative (1 + gbr_extra_cost,
-			  sh_ams::make_post_inc_addr (acc_mode));
+    *alts++ = alternative (1 + gbr_extra_cost + inc_cost,
+			   sh_ams::make_post_inc_addr (acc_mode));
   else if (acc->access_type () == sh_ams::store)
-    *alts++ = alternative (1 + gbr_extra_cost,
+    *alts++ = alternative (1 + gbr_extra_cost + dec_cost,
 			   sh_ams::make_pre_dec_addr (acc_mode));
 
   // On SH2A we can do larger displacements and also do FP modes with
@@ -13840,26 +13846,6 @@ adjust_alternative_costs (sh_ams::access::alternative& alt,
                           const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
                           sh_ams::access_sequence::const_iterator acc)
 {
-  // For QImode and HImode accesses, increase the base+disp alternative's cost
-  // if the access is part of 3 or more adjacent accesses that can be reached
-  // using post-inc addresses.  This encourages AMS to use the post-inc
-  // alternatives instead which can use registers other than R0.
-  if (alt.address ().type () == sh_ams::non_mod
-      && (alt.address ().disp_min () != 0 || alt.address ().disp_max () != 0)
-      && acc->access_size () < 4)
-    {
-      for (sh_ams::access::alternative_set::const_iterator
-             alt = acc->alternatives ().begin (); ; ++alt)
-        {
-          if (alt == acc->alternatives ().end ())
-            return;
-          if (alt->address ().type () == sh_ams::post_mod)
-            break;
-        }
-
-      if (acc->inc_chain_length () >= 3)
-        alt.adjust_cost (+1);
-    }
 }
 
 int ams_delegate::

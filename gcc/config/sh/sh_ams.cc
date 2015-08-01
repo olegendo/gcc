@@ -3081,13 +3081,16 @@ unsigned int sh_ams::execute (function* fun)
       log_access_sequence (as, false);
       log_msg ("\n\n");
 
+      log_msg ("doing adjacency analysis\n");
+      as.calculate_adjacency_info ();
+
+      log_access_sequence (as, false);
+      log_msg ("\n\n");
+
       log_msg ("updating access alternatives\n");
       for (access_sequence::iterator it = as.first_access_to_optimize ();
            it != as.accesses ().end (); it = as.next_access_to_optimize (it))
         as.update_access_alternatives (m_delegate, it);
-
-      log_msg ("doing adjacency analysis\n");
-      as.calculate_adjacency_info ();
 
       log_msg ("updating costs\n");
 
