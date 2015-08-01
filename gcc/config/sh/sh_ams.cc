@@ -773,87 +773,19 @@ sh_ams::access_sequence::remove_access (access_sequence::iterator acc)
   return accesses ().erase (acc);
 }
 
-sh_ams::access_sequence::iterator
-sh_ams::access_sequence::first_mem_access (void)
+struct sh_ams::access_to_optimize
 {
-  for (iterator i = accesses ().begin (); i != accesses ().end (); ++i)
-    if (i->access_type () == load || i->access_type () == store)
-      return i;
-
-  return accesses ().end ();
-}
-
-sh_ams::access_sequence::iterator
-sh_ams::access_sequence::next_mem_access (iterator i)
-{
-  if (i == accesses ().end ())
-    return i;
-
-  for (++i; i != accesses ().end (); ++i)
-    if (i->access_type () == load || i->access_type () == store)
-      return i;
-
-  return accesses ().end ();
-}
-
-sh_ams::access_sequence::iterator
-sh_ams::access_sequence::first_access_to_optimize (void)
-{
-  for (iterator i = accesses ().begin (); i != accesses ().end (); ++i)
-    if ((i->access_type () == load || i->access_type () == store
-         || i->access_type () == reg_use
-         || (i->access_type () == reg_mod
-             && i->original_address ().is_invalid ()
-             && !i->address ().is_invalid ()))
-        && i->should_optimize ()
-        && !i->is_trailing ())
-      return i;
-
-  return accesses ().end ();
-}
-
-sh_ams::access_sequence::iterator
-sh_ams::access_sequence::next_access_to_optimize (iterator i)
-{
-  if (i == accesses ().end ())
-    return i;
-
-  for (++i; i != accesses ().end (); ++i)
-    if ((i->access_type () == load || i->access_type () == store
-         || i->access_type () == reg_use
-         || (i->access_type () == reg_mod
-             && i->original_address ().is_invalid ()
-             && !i->address ().is_invalid ()))
-        && i->should_optimize ()
-        && !i->is_trailing ())
-      return i;
-
-  return accesses ().end ();
-}
-
-sh_ams::access_sequence::const_iterator
-sh_ams::access_sequence::first_mem_access (void) const
-{
-  return const_cast<access_sequence*> (this)->first_mem_access ();
-}
-
-sh_ams::access_sequence::const_iterator
-sh_ams::access_sequence::next_mem_access (const_iterator i) const
-{
-  return const_cast<access_sequence*> (this)->next_mem_access (i);
-}
-
-sh_ams::access_sequence::const_iterator
-sh_ams::access_sequence::first_access_to_optimize (void) const
-{
-  return const_cast<access_sequence*> (this)->first_access_to_optimize ();
-}
-
-sh_ams::access_sequence::const_iterator
-sh_ams::access_sequence::next_access_to_optimize (const_iterator i) const
-{
-  return const_cast<access_sequence*> (this)->next_access_to_optimize (i);
-}
+  bool operator () (const access& a) const
+  {
+    return (a.access_type () == load || a.access_type () == store
+	    || a.access_type () == reg_use
+	    || (a.access_type () == reg_mod
+		&& a.original_address ().is_invalid ()
+		&& !a.address ().is_invalid ()))
+	   && a.should_optimize ()
+           && !a.is_trailing ();
+  }
+};
 
 basic_block
 sh_ams::access_sequence::start_bb (void) const
@@ -1639,14 +1571,13 @@ void sh_ams::split_access_sequence_2 (std::set<rtx>& addr_regs,
 // the access sequence.  They are inserted in the form of reg_mod accesses
 // between the regular accesses.
 // FIXME: Handle trailing reg_mods/uses.
-void sh_ams::access_sequence::
-gen_address_mod (delegate& dlg)
+void
+sh_ams::access_sequence::gen_address_mod (delegate& dlg)
 {
   log_msg ("Generating address modifications\n");
 
   // Remove the original reg_mod accesses.
-  for (access_sequence::iterator accs = accesses ().begin ();
-       accs != accesses ().end ();)
+  for (iterator accs = accesses ().begin (); accs != accesses ().end (); )
     {
       if (accs->removable ())
         accs = remove_access (accs);
@@ -1654,30 +1585,30 @@ gen_address_mod (delegate& dlg)
         ++accs;
     }
 
-  for (access_sequence::iterator accs = first_access_to_optimize ();
-       accs != accesses ().end (); accs = next_access_to_optimize (accs))
-    gen_min_mod (accs, dlg, dlg.lookahead_count (*this, accs), true);
+  typedef cond_iterator<iterator, access_to_optimize> acc_opt_iter;
+  
+  for (acc_opt_iter accs = begin<access_to_optimize> (),
+       accs_end = end<access_to_optimize> (); accs != accs_end; ++accs)
+    gen_min_mod (accs, dlg, dlg.lookahead_count (*this, (iterator)accs), true);
 
-  for (access_sequence::iterator accs = accesses ().begin ();
-       accs != accesses ().end ();)
+  typedef access_type_matches<reg_mod> reg_mod_match;
+  typedef cond_iterator<iterator, reg_mod_match> reg_mod_iter;
+
+  for (reg_mod_iter accs = begin<reg_mod_match> (),
+       accs_end = end<reg_mod_match> (); accs != accs_end; )
     {
-      if (accs->access_type () == reg_mod)
-        {
-          // Mark the reg_mod accesses as "unused" again.
-          accs->reset_used ();
+      // Mark the reg_mod accesses as "unused" again.
+      accs->reset_used ();
 
-          // Remove any unused reg <- constant copy that might have been
-          // added while trying different accesses.
-          if (accs->original_address ().has_no_base_reg ()
-              && accs->original_address ().has_no_index_reg ())
-            {
-              access_sequence::iterator next_acc = accs;
-              ++next_acc;
-              if (!reg_used_in_sequence (accs->address_reg (), next_acc))
-                {
-                  accs = remove_access (accs);
-                  continue;
-                }
+      // Remove any unused reg <- constant copy that might have been
+      // added while trying different accesses.
+      if (accs->original_address ().has_no_base_reg ()
+	  && accs->original_address ().has_no_index_reg ())
+	{
+	  if (!reg_used_in_sequence (accs->address_reg (), stdx::next (accs)))
+	    {
+	      accs = remove_access (accs);
+	      continue;
             }
         }
       ++accs;
@@ -1689,7 +1620,7 @@ gen_address_mod (delegate& dlg)
 // If RECORD_IN_SEQUENCE is false, don't insert the actual modifications
 // in the sequence, only calculate the cost.
 int sh_ams::access_sequence::
-gen_min_mod (access_sequence::iterator acc, delegate& dlg,
+gen_min_mod (cond_iterator<iterator, access_to_optimize> acc, delegate& dlg,
              int lookahead_num, bool record_in_sequence)
 {
   const addr_expr& ae = acc->address ();
@@ -1707,9 +1638,8 @@ gen_min_mod (access_sequence::iterator acc, delegate& dlg,
   addr_expr min_end_base, min_end_index;
   mod_tracker tracker;
 
-  access_sequence::iterator next_acc = lookahead_num
-                                     ? next_access_to_optimize (acc)
-                                     : accesses ().end ();
+  cond_iterator<iterator, access_to_optimize> next_acc =
+	lookahead_num ? stdx::next (acc) : end<access_to_optimize> ();
 
   // Go through the alternatives for this access and keep
   // track of the one with minimal costs.
@@ -2802,8 +2732,7 @@ void sh_ams::access_sequence::find_reg_uses (void)
       if (accs->access_type () == reg_use)
         continue;
 
-      access_sequence::iterator next_acc = accs;
-      ++next_acc;
+      access_sequence::iterator next_acc = stdx::next (accs);
       used_regs.clear ();
       collect_addr_reg_uses (*this, accs->insn (),
                              next_acc == accesses ().end ()
@@ -3072,19 +3001,27 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("\n\n");
 
       log_msg ("updating access alternatives\n");
-      for (access_sequence::iterator it = as.first_access_to_optimize ();
-           it != as.accesses ().end (); it = as.next_access_to_optimize (it))
-        as.update_access_alternatives (m_delegate, it);
+      {
+	typedef access_to_optimize match;
+	typedef cond_iterator<access_sequence::iterator, match> acc_opt_iter;
+  
+	for (acc_opt_iter a = as.begin<match> (), a_end = as.end<match> ();
+	     a != a_end; ++a)
+	  as.update_access_alternatives (m_delegate, a);
+      }
 
       log_msg ("updating costs\n");
+      {
+	typedef access_type_matches<load, store> match;
+	typedef cond_iterator<access_sequence::iterator, match> iter;
 
-      for (access_sequence::iterator mem_acc = as.first_mem_access ();
-           mem_acc != as.accesses ().end ();
-           mem_acc = as.next_mem_access (mem_acc))
-        for (access::alternative_set::iterator
-		alt = mem_acc->alternatives ().begin ();
-             alt != mem_acc->alternatives ().end (); ++alt)
-          m_delegate.adjust_alternative_costs (*alt, as, mem_acc);
+	for (iter m = as.begin<match> (), mend = as.end<match> ();
+	     m != mend; ++m)
+	  for (access::alternative_set::iterator
+		alt = m->alternatives ().begin ();
+	       alt != m->alternatives ().end (); ++alt)
+	    m_delegate.adjust_alternative_costs (*alt, as, m.base_iterator ());
+      }
 
       as.update_cost (m_delegate);
       int original_cost = as.cost ();

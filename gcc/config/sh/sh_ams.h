@@ -40,10 +40,23 @@ public:
 
   operator Iter (void) const { return m_i; }
 
+  // FIXME: the base_iterator wouldn't be needed if conversions to const
+  // iterator and to const iterator of Iter worked.
+  Iter base_iterator (void) const { return m_i; }
+
   void swap (cond_iterator& other)
   {
     std::swap (m_i, other.m_i);
     std::swap (m_end, other.m_end);
+  }
+
+  cond_iterator& operator = (Iter i)
+  {
+    Cond cond;
+    for (; i != m_end && !cond (*i); ++i);
+
+    m_i = i;
+    return *this;
   }
   
   cond_iterator& operator ++ (void)
@@ -621,6 +634,8 @@ public:
     }
   };
 
+  struct access_to_optimize;
+
 
   // Return true if the effective address of FIRST and SECOND only differs in
   // the constant displacement and the difference is the access size of FIRST.
@@ -818,20 +833,6 @@ public:
       return iter (m_accs.end (), iter::make_end);
     }
         
-
-
-    iterator first_mem_access (void);
-    iterator next_mem_access (iterator i);
-    const_iterator first_mem_access (void) const;
-    const_iterator next_mem_access (const_iterator i) const;
-
-    // find the first/next access in this sequence that should be
-    // optimized by gen_address_mod.
-    iterator first_access_to_optimize (void);
-    iterator next_access_to_optimize (iterator i);
-    const_iterator first_access_to_optimize (void) const;
-    const_iterator next_access_to_optimize (const_iterator i) const;
-
   private:
 
     // A structure for keeping track of modifications to the access sequence.
@@ -871,7 +872,7 @@ public:
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
 
-    int gen_min_mod (access_sequence::iterator acc,
+    int gen_min_mod (cond_iterator<iterator, access_to_optimize> acc,
                      delegate& dlg, int lookahead_num,
                      bool record_in_sequence);
 
