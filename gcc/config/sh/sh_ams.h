@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <iterator>
 
 class sh_ams : public rtl_opt_pass
 {
@@ -312,7 +313,7 @@ public:
     public:
       alternative (void) { }
 
-      alternative (const addr_expr& ae, int cost)
+      alternative (int cost, const addr_expr& ae)
       : m_addr_expr (ae), m_cost (cost) { }
 
       const addr_expr& address (void) const { return m_addr_expr; }
@@ -324,6 +325,81 @@ public:
     private:
       addr_expr m_addr_expr;
       int m_cost;
+    };
+
+    // for now the alternative set is basically a boost::static_vector.
+    class alternative_set
+    {
+    public:
+      typedef alternative value_type;
+      
+      // copied from std::array
+      typedef value_type*			      pointer;
+      typedef const value_type*                       const_pointer;
+      typedef value_type&                   	      reference;
+      typedef const value_type&             	      const_reference;
+      typedef value_type*          		      iterator;
+      typedef const value_type*			      const_iterator;
+      typedef unsigned int                    	      size_type;
+      typedef std::ptrdiff_t                   	      difference_type;
+      typedef std::reverse_iterator<iterator>	      reverse_iterator;
+      typedef std::reverse_iterator<const_iterator>   const_reverse_iterator;
+
+      alternative_set (void) : m_size (0) { }
+
+      reference at (size_type pos);
+      const_reference at (size_type pos) const;
+      
+      reference operator [] (size_type pos) { return m_data[pos]; }
+      const_reference operator [] (size_type pos) const { return m_data[pos]; }
+
+      reference front (void) { return m_data[0]; }
+      const_reference front (void) const { m_data[0]; }
+
+      reference back (void) { return m_data[m_size - 1]; }
+      const_reference back (void) const { return m_data[m_size - 1]; }
+      
+      pointer data (void) { return m_data; }
+      const_pointer data (void) const { return m_data; }
+      
+      iterator begin (void) { return m_data; }
+      const_iterator begin (void) const { return m_data; }
+      const_iterator cbegin (void) const { return m_data; }
+
+      iterator end (void) { return m_data + size (); }
+      const_iterator end (void) const { return m_data + size (); }
+      const_iterator cend (void) const { return m_data + size (); }
+
+      reverse_iterator rbegin (void) { return reverse_iterator (end ()); }
+
+      const_reverse_iterator
+      rbegin (void) const { return const_reverse_iterator (end ()); }
+
+      const_reverse_iterator
+      crbegin (void) const { return const_reverse_iterator (end ()); }
+
+      reverse_iterator rend (void) { return reverse_iterator (begin ()); }
+
+      const_reverse_iterator
+      rend (void) const { return const_reverse_iterator (begin ()); }
+
+      const_reverse_iterator
+      crend (void) const { return const_reverse_iterator (begin ()); }
+
+      bool empty (void) const { return size () == 0; }
+      size_type size (void) const { return m_size; }
+      size_type max_size (void) const { return max_data_size; }
+      size_type capacity (void) const { return max_data_size; }
+
+      void clear (void) { m_size = 0; }
+      void push_back (const value_type& v);
+      void pop_back (void) { --m_size; }
+      
+    private:
+      enum { max_data_size = 16 };
+
+      size_type m_size;
+      alternative m_data[max_data_size];
     };
 
     access (rtx_insn* insn, rtx* mem, access_type_t access_type,
@@ -409,36 +485,8 @@ public:
     const std::vector<rtx_insn*>& trailing_insns (void) const
     { return m_trailing_insns; }
 
-    access& add_alternative (int costs, const addr_expr& ae)
-    {
-      gcc_assert (m_alternatives_count < MAX_ALTERNATIVES);
-      m_alternatives[m_alternatives_count++] = alternative (ae, costs);
-      return *this;
-    }
-
-    void clear_alternatives (void) { m_alternatives_count = 0; }
-
-    int alternatives_count (void) const { return m_alternatives_count; }
-
-    alternative* begin_alternatives (void)
-    {
-      return &(m_alternatives[0]);
-    }
-
-    alternative* end_alternatives (void)
-    {
-      return begin_alternatives () + m_alternatives_count;
-    }
-
-    const alternative* begin_alternatives (void) const
-    {
-      return &(m_alternatives[0]);
-    }
-
-    const alternative* end_alternatives (void) const
-    {
-      return begin_alternatives () + m_alternatives_count;
-    }
+    alternative_set& alternatives (void) { return m_alternatives; }
+    const alternative_set& alternatives (void) const { return m_alternatives; }
 
     bool matches_alternative (const alternative& alt) const;
 
@@ -487,14 +535,7 @@ public:
     int m_inc_chain_length;
     int m_dec_chain_length;
 
-    // all available alternatives for this access as reported by the target.
-    enum
-    {
-      MAX_ALTERNATIVES = 16
-    };
-
-    int m_alternatives_count;
-    alternative m_alternatives[MAX_ALTERNATIVES];
+    alternative_set m_alternatives;
   };
 
   class access_sequence
@@ -537,11 +578,12 @@ public:
 				     access_sequence::iterator acc)
     {
       if (acc->access_type () == load || acc->access_type () == store)
-	dlg.mem_access_alternatives (*acc, *this, acc);
+	dlg.mem_access_alternatives (acc->alternatives (), *this, acc);
       else
 	// If the access isn't a true memory access, the
 	// address has to be loaded into a single register.
-	acc->add_alternative (0, make_reg_addr ());
+	acc->alternatives ().push_back (
+		access::alternative (0, make_reg_addr ()));
     }
 
     access&
@@ -775,7 +817,7 @@ public:
   {
     // provide alternatives for the specified access.
     // use access::add_alternative.
-    virtual void mem_access_alternatives (sh_ams::access& a,
+    virtual void mem_access_alternatives (access::alternative_set& alt,
                                           const access_sequence& as,
                                           access_sequence::const_iterator acc) = 0;
 
@@ -1013,5 +1055,25 @@ inline sh_ams::post_mod_addr
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
+inline sh_ams::access::alternative_set::reference
+sh_ams::access::alternative_set::at (size_type pos)
+{
+  gcc_assert (pos < size ());
+  return m_data[pos];
+}
+
+inline sh_ams::access::alternative_set::const_reference
+sh_ams::access::alternative_set::at (size_type pos) const
+{
+  gcc_assert (pos < size ());
+  return m_data[pos];
+}
+
+inline void
+sh_ams::access::alternative_set::push_back (const value_type& e)
+{
+  gcc_assert (size () < max_size ());
+  m_data[m_size++] = e;
+}
 
 #endif // includeguard_gcc_sh_ams_includeguard

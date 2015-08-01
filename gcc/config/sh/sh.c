@@ -821,7 +821,7 @@ extern opt_pass* make_pass_sh_optimize_sett_clrt (gcc::context* ctx,
 static struct ams_delegate : public sh_ams::delegate
 {
   virtual void
-  mem_access_alternatives (sh_ams::access& a,
+  mem_access_alternatives (sh_ams::access::alternative_set& alt,
 			   const sh_ams::access_sequence& as,
 			   sh_ams::access_sequence::const_iterator acc);
   virtual void
@@ -13727,12 +13727,19 @@ sh_find_equiv_gbr_addr (rtx_insn* insn, rtx mem)
 
 // similar to sh_address_cost, but for the AMS pass.
 void ams_delegate::
-mem_access_alternatives (sh_ams::access& a,
+mem_access_alternatives (sh_ams::access::alternative_set& alt,
 			 const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
 			 sh_ams::access_sequence::const_iterator acc
 			 ATTRIBUTE_UNUSED)
 
 {
+  typedef sh_ams::access::alternative alternative;
+  std::back_insert_iterator <sh_ams::access::alternative_set> alts (alt);
+
+  const machine_mode acc_mode = acc->mach_mode ();
+  const int acc_size = acc->access_size ();
+  const sh_ams::addr_expr& addr = acc->address ();
+
   // FIXME: determine R0 extra cost dynamically, based on what is happening
   // around the memory access.
   // if there are insns that are likely to use R0 (tst #imm, and/or/xor #imm)
@@ -13755,7 +13762,7 @@ mem_access_alternatives (sh_ams::access& a,
   // on pseudos before RA will work.  but when ran after RA, AMS will have to
   // deal with hard-regs and do the checking on register classes + reg numbers.
   // this is some sort of register constraint handling.
-  if (sh_ams::get_regno (a.address ().base_reg ()) == GBR_REG)
+  if (sh_ams::get_regno (addr.base_reg ()) == GBR_REG)
   {
     // A GBR relative address.  Sticking to the GBR base reg is the cheapest
     // and also allows for the largest displacement.
@@ -13766,10 +13773,10 @@ mem_access_alternatives (sh_ams::access& a,
 
     //if (REG_P (a.other_operand ()) && FP_REGISTER_P (a.other_operand ()))
 
-    if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
+    if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
       {
-	a.add_alternative (1, sh_ams::make_disp_addr (get_gbr_reg_rtx (), 0,
-			   255 * a.access_size ()));
+        *alts++ = alternative (1, sh_ams::make_disp_addr (get_gbr_reg_rtx (), 0,
+							  255 * acc_size));
 	gbr_extra_cost = 2;
       }
   }
@@ -13781,45 +13788,51 @@ mem_access_alternatives (sh_ams::access& a,
   // Y0, Y1, FPSCR, FPUL.
   // FIXME: also constant pool loads (LABEL_REF?).
   // FIXME: also mac.w and mac.l insns (post-inc loads only).
-  a.add_alternative (1 + gbr_extra_cost, sh_ams::make_reg_addr ());
+  *alts++ = alternative (1 + gbr_extra_cost, sh_ams::make_reg_addr ());
 
-  if (GET_MODE_CLASS (a.mach_mode ()) != MODE_FLOAT)
+  if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
-      if (a.access_type () == sh_ams::load && TARGET_SH2A)
-	a.add_alternative (1 + r0_extra_cost + gbr_extra_cost,
-			   sh_ams::make_pre_dec_addr (a.mach_mode ()));
+      if (acc->access_type () == sh_ams::load && TARGET_SH2A)
+	*alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost,
+			       sh_ams::make_pre_dec_addr (acc_mode));
 
-      if (a.access_type () == sh_ams::store && TARGET_SH2A)
-	a.add_alternative (1 + r0_extra_cost + gbr_extra_cost,
-			   sh_ams::make_post_inc_addr (a.mach_mode ()));
+      if (acc->access_type () == sh_ams::store && TARGET_SH2A)
+	*alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost,
+			       sh_ams::make_post_inc_addr (acc_mode));
 
       // QImode and HImode accesses with displacements work with R0 only,
       // thus charge extra.
-      a.add_alternative (
-	  1 + (a.access_size () < 4 ? r0_extra_cost : 0) + gbr_extra_cost,
-	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), false)));
+      const int disp_cost = 1 + (acc_size < 4 ? r0_extra_cost : 0)
+			    + gbr_extra_cost;
+      const int max_disp = sh_max_mov_insn_displacement (acc_mode, false);
+
+      *alts++ = alternative (disp_cost, sh_ams::make_disp_addr (0, max_disp));
     }
 
   // indexed addressing has to use R0 for either base or index reg.
-  a.add_alternative (1 + gbr_extra_cost + r0_extra_cost,
-		     sh_ams::make_index_addr ());
+  *alts++ = alternative (1 + gbr_extra_cost + r0_extra_cost,
+			 sh_ams::make_index_addr ());
 
   // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
   // everything.
-  if (a.access_type () == sh_ams::load)
-    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_post_inc_addr (a.mach_mode ()));
-  else if (a.access_type () == sh_ams::store)
-    a.add_alternative (1 + gbr_extra_cost, sh_ams::make_pre_dec_addr (a.mach_mode ()));
+  if (acc->access_type () == sh_ams::load)
+   *alts++ = alternative (1 + gbr_extra_cost,
+			  sh_ams::make_post_inc_addr (acc_mode));
+  else if (acc->access_type () == sh_ams::store)
+    *alts++ = alternative (1 + gbr_extra_cost,
+			   sh_ams::make_pre_dec_addr (acc_mode));
 
   // On SH2A we can do larger displacements and also do FP modes with
   // displacements, but those are 32 bit insns, which we generally try to avoid.
   // FIXME: maybe this is a good alternative for GBR access (i.e. reduce cost
   // in this case if base reg is GBR)
   if (TARGET_SH2A)
-    a.add_alternative (
-	  3 + gbr_extra_cost,
-	  sh_ams::make_disp_addr (0, sh_max_mov_insn_displacement (a.mach_mode (), true)));
+    {
+      const int max_disp = sh_max_mov_insn_displacement (acc_mode, true);
+      *alts++ = alternative (3 + gbr_extra_cost,
+			     sh_ams::make_disp_addr (0, max_disp));
+    }
 }
 
 void ams_delegate::
@@ -13835,12 +13848,12 @@ adjust_alternative_costs (sh_ams::access::alternative& alt,
       && (alt.address ().disp_min () != 0 || alt.address ().disp_max () != 0)
       && acc->access_size () < 4)
     {
-      for (const sh_ams::access::alternative*
-             alts = acc->begin_alternatives (); ; ++alts)
+      for (sh_ams::access::alternative_set::const_iterator
+             alt = acc->alternatives ().begin (); ; ++alt)
         {
-          if (alts == acc->end_alternatives ())
+          if (alt == acc->alternatives ().end ())
             return;
-          if (alts->address ().type () == sh_ams::post_mod)
+          if (alt->address ().type () == sh_ams::post_mod)
             break;
         }
 
@@ -13902,9 +13915,9 @@ addr_reg_plus_reg_cost (const_rtx reg,
           || next_acc->access_type () == sh_ams::store)
       && next_acc->address () == acc->address ())
     {
-      for (const sh_ams::access::alternative*
-	     alt = next_acc->begin_alternatives ();
-	   alt != next_acc->end_alternatives (); ++alt)
+      for (sh_ams::access::alternative_set::const_iterator
+	     alt = next_acc->alternatives ().begin ();
+	   alt != next_acc->alternatives ().end (); ++alt)
 	{
 	  if (alt->address ().base_reg () == sh_ams::any_regno
 	      && alt->address ().index_reg () == sh_ams::any_regno)

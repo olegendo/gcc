@@ -238,10 +238,11 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
       && (a.access_type () == sh_ams::load
 	  || a.access_type () == sh_ams::store))
     {
-      log_msg ("\n  %d alternatives:\n", a.alternatives_count ());
+      log_msg ("\n  %d alternatives:\n", a.alternatives ().size ());
       int alt_count = 0;
-      for (const sh_ams::access::alternative* alt = a.begin_alternatives ();
-           alt != a.end_alternatives (); ++alt)
+      for (sh_ams::access::alternative_set::const_iterator
+		alt = a.alternatives ().begin ();
+           alt != a.alternatives ().end (); ++alt)
         {
           if (alt_count > 0)
             log_msg ("\n");
@@ -473,7 +474,6 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_used = false;
   m_inc_chain_length = 1;
   m_dec_chain_length = 1;
-  m_alternatives_count = 0;
 }
 
 // Constructor for reg_mod accesses.
@@ -494,7 +494,6 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_used = false;
   m_inc_chain_length = 1;
   m_dec_chain_length = 1;
-  m_alternatives_count = 0;
 }
 
 // Constructor for reg_use accesses.
@@ -516,7 +515,6 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_used = false;
   m_inc_chain_length = 1;
   m_dec_chain_length = 1;
-  m_alternatives_count = 0;
 }
 
 bool
@@ -1720,8 +1718,8 @@ gen_min_mod (access_sequence::iterator acc, delegate& dlg,
 
   // Go through the alternatives for this access and keep
   // track of the one with minimal costs.
-  for (access::alternative* alt = acc->begin_alternatives ();
-       alt != acc->end_alternatives (); ++alt)
+  for (access::alternative_set::iterator alt = acc->alternatives ().begin ();
+       alt != acc->alternatives ().end (); ++alt)
     {
       const addr_expr& alt_ae = alt->address ();
       addr_expr end_base, end_index;
@@ -1814,7 +1812,7 @@ gen_min_mod (access_sequence::iterator acc, delegate& dlg,
   if (record_in_sequence)
     {
       log_msg ("  min alternative: %d  min costs = %d\n",
-               (int)(min_alternative - acc->begin_alternatives ()),
+               (int)(min_alternative - acc->alternatives ().begin ()),
                min_cost);
       gen_mod_for_alt (*min_alternative,
                        min_start_base, min_start_index,
@@ -2232,15 +2230,15 @@ void sh_ams::access_sequence::update_cost (delegate& dlg)
           // FIXME: when selecting an alternative, remember the alternative
           // iterator as the "currently selected alternative".  then we don't
           // need to find it over and over again.
-          for (const sh_ams::access::alternative* alt
-                 = accs->begin_alternatives (); ; ++alt)
+          for (access::alternative_set::const_iterator alt
+                 = accs->alternatives ().begin (); ; ++alt)
             {
               if (accs->matches_alternative (*alt))
                 {
                   accs->set_cost (alt->cost ());
                   break;
                 }
-              if (alt == accs->end_alternatives ())
+              if (alt == accs->alternatives ().end ())
                 gcc_unreachable ();
             }
         }
@@ -2345,8 +2343,9 @@ bool sh_ams::access_sequence::cost_already_minimal (void) const
     {
       if (accs->access_type () == load || accs->access_type () == store)
         {
-          for (const access::alternative* alt = accs->begin_alternatives ();
-               alt != accs->end_alternatives (); ++alt)
+          for (access::alternative_set::const_iterator
+		  alt = accs->alternatives ().begin ();
+               alt != accs->alternatives ().end (); ++alt)
             {
               if (alt->cost () < accs->cost ())
                 return false;
@@ -3095,8 +3094,9 @@ unsigned int sh_ams::execute (function* fun)
       for (access_sequence::iterator mem_acc = as.first_mem_access ();
            mem_acc != as.accesses ().end ();
            mem_acc = as.next_mem_access (mem_acc))
-        for (access::alternative* alt = mem_acc->begin_alternatives ();
-             alt != mem_acc->end_alternatives (); ++alt)
+        for (access::alternative_set::iterator
+		alt = mem_acc->alternatives ().begin ();
+             alt != mem_acc->alternatives ().end (); ++alt)
           m_delegate.adjust_alternative_costs (*alt, as, mem_acc);
 
       as.update_cost (m_delegate);
