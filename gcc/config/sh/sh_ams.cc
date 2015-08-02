@@ -619,7 +619,7 @@ void
 sh_ams::access::set_insn (rtx_insn* new_insn)
 {
   // FIXME: maybe add some consistency checks here?
-  m_insn = new_insn; 
+  m_insn = new_insn;
 }
 
 // Create a reg_mod access and add it to the access sequence.
@@ -1588,7 +1588,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg)
     }
 
   typedef cond_iterator<iterator, access_to_optimize> acc_opt_iter;
-  
+
   for (acc_opt_iter accs = begin<access_to_optimize> (),
        accs_end = end<access_to_optimize> (); accs != accs_end; ++accs)
     gen_min_mod (accs, dlg, dlg.lookahead_count (*this, (iterator)accs), true);
@@ -1800,6 +1800,8 @@ sh_ams::access_sequence::gen_mod_for_alt (access::alternative& alternative,
 
   // Update the original_addr_expr of the access with the
   // alternative.
+  mod_tracker.addr_changed_accs ()
+    .push_back (std::make_pair (&(*acc), acc->original_address ()));
   acc->set_original_address (alternative.cost (), new_addr_expr);
 }
 
@@ -1898,7 +1900,7 @@ start_addr_list::remove (access* start_addr)
 }
 
 // Write the sequence into the insn stream.
-void 
+void
 sh_ams::access_sequence
 ::update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns)
 {
@@ -2240,7 +2242,8 @@ sh_ams::access_sequence::get_clone_cost (access_sequence::iterator& acc,
   if (reused_reg == acc->address_reg ())
     return 0;
 
-  for (access_sequence::iterator prev_accs = accesses ().begin (); ; ++prev_accs)
+  for (access_sequence::iterator prev_accs = accesses ().begin ();
+       prev_accs != acc; ++prev_accs)
     {
       if (prev_accs->access_type () == reg_mod
           && prev_accs->address_reg () == reused_reg)
@@ -2748,7 +2751,7 @@ sh_ams::access_sequence::find_reg_uses (void)
 
   if (!last_insn)
     return;
-    
+
   // Add trailing address reg uses to the end of the sequence.
   for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
@@ -2862,7 +2865,7 @@ void sh_ams::access_sequence::calculate_adjacency_info (void)
 	  ++m;
 	}
     }
-  
+
   for (iter m = begin<match> (), mend = end<match> (); m != mend; )
     {
       iter dec_end = std::adjacent_find (m, mend, not_adjacent_dec);
@@ -2998,7 +3001,7 @@ unsigned int sh_ams::execute (function* fun)
       {
 	typedef access_to_optimize match;
 	typedef cond_iterator<access_sequence::iterator, match> iter;
-  
+
 	for (iter a = as.begin<match> (), a_end = as.end<match> ();
 	     a != a_end; ++a)
 	  as.update_access_alternatives (m_delegate, a);

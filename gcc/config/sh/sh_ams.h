@@ -18,7 +18,7 @@ class cond_iterator
   			 typename std::iterator_traits<Iter>::value_type,
   			 typename std::iterator_traits<Iter>::difference_type,
   			 typename std::iterator_traits<Iter>::pointer,
-  			 typename std::iterator_traits<Iter>::reference>				   
+  			 typename std::iterator_traits<Iter>::reference>
 {
 public:
   enum make_begin_tag { make_begin };
@@ -58,16 +58,16 @@ public:
     m_i = i;
     return *this;
   }
-  
+
   cond_iterator& operator ++ (void)
   {
     Cond cond;
     Iter i = m_i;
     ++i;
     for (; i != m_end && !cond (*i); ++i);
-    
+
     m_i = i;
-    return *this;  
+    return *this;
   }
 
   cond_iterator operator ++ (int)
@@ -415,7 +415,7 @@ public:
     {
     public:
       typedef alternative value_type;
-      
+
       // copied from std::array
       typedef value_type*			      pointer;
       typedef const value_type*                       const_pointer;
@@ -432,7 +432,7 @@ public:
 
       reference at (size_type pos);
       const_reference at (size_type pos) const;
-      
+
       reference operator [] (size_type pos) { return m_data[pos]; }
       const_reference operator [] (size_type pos) const { return m_data[pos]; }
 
@@ -441,10 +441,10 @@ public:
 
       reference back (void) { return m_data[m_size - 1]; }
       const_reference back (void) const { return m_data[m_size - 1]; }
-      
+
       pointer data (void) { return m_data; }
       const_pointer data (void) const { return m_data; }
-      
+
       iterator begin (void) { return m_data; }
       const_iterator begin (void) const { return m_data; }
       const_iterator cbegin (void) const { return m_data; }
@@ -477,7 +477,7 @@ public:
       void clear (void) { m_size = 0; }
       void push_back (const value_type& v);
       void pop_back (void) { --m_size; }
-      
+
     private:
       enum { max_data_size = 16 };
 
@@ -578,7 +578,7 @@ public:
     // chain.
     const adjacent_chain& inc_chain (void) const { return m_inc_chain; }
     const adjacent_chain& dec_chain (void) const { return m_dec_chain; }
-    
+
     void set_inc_chain (const adjacent_chain& c) { m_inc_chain = c; }
     void set_dec_chain (const adjacent_chain& c) { m_dec_chain = c; }
 
@@ -811,7 +811,7 @@ public:
       typedef cond_iterator<iterator, Match> iter;
       return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
     }
-    
+
     template <typename Match>
     cond_iterator<iterator, Match> end (void)
     {
@@ -825,14 +825,14 @@ public:
       typedef cond_iterator<const_iterator, Match> iter;
       return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
     }
-    
+
     template <typename Match>
     cond_iterator<const_iterator, Match> end (void) const
     {
       typedef cond_iterator<const_iterator, Match> iter;
       return iter (m_accs.end (), iter::make_end);
     }
-        
+
   private:
 
     // A structure for keeping track of modifications to the access sequence.
@@ -842,19 +842,26 @@ public:
     public:
       mod_tracker (void)
       {
-	m_inserted_accs.reserve (8);
-	m_use_changed_accs.reserve (4);
+        m_inserted_accs.reserve (8);
+        m_use_changed_accs.reserve (4);
+        m_addr_changed_accs.reserve (4);
       }
 
       void reset_changes (access_sequence &as)
       {
-	std::for_each (inserted_accs ().begin (), inserted_accs ().end (),
+        std::for_each (inserted_accs ().begin (), inserted_accs ().end (),
             std::bind1st (std::mem_fun (&access_sequence::remove_access), &as));
-	inserted_accs ().clear ();
+        inserted_accs ().clear ();
 
-	std::for_each (use_changed_accs ().begin (), use_changed_accs ().end (),
+        std::for_each (use_changed_accs ().begin (), use_changed_accs ().end (),
             std::mem_fun (&access::reset_used));
-	use_changed_accs ().clear ();
+        use_changed_accs ().clear ();
+
+        for (std::vector<std::pair <access* , addr_expr> >::iterator
+               it = addr_changed_accs ().begin ();
+             it != addr_changed_accs ().end (); ++it)
+          it->first->set_original_address (0, it->second);
+        addr_changed_accs ().clear ();
       }
 
       // List of accesses that were inserted into the sequence.
@@ -865,9 +872,15 @@ public:
       std::vector<access*>&
       use_changed_accs (void) { return m_use_changed_accs; }
 
+      // List of accesses whose M_ORIGINAL_ADDR_EXPR changed, along
+      // with their previous values.
+      std::vector<std::pair <access* , addr_expr> >&
+      addr_changed_accs (void) { return m_addr_changed_accs; }
+
     private:
       std::vector<access_sequence::iterator> m_inserted_accs;
       std::vector<access*> m_use_changed_accs;
+      std::vector<std::pair <access* , addr_expr> > m_addr_changed_accs;
     };
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
