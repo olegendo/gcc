@@ -51,6 +51,7 @@
 #include <list>
 #include <vector>
 #include <set>
+#include <cstdlib>
 
 #include "sh_ams.h"
 
@@ -2438,10 +2439,12 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
         return mod_addr_result (infinite_costs, invalid_regno, 0);
 
       // We can only scale by integers.
-      if (c_end_addr.scale () % c_start_addr.scale () != 0)
+      std::div_t sr = std::div (c_end_addr.scale (), c_start_addr.scale ());
+
+      if (sr.rem != 0)
         return mod_addr_result (infinite_costs, invalid_regno, 0);
 
-      scale_t scale = c_end_addr.scale () / c_start_addr.scale ();
+      scale_t scale = sr.quot;
       c_start_addr = non_mod_addr (invalid_regno, c_start_addr.index_reg (),
                                    c_end_addr.scale (), 0);
 
