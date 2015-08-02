@@ -1605,7 +1605,8 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg)
       if (accs->original_address ().has_no_base_reg ()
 	  && accs->original_address ().has_no_index_reg ())
 	{
-	  if (!reg_used_in_sequence (accs->address_reg (), stdx::next (accs)))
+	  if (!reg_used_in_sequence (accs->address_reg (),
+				     stdx::next ((iterator)accs)))
 	    {
 	      accs = remove_access (accs);
 	      continue;
