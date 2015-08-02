@@ -419,6 +419,14 @@ next (ForwardIt it,
   return it;
 }
 
+template<class BidirIt> BidirIt
+prev (BidirIt it,
+      typename std::iterator_traits<BidirIt>::difference_type n = 1)
+{
+  std::advance (it, -n);
+  return it;
+}
+
 } // namespace stdx
 
 
@@ -1481,10 +1489,8 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
       else
         {
           if (last_mem_acc == as.accesses ().end ())
-            {
-              last_mem_acc = accs.base ();
-              --last_mem_acc;
-            }
+            last_mem_acc = stdx::prev (accs.base ());
+
           rtx key = accs->address ().is_invalid () ? NULL
                                                    : accs->address ().base_reg ();
           std::pair<access_sequence*, std::set<rtx> >& new_seq = new_seqs[key];
@@ -1921,9 +1927,7 @@ update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns)
 
   // Create a new insn list for this sequence.
   sequence_mod_insns.push_back (mod_insn_list ());
-  std::list<mod_insn_list>::iterator new_insns = sequence_mod_insns.end ();
-  --new_insns;
-  update_mod_insns (new_insns);
+  update_mod_insns (stdx::prev (sequence_mod_insns.end ()));
 
   bool sequence_started = false;
   rtx_insn* last_insn = NULL;
@@ -2455,8 +2459,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                  c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
-      ins_place = access_place;
-      --ins_place;
+      ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
 
       cost += dlg.addr_reg_scale_cost (start_addr->address_reg (), scale,
@@ -2493,8 +2496,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                  c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
-      ins_place = access_place;
-      --ins_place;
+      ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
 
       cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
@@ -2527,8 +2529,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                  c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
-      ins_place = access_place;
-      --ins_place;
+      ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
 
       cost += dlg.addr_reg_plus_reg_cost (start_addr->address_reg (),
@@ -2582,8 +2583,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                   c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
-      ins_place = access_place;
-      --ins_place;
+      ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
 
       cost += dlg.addr_reg_disp_cost (start_addr->address_reg (), disp,
@@ -2617,8 +2617,7 @@ try_modify_addr (access* start_addr, const addr_expr& end_addr,
                                        c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
 
-      ins_place = access_place;
-      --ins_place;
+      ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
 
       new_addr->set_cost (cost - prev_cost);
@@ -2644,8 +2643,7 @@ void sh_ams::access_sequence::find_addr_regs (void)
         addr_regs ()[accs->address_reg ()] = &(*accs);
 
       // Search for REG_DEAD notes in the insns between this and the next access.
-      access_sequence::iterator next = accs;
-      ++next;
+      access_sequence::iterator next = stdx::next (accs);
       if (accs->insn () && next != accesses ().end () && !next->is_trailing ())
         {
           for (rtx_insn *i = accs->insn (); ; i = NEXT_INSN (i))
@@ -2915,9 +2913,8 @@ unsigned int sh_ams::execute (function* fun)
 
       // Construct the access sequence from the access insns.
       sequence_mod_insns.push_back (access_sequence::mod_insn_list ());
-      std::list<access_sequence::mod_insn_list>::iterator mod_insns
-        = sequence_mod_insns.end ();
-      --mod_insns;
+      std::list<access_sequence::mod_insn_list>::iterator mod_insns =
+					stdx::prev (sequence_mod_insns.end ());
 
       sequences.push_back (access_sequence (mod_insns));
       mod_insns->use ();
