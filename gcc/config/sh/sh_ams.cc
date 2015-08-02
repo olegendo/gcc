@@ -2862,7 +2862,10 @@ void sh_ams::access_sequence::calculate_adjacency_info (void)
   for (iter m = begin<match> (), mend = end<match> (); m != mend; )
     {
       iter inc_end = std::adjacent_find (m, mend, not_adjacent_inc);
-      const int inc_len = std::max (1, (int)std::distance (m, inc_end));
+      if (inc_end != mend)
+        ++inc_end;
+
+      const int inc_len = std::distance (m, inc_end);
 
       for (int i = 0; i < inc_len; ++i)
 	{
@@ -2874,7 +2877,10 @@ void sh_ams::access_sequence::calculate_adjacency_info (void)
   for (iter m = begin<match> (), mend = end<match> (); m != mend; )
     {
       iter dec_end = std::adjacent_find (m, mend, not_adjacent_dec);
-      const int dec_len = std::max (1, (int)std::distance (m, dec_end));
+      if (dec_end != mend)
+        ++dec_end;
+
+      const int dec_len = std::distance (m, dec_end);
 
       for (int i = 0; i < dec_len; ++i)
 	{
