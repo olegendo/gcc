@@ -80,6 +80,9 @@ public:
   bool operator == (const cond_iterator& rhs) const { return m_i == rhs.m_i; }
   bool operator != (const cond_iterator& rhs) const { return m_i != rhs.m_i; }
 
+  bool operator == (const Iter& rhs) const { return m_i == rhs; }
+  bool operator != (const Iter& rhs) const { return m_i != rhs; }
+
   typename std::iterator_traits<Iter>::reference
   operator * (void) const { return *m_i; }
 
