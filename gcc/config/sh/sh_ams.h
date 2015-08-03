@@ -972,25 +972,13 @@ public:
     virtual int lookahead_count (const access_sequence& as,
                                  access_sequence::const_iterator acc) = 0;
 
-    // provide the cost for adding a constant to the specified
-    // address register.
+    // provide the cost for setting the specified address register to
+    // an rtx expression.
     // the cost must be somehow relative to the cost provided for access
     // alternatives.
-    virtual int addr_reg_disp_cost (const_rtx reg, sh_ams::disp_t disp,
-                                    const access_sequence& as,
-                                    access_sequence::const_iterator acc) = 0;
-
-    // provide the cost for multiplying the specified address register
-    // by a constant.
-    virtual int addr_reg_scale_cost (const_rtx reg, sh_ams::scale_t scale,
-                                     const access_sequence& as,
-                                     access_sequence::const_iterator acc) = 0;
-
-    // provide the cost for adding another register to the specified
-    // address register.
-    virtual int addr_reg_plus_reg_cost (const_rtx reg, const_rtx disp_reg,
-                                        const access_sequence& as,
-                                        access_sequence::const_iterator acc) = 0;
+    virtual int addr_reg_mod_cost (const_rtx reg, const_rtx val,
+                                   const access_sequence& as,
+                                   access_sequence::const_iterator acc) = 0;
 
     // provide the cost for cloning the address register, which is usually
     // required when splitting an access sequence.  if (address) register
@@ -1001,12 +989,17 @@ public:
                                      const access_sequence& as,
                                      access_sequence::const_iterator acc) = 0;
 
-    // provide the cost of loading a constant into the address register.
-    virtual int const_load_cost (const_rtx reg, disp_t value,
-                                 const access_sequence& as,
-                                 access_sequence::const_iterator acc) = 0;
-
   };
+
+  static int
+  get_reg_mod_cost (delegate &dlg, const_rtx reg, const_rtx val,
+                    const access_sequence& as,
+                    access_sequence::const_iterator acc)
+  {
+    if (REG_P (val))
+      return 0;
+    return dlg.addr_reg_mod_cost (reg, val, as, acc);
+  }
 
   sh_ams (gcc::context* ctx, const char* name, delegate& dlg);
   virtual ~sh_ams (void);
