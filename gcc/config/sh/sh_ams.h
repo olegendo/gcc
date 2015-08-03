@@ -440,7 +440,7 @@ public:
       const_reference operator [] (size_type pos) const { return m_data[pos]; }
 
       reference front (void) { return m_data[0]; }
-      const_reference front (void) const { m_data[0]; }
+      const_reference front (void) const { return m_data[0]; }
 
       reference back (void) { return m_data[m_size - 1]; }
       const_reference back (void) const { return m_data[m_size - 1]; }
