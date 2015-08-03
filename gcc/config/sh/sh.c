@@ -13847,9 +13847,9 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
 }
 
 void ams_delegate::
-adjust_alternative_costs (sh_ams::access::alternative& alt,
+adjust_alternative_costs (sh_ams::access::alternative& alt ATTRIBUTE_UNUSED,
                           const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
-                          sh_ams::access_sequence::const_iterator acc)
+                          sh_ams::access_sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
 }
 
