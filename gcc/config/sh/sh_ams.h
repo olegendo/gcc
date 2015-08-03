@@ -512,7 +512,7 @@ public:
 	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
     access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
             rtx* reg_ref, addr_expr original_addr_expr,
-	    addr_expr addr_expr);
+	    addr_expr addr_expr, int cost);
     access (rtx addr_reg, addr_expr reg_value);
 
     // If m_access_type is REG_MOD, this access represents the modification
@@ -681,7 +681,7 @@ public:
       return reg_used_in_sequence (reg, accesses ().begin ());
     }
 
-    void find_reg_uses (void);
+    void find_reg_uses (delegate& dlg);
     void find_reg_end_values (void);
 
     void calculate_adjacency_info (void);
@@ -728,13 +728,13 @@ public:
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr,
 		 rtx* reg_ref,
-		 rtx_insn* use_insn);
+		 rtx_insn* use_insn, int cost);
     access&
     add_reg_use (access_sequence::iterator insert_before,
 		 const addr_expr& original_addr_expr,
 		 const addr_expr& addr_expr,
 		 rtx* reg_ref,
-		 std::vector<rtx_insn*> use_insns);
+		 std::vector<rtx_insn*> use_insns, int cost);
 
     access_sequence::iterator
     remove_access (access_sequence::iterator acc);

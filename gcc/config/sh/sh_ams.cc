@@ -504,10 +504,11 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
 // Constructor for reg_use accesses.
 sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
                         rtx* reg_ref,
-                        addr_expr original_addr_expr, addr_expr addr_expr)
+                        addr_expr original_addr_expr, addr_expr addr_expr,
+                        int cost)
 {
   m_access_type = reg_use;
-  m_cost = 0;
+  m_cost = cost;
   m_insn = insn;
   m_trailing_insns = trailing_insns;
   m_mem_ref = reg_ref;
@@ -742,12 +743,12 @@ sh_ams::access&
 sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
                                       const addr_expr& original_addr_expr,
                                       const addr_expr& addr_expr,
-                                      rtx* reg_ref, rtx_insn* use_insn)
+                                      rtx* reg_ref, rtx_insn* use_insn, int cost)
 {
   access_sequence::iterator inserted =
     accesses ().insert (insert_before,
                         access (use_insn, std::vector<rtx_insn*> (), reg_ref,
-                                original_addr_expr, addr_expr));
+                                original_addr_expr, addr_expr, cost));
   return *inserted;
 }
 
@@ -758,12 +759,12 @@ sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
                                       const addr_expr& original_addr_expr,
                                       const addr_expr& addr_expr,
                                       rtx* reg_ref,
-                                      std::vector<rtx_insn*> use_insns)
+                                      std::vector<rtx_insn*> use_insns, int cost)
 {
   access_sequence::iterator inserted =
     accesses ().insert (insert_before,
                         access (NULL, use_insns, reg_ref,
-                                original_addr_expr, addr_expr));
+                                original_addr_expr, addr_expr, cost));
   return *inserted;
 }
 
@@ -2733,7 +2734,7 @@ sh_ams::access_sequence
 // or address modifications, and add them to the sequence
 // as reg_use accesses.
 void
-sh_ams::access_sequence::find_reg_uses (void)
+sh_ams::access_sequence::find_reg_uses (delegate& dlg)
 {
   std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
   rtx_insn* last_insn = NULL;
@@ -2767,8 +2768,12 @@ sh_ams::access_sequence::find_reg_uses (void)
             = extract_addr_expr (*use_ref, use_insn, NULL, Pmode, this);
 
           if (!effective_addr.is_invalid ())
-            add_reg_use (next_acc, use_expr, effective_addr,
-                         use_ref, use_insn);
+            {
+              add_reg_use (next_acc, use_expr, effective_addr,
+                           use_ref, use_insn, 0);
+              access_sequence::iterator acc = stdx::prev (next_acc);
+              acc->set_cost (dlg.addr_reg_mod_cost (NULL, *use_ref, *this, acc));
+            }
         }
     }
 
@@ -2811,7 +2816,10 @@ sh_ams::access_sequence::find_reg_uses (void)
           add_reg_use (accesses ().end (),
                        original_addr,
                        original_addr,
-                       trailing_use_ref, insns);
+                       trailing_use_ref, insns, 0);
+          access_sequence::iterator acc = stdx::prev (accesses ().end ());
+          acc->set_cost (dlg.addr_reg_mod_cost (NULL, *trailing_use_ref,
+                                                *this, acc));
         }
     }
 }
@@ -2974,7 +2982,7 @@ unsigned int sh_ams::execute (function* fun)
       log_msg ("\n\n");
 
       log_msg ("find_reg_uses\n");
-      as.find_reg_uses ();
+      as.find_reg_uses (m_delegate);
 
       log_access_sequence (as, false);
       log_msg ("\n\n");
