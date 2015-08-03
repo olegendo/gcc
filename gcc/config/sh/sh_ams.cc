@@ -1,5 +1,8 @@
 
 #include "config.h"
+
+#include <iterator>
+
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -539,7 +542,7 @@ sh_ams::access::matches_alternative (const alternative& alt) const
 
       if (ae.scale () < alt_ae.scale_min ()
 	  || ae.scale () > alt_ae.scale_max ()
-	  || !registers_match (ae.index_reg (), alt_ae.index_reg ()))
+	  || !registers_match (ae.index_reg (), alt_ae.index_reg ()))
 	return false;
     }
 
