@@ -2293,7 +2293,7 @@ bool sh_ams::access_sequence::cost_already_minimal (void) const
                 return false;
             }
         }
-      else if (accs->access_type () == reg_mod && accs->cost () > 0)
+      else if (accs->cost () > 0)
         return false;
     }
   return true;
