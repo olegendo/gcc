@@ -6594,6 +6594,15 @@ label:
   [(set_attr "type" "load")
    (set_attr "length" "2,2,4")])
 
+(define_insn "*extend<mode>si2_predec"
+  [(set (match_operand:SI 0 "arith_reg_dest" "=z")
+	(sign_extend:SI
+	  (mem:QIHI
+	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "+r")))))]
+  "TARGET_SH2A"
+  "mov.<bw>	@%1-,%0"
+  [(set_attr "type" "load")])
+
 ;; The *_snd patterns will take care of other QImode/HImode addressing
 ;; modes than displacement addressing.  They must be defined _after_ the
 ;; displacement addressing patterns.  Otherwise the displacement addressing
@@ -7265,6 +7274,21 @@ label:
 	mov.<bw>	@(%O2,%1),%0"
   [(set_attr "type" "load")
    (set_attr "length" "2,2,4")])
+
+(define_insn "*mov<mode>_load_predec"
+  [(set (match_operand:QIHISI 0 "arith_reg_dest" "=z")
+	  (mem:QIHISI
+	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "+r"))))]
+  "TARGET_SH2A"
+  "mov.<bwl>	@%1-,%0"
+  [(set_attr "type" "load")])
+
+(define_insn "*mov<mode>_store_postinc"
+  [(set (mem:QIHISI (post_inc:SI (match_operand:SI 0 "arith_reg_operand" "+r")))
+	(match_operand:QIHISI 1 "arith_reg_operand" "z"))]
+  "TARGET_SH2A"
+  "mov.<bwl>	%1,@%0+"
+  [(set_attr "type" "store")])
 
 ;; The order of the constraint alternatives is important here.
 ;; Q/r has to come first, otherwise PC relative loads might wrongly get
