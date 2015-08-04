@@ -100,7 +100,6 @@ private:
 class sh_ams : public rtl_opt_pass
 {
 public:
-
   // the most complex non modifying address is of the form
   // 'base_reg + index_reg*scale + disp'.
 
@@ -128,14 +127,11 @@ public:
   static const rtx invalid_regno;
   static const rtx any_regno;
 
-  static regno_t get_regno (const_rtx x)
-  {
-    if (x == NULL)
-      return -1;
-    if (x == any_regno)
-      return -2;
-    return REGNO (x);
-  }
+  static regno_t get_regno (const_rtx x);
+
+  class access;
+  class access_sequence;
+  struct delegate;
 
   // we could use an abstract base class etc etc, but that usually implies
   // that we need to store objects thereof on the free store and keep the
@@ -224,75 +220,6 @@ public:
     post_mod_addr (rtx base_reg, disp_t disp);
   };
 
-  class access;
-  class access_sequence;
-
-  template <typename OutputIterator> static void
-  collect_addr_reg_uses (access_sequence& as, rtx addr_reg, rtx_insn *start_insn,
-                         rtx abort_at_insn, OutputIterator out,
-                         bool skip_addr_reg_mods,
-                         bool stay_in_curr_bb,
-                         bool stop_after_first);
-
-  template <typename OutputIterator> static void
-  collect_addr_reg_uses (access_sequence& as, rtx_insn *start_insn,
-                         rtx abort_at_insn, OutputIterator out,
-                         bool skip_addr_reg_mods,
-                         bool stay_in_curr_bb ,
-                         bool stop_after_first)
-    {
-      collect_addr_reg_uses (as, NULL, start_insn, abort_at_insn, out,
-                             skip_addr_reg_mods, stay_in_curr_bb,
-                             stop_after_first);
-    }
-
-  template <typename OutputIterator> static void
-  collect_addr_reg_uses_1 (access_sequence& as, rtx addr_reg,
-                           rtx_insn *start_insn, basic_block bb,
-                           std::vector<basic_block>& visited_bb,
-                           rtx abort_at_insn, OutputIterator out,
-                           bool skip_addr_reg_mods,
-                           bool stay_in_curr_bb,
-                           bool stop_after_first);
-
-  template <typename OutputIterator> static bool
-  collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
-                           rtx_insn *insn, rtx& x, OutputIterator out,
-                           bool skip_addr_reg_mods);
-
-  static void find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
-			      rtx_insn** mod_insn, machine_mode* auto_mod_mode);
-
-  static addr_expr extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
-				      machine_mode mem_mach_mode,
-				      access_sequence* as,
-				      std::vector<access*>& inserted_reg_mods);
-
-  static addr_expr extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn* root_insn,
-				      machine_mode mem_mach_mode,
-				      access_sequence* as)
-  {
-    std::vector<access*> inserted_reg_mods;
-    return extract_addr_expr (x, insn, root_insn, mem_mach_mode, as,
-			      inserted_reg_mods);
-  }
-
-  static addr_expr extract_addr_expr (rtx x, machine_mode mem_mach_mode = Pmode)
-  {
-    return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL);
-  }
-
-  static std::list<access_sequence>::iterator
-  split_access_sequence (std::list<access_sequence>::iterator as_it,
-                         std::list<access_sequence>& sequences);
-
-  static void
-  split_access_sequence_1 (
-    std::map<rtx, std::pair<sh_ams::access_sequence*, std::set<rtx> > >& new_seqs,
-    sh_ams::access &acc, bool add_to_front);
-
-  static void split_access_sequence_2 (std::set<rtx>& addr_regs,
-                                       sh_ams::access& acc);
 
   // helper functions to create a particular type of address expression.
   static addr_expr
@@ -330,8 +257,6 @@ public:
 
   static addr_expr
   make_invalid_addr (void);
-
-  struct delegate;
 
   // a memory access in the insn stream.
   class access
@@ -676,27 +601,14 @@ public:
     void add_missing_reg_mods (void);
 
     bool reg_used_in_sequence (rtx reg, access_sequence::iterator search_start);
-    bool reg_used_in_sequence (rtx reg)
-    {
-      return reg_used_in_sequence (reg, accesses ().begin ());
-    }
+    bool reg_used_in_sequence (rtx reg);
 
     void find_reg_uses (delegate& dlg);
     void find_reg_end_values (void);
 
     void calculate_adjacency_info (void);
 
-    void update_access_alternatives (delegate& dlg,
-				     access_sequence::iterator acc)
-    {
-      if (acc->access_type () == load || acc->access_type () == store)
-	dlg.mem_access_alternatives (acc->alternatives (), *this, acc);
-      else
-	// If the access isn't a true memory access, the
-	// address has to be loaded into a single register.
-	acc->alternatives ().push_back (
-		access::alternative (0, make_reg_addr ()));
-    }
+    void update_access_alternatives (delegate& d, access_sequence::iterator a);
 
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
@@ -988,18 +900,8 @@ public:
     virtual int addr_reg_clone_cost (const_rtx reg,
                                      const access_sequence& as,
                                      access_sequence::const_iterator acc) = 0;
-
   };
 
-  static int
-  get_reg_mod_cost (delegate &dlg, const_rtx reg, const_rtx val,
-                    const access_sequence& as,
-                    access_sequence::const_iterator acc)
-  {
-    if (REG_P (val))
-      return 0;
-    return dlg.addr_reg_mod_cost (reg, val, as, acc);
-  }
 
   sh_ams (gcc::context* ctx, const char* name, delegate& dlg);
   virtual ~sh_ams (void);
@@ -1007,10 +909,97 @@ public:
   virtual unsigned int execute (function* fun);
 
 private:
+  static int
+  get_reg_mod_cost (delegate &dlg, const_rtx reg, const_rtx val,
+                    const access_sequence& as,
+                    access_sequence::const_iterator acc);
+
+  static std::list<access_sequence>::iterator
+  split_access_sequence (std::list<access_sequence>::iterator as_it,
+                         std::list<access_sequence>& sequences);
+
+  static void
+  split_access_sequence_1 (std::map<rtx, std::pair<sh_ams::access_sequence*,
+						   std::set<rtx> > >& new_seqs,
+			   sh_ams::access &acc, bool add_to_front);
+
+  static void
+  split_access_sequence_2 (std::set<rtx>& addr_regs, sh_ams::access& acc);
+
+  template <typename OutputIterator> static void
+  collect_addr_reg_uses (access_sequence& as, rtx addr_reg,
+			 rtx_insn *start_insn, rtx abort_at_insn,
+			 OutputIterator out,
+                         bool skip_addr_reg_mods,
+                         bool stay_in_curr_bb,
+                         bool stop_after_first);
+
+  template <typename OutputIterator> static void
+  collect_addr_reg_uses (access_sequence& as, rtx_insn *start_insn,
+                         rtx abort_at_insn, OutputIterator out,
+                         bool skip_addr_reg_mods,
+                         bool stay_in_curr_bb ,
+                         bool stop_after_first)
+  {
+    collect_addr_reg_uses (as, NULL, start_insn, abort_at_insn, out,
+			   skip_addr_reg_mods, stay_in_curr_bb,
+			   stop_after_first);
+  }
+
+  template <typename OutputIterator> static void
+  collect_addr_reg_uses_1 (access_sequence& as, rtx addr_reg,
+                           rtx_insn *start_insn, basic_block bb,
+                           std::vector<basic_block>& visited_bb,
+                           rtx abort_at_insn, OutputIterator out,
+                           bool skip_addr_reg_mods,
+                           bool stay_in_curr_bb,
+                           bool stop_after_first);
+
+  template <typename OutputIterator> static bool
+  collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
+                           rtx_insn *insn, rtx& x, OutputIterator out,
+                           bool skip_addr_reg_mods);
+
+  static void
+  find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn,
+		  machine_mode* auto_mod_mode);
+
+  static addr_expr
+  extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
+		     machine_mode mem_mach_mode, access_sequence* as,
+		     std::vector<access*>& inserted_reg_mods);
+
+  static addr_expr
+  extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn* root_insn,
+		     machine_mode mem_mach_mode, access_sequence* as)
+  {
+    std::vector<access*> inserted_reg_mods;
+    return extract_addr_expr (x, insn, root_insn, mem_mach_mode, as,
+			      inserted_reg_mods);
+  }
+
+  static addr_expr
+  extract_addr_expr (rtx x, machine_mode mem_mach_mode = Pmode)
+  {
+    return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL);
+  }
+
   static const pass_data default_pass_data;
 
   delegate& m_delegate;
 };
+
+// ---------------------------------------------------------------------------
+
+inline sh_ams::regno_t
+sh_ams::get_regno (const_rtx x)
+{
+  if (x == NULL)
+    return -1;
+  if (x == any_regno)
+    return -2;
+  return REGNO (x);
+}
 
 inline sh_ams::addr_expr
 sh_ams::make_reg_addr (rtx base_reg)

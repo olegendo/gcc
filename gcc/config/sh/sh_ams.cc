@@ -2731,6 +2731,13 @@ sh_ams::access_sequence
   return false;
 }
 
+bool
+sh_ams::access_sequence
+::reg_used_in_sequence (rtx reg)
+{
+  return reg_used_in_sequence (reg, accesses ().begin ());
+}
+
 // Find all uses of the address registers that aren't mem loads/stores
 // or address modifications, and add them to the sequence
 // as reg_use accesses.
@@ -2878,7 +2885,8 @@ sh_ams::access_sequence::find_reg_end_values (void)
 //    (5) @(reg + 48)    hyp adj = 3 (chain 3,4,5)
 //    (6) @(reg + 8)     hyp adj = 3 (chain 1,2,6)
 //
-void sh_ams::access_sequence::calculate_adjacency_info (void)
+void
+sh_ams::access_sequence::calculate_adjacency_info (void)
 {
   typedef access_type_matches<load, store, reg_use> match;
   typedef cond_iterator<iterator, match> iter;
@@ -2914,7 +2922,33 @@ void sh_ams::access_sequence::calculate_adjacency_info (void)
     }
 }
 
-unsigned int sh_ams::execute (function* fun)
+void
+sh_ams::access_sequence
+::update_access_alternatives (delegate& d, access_sequence::iterator a)
+{
+  if (a->access_type () == load || a->access_type () == store)
+    d.mem_access_alternatives (a->alternatives (), *this, a);
+  else
+    {
+      // If the access isn't a true memory access, the
+      // address has to be loaded into a single register.
+      a->alternatives ().push_back (access::alternative (0, make_reg_addr ()));
+    }
+}
+
+int
+sh_ams::get_reg_mod_cost (delegate &dlg, const_rtx reg, const_rtx val,
+			  const access_sequence& as,
+			  access_sequence::const_iterator acc)
+{
+  if (REG_P (val))
+    return 0;
+
+  return dlg.addr_reg_mod_cost (reg, val, as, acc);
+}
+
+unsigned int
+sh_ams::execute (function* fun)
 {
   log_msg ("sh-ams pass\n");
 
