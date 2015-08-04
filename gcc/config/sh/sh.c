@@ -13776,16 +13776,27 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   // FIXME: also mac.w and mac.l insns (post-inc loads only).
   *alts++ = alternative (1 + gbr_extra_cost, sh_ams::make_reg_addr ());
 
+  // for QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
+  // are part of adjacent chains of 3 or more insns.  this will make AMS
+  // prefer them over displacement alternatives.
+  const int inc_cost = acc_size < 4
+		       && acc->inc_chain ().length () >= 3
+		       && !acc->inc_chain ().last () ? -2 : 0;
+
+  const int dec_cost = acc_size < 4
+		       && acc->dec_chain ().length () >= 3
+		       && acc->dec_chain ().first () ? -2 : 0;
+
   if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
       if (acc->access_type () == sh_ams::load && TARGET_SH2A)
-	*alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost,
-			       sh_ams::make_pre_dec_addr (acc_mode));
+        *alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost + dec_cost,
+                               sh_ams::make_pre_dec_addr (acc_mode));
 
       if (acc->access_type () == sh_ams::store && TARGET_SH2A)
-	*alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost,
-			       sh_ams::make_post_inc_addr (acc_mode));
+        *alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost + inc_cost,
+                               sh_ams::make_post_inc_addr (acc_mode));
 
       // QImode and HImode accesses with displacements work with R0 only,
       // thus charge extra.
@@ -13802,20 +13813,9 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
 
   // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
   // everything.
-  // for QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
-  // are part of adjacent chains of 3 or more insns.  this will make AMS
-  // prefer them over displacement alternatives.
-  const int inc_cost = acc_size < 4
-		       && acc->inc_chain ().length () >= 3
-		       && !acc->inc_chain ().last () ? -2 : 0;
-
-  const int dec_cost = acc_size < 4
-		       && acc->dec_chain ().length () >= 3
-		       && acc->dec_chain ().first () ? -2 : 0;
-
   if (acc->access_type () == sh_ams::load)
     *alts++ = alternative (1 + gbr_extra_cost + inc_cost,
-			   sh_ams::make_post_inc_addr (acc_mode));
+                           sh_ams::make_post_inc_addr (acc_mode));
   else if (acc->access_type () == sh_ams::store)
     *alts++ = alternative (1 + gbr_extra_cost + dec_cost,
 			   sh_ams::make_pre_dec_addr (acc_mode));
