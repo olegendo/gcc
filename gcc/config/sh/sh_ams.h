@@ -1,3 +1,61 @@
+// 
+// the ams pass obtains a set of alternatives for a given access from the
+// delegate (the target).  an alternative is simply a desired/supported
+// address expression and its cost.  the costs are allowed to vary for
+// each access and alternative independently, so the target can estimate
+// the costs based on the context.
+// the original address expression that is found in an insn is matched
+// against the target provided alternatives to derive the cost for the
+// original form.  this will be used as the "original cost".  if no match
+// can be found infinite costs will be assigned.
+//
+// we assume that when initially analysing the access sequences the
+// address expressions found in mems are valid addresses for the target.
+// this means that the access sequence will continue possible address
+// register modification insns or splits.  in order to optimize an
+// access sequence the values of the address registers and modifications
+// are traced back as much as possible.
+// brief example:
+//
+// the original sequence:
+// 1:    load.l  @r123, r50
+// 2:    add     #64, r123
+// 3:    load.l  @r123, r51
+//
+// will be analysed as:
+// 1:    load.l  @r123, r50
+// 3:    load.l  @(r123 + 64), r51
+//
+// the target provides the alternatives (addr = cost) for loads 1 and 3:
+// 1:    @reg = 1, @(reg + 0..60) = 1, @reg+ = 1
+// 3:    @reg = 1, @(reg + 0..60) = 1, @reg+ = 1
+//
+// the target reports cost 3 for the address reg modification in 2.
+// the total costs of the original sequence are 1 + 3 + 1 = 5.
+//
+// the task is to minimize the costs of the total sequence.  since the
+// originally used address modes already have minimal costs, the only
+// thing that can be optimized away is the address reg modification in 2.
+//
+// after applying the optimizations we get the following optimized
+// sequence:
+// 1:    load.l  @r123+, r50
+// 2:    --
+// 3:    load.l  @(r123 + 60), r51
+//
+// if the original value of r123 is used after load 3 a better sequence
+// could be:
+//       mov     r123,r124   // split sequence
+//       load.l  @124+, r50
+//       load.l  @(r124 + 60), r51
+//
+// or using indexed addressing:
+//       load.l  @r123, r50
+//       mov     #64, r60
+//       load.l  @(r123 + r60), r51
+//
+// .. depending on the context.
+
 
 #ifndef includeguard_gcc_sh_ams_includeguard
 #define includeguard_gcc_sh_ams_includeguard
@@ -89,7 +147,7 @@ public:
   typename std::iterator_traits<Iter>::pointer
   operator -> (void) const { return m_i.operator -> (); }
 
-  // FIXME: conversion to const_iterator is probably not working.
+  // FIXME: conversion to const_iterator is not working.
 
 private:
   Iter m_i;
@@ -100,17 +158,7 @@ private:
 class sh_ams : public rtl_opt_pass
 {
 public:
-  // the most complex non modifying address is of the form
-  // 'base_reg + index_reg*scale + disp'.
-
-  // a post/pre-modifying address can be of the form 'base_reg += disp'
-  // or 'base_reg += mod_reg', although for now we support only the former.
-  // if 'disp' is positive, it is a post/pre-increment.
-  // if 'disp' is negative, it is a post/pre-decrement.
-  // if abs ('disp') == access mode size it's a {PRE,POST}_{INC_DEC}.
-
   enum addr_type_t { non_mod, pre_mod, post_mod };
-  enum access_type_t { load, store, reg_mod, reg_use };
 
   typedef int regno_t;
 
@@ -132,6 +180,16 @@ public:
   class access;
   class access_sequence;
   struct delegate;
+
+
+  // the most complex non modifying address is of the form
+  // 'base_reg + index_reg*scale + disp'.
+
+  // a post/pre-modifying address can be of the form 'base_reg += disp'
+  // or 'base_reg += mod_reg', although for now we support only the former.
+  // if 'disp' is positive, it is a post/pre-increment.
+  // if 'disp' is negative, it is a post/pre-decrement.
+  // if abs ('disp') == access mode size it's a {PRE,POST}_{INC_DEC}.
 
   // we could use an abstract base class etc etc, but that usually implies
   // that we need to store objects thereof on the free store and keep the
@@ -181,11 +239,10 @@ public:
   protected:
     addr_type_t m_type;
 
-    // although constant addresses can be grouped and a base reg can be
-    // derived, on some architectures (8051) using a constant address directly
-    // is possible.
-    // after the constant pool layout has been determined, the value of the
-    // base register will be a constant label_ref or something.
+    // FIXME: on some architectures constant addresses can be used directly.
+    // in such cases, after the constant pool layout has been determined,
+    // the value of the base register will be e.g. a constant label_ref.
+    // currently we can't deal with those.
     rtx m_base_reg;
     disp_t m_disp;
     disp_t m_disp_min;
@@ -258,66 +315,13 @@ public:
   static addr_expr
   make_invalid_addr (void);
 
-  // a memory access in the insn stream.
+  // an element in the access sequence.  can be a real memory access insn
+  // or address register modification or address register use insn.
+  enum access_type_t { load, store, reg_mod, reg_use };
+
   class access
   {
   public:
-    // the ams pass obtains a set of alternatives for a given access from the
-    // delegate (the target).  an alternative is simply a desired/supported
-    // address expression and its cost.  the costs are allowed to vary for
-    // each access independently, so the target can estimate the costs based
-    // on the context.
-    // the original address expression that is found in an insn is matched
-    // against the target provided alternatives to derive the cost for the
-    // original form.  this will be used as the "original cost".  if no match
-    // can be found infinite costs will be assigned.
-    //
-    // we assume that when initially analysing the access sequences the
-    // address expressions found in mems are valid addresses for the target.
-    // this means that the access sequence will continue possible address
-    // register modification insns or splits.  in order to optimize an
-    // access sequence the values of the address registers and modifications
-    // are traced back as much as possible.
-    // brief example:
-    //
-    // the original sequence:
-    // 1:    load.l  @r123, r50
-    // 2:    add     #64, r123
-    // 3:    load.l  @r123, r51
-    //
-    // will be analysed as:
-    // 1:    load.l  @r123, r50
-    // 3:    load.l  @(r123 + 64), r51
-    //
-    // the target provides the alternatives (addr = cost) for loads 1 and 3:
-    // 1:    @reg = 1, @(reg + 0..60) = 1, @reg+ = 1
-    // 3:    @reg = 1, @(reg + 0..60) = 1, @reg+ = 1
-    //
-    // the target reports cost 3 for the address reg modification in 2.
-    // the total costs of the original sequence are 1 + 3 + 1 = 5.
-    //
-    // the task is to minimize the costs of the total sequence.  since the
-    // originally used address modes already have minimal costs, the only
-    // thing that can be optimized away is the address reg modification in 2.
-    //
-    // after applying the optimizations we get the following optimized
-    // sequence:
-    // 1:    load.l  @r123+, r50
-    // 2:    --
-    // 3:    load.l  @(r123 + 60), r51
-    //
-    // if the original value of r123 is used after load 3 a better sequence
-    // could be:
-    //       mov     r123,r124   // split sequence
-    //       load.l  @124+, r50
-    //       load.l  @(r124 + 60), r51
-    //
-    // or using indexed addressing:
-    //       load.l  @r123, r50
-    //       mov     #64, r60
-    //       load.l  @(r123 + r60), r51
-    //
-    // .. depending on the context.
 
     class alternative
     {
