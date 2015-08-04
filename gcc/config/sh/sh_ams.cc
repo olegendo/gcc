@@ -530,22 +530,23 @@ sh_ams::access::matches_alternative (const alternative& alt) const
   if (ae.type () != alt_ae.type ())
     return false;
 
-  if (!registers_match (ae.base_reg (), alt_ae.base_reg ()))
+  if (ae.has_base_reg () != alt_ae.has_base_reg ())
+    return false;
+  if (ae.has_index_reg () != alt_ae.has_index_reg ())
+    return false;
+
+  if (ae.has_base_reg () && alt_ae.has_base_reg ()
+      && !registers_match (ae.base_reg (), alt_ae.base_reg ()))
     return false;
 
   if (ae.disp () < alt_ae.disp_min () || ae.disp () > alt_ae.disp_max ())
     return false;
 
-  if (ae.has_index_reg ())
-    {
-      if (!alt_ae.has_index_reg ())
-	return false;
-
-      if (ae.scale () < alt_ae.scale_min ()
-	  || ae.scale () > alt_ae.scale_max ()
-	  || !registers_match (ae.index_reg (), alt_ae.index_reg ()))
-	return false;
-    }
+  if (ae.has_index_reg ()
+      && (ae.scale () < alt_ae.scale_min ()
+          || ae.scale () > alt_ae.scale_max ()
+          || !registers_match (ae.index_reg (), alt_ae.index_reg ())))
+    return false;
 
   return true;
 }
