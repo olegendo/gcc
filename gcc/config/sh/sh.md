@@ -7290,6 +7290,27 @@ label:
   "mov.<bwl>	%1,@%0+"
   [(set_attr "type" "store")])
 
+;; Doing a post-inc DImode store is possible, but it's very likely to result
+;; lots of reg moves to load the R0 reg before the store.  Thus it's better
+;; use displacement stores instead.  Notice that these DImode alternatives
+;; also have to be disabled in the AMS delegate.
+(define_insn_and_split "*movdi_store_postinc"
+  [(set (match_operand:DI 0 "post_inc_mem")
+	(match_operand:DI 1 "arith_reg_operand"))]
+  "TARGET_SH2A && can_create_pseudo_p () && 0"
+  "#"
+  "&& 1"
+  [(set (match_dup 3) (match_dup 5))
+   (set (match_dup 4) (match_dup 6))]
+{
+  operands[3] = change_address (operands[0], SImode, NULL);
+  operands[4] = change_address (operands[0], SImode, NULL);
+
+  const int off = TARGET_LITTLE_ENDIAN ? 1 : 0;
+  operands[5 + off] = gen_highpart (SImode, operands[1]);
+  operands[6 - off] = gen_lowpart (SImode, operands[1]);
+})
+
 ;; The order of the constraint alternatives is important here.
 ;; Q/r has to come first, otherwise PC relative loads might wrongly get
 ;; placed into delay slots.  Since there is no QImode PC relative load, the

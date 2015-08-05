@@ -13790,11 +13790,15 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
-      if (acc->access_type () == sh_ams::load && TARGET_SH2A)
+      // However, don't use it for DImode since this results in worse code
+      // than using displacement modes.
+      if (acc->access_type () == sh_ams::load && TARGET_SH2A
+	  && acc_mode != DImode)
         *alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost + dec_cost,
                                sh_ams::make_pre_dec_addr (acc_mode));
 
-      if (acc->access_type () == sh_ams::store && TARGET_SH2A)
+      if (acc->access_type () == sh_ams::store && TARGET_SH2A
+	  && acc_mode != DImode)
         *alts++ = alternative (1 + r0_extra_cost + gbr_extra_cost + inc_cost,
                                sh_ams::make_post_inc_addr (acc_mode));
 
