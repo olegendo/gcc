@@ -6598,7 +6598,7 @@ label:
   [(set (match_operand:SI 0 "arith_reg_dest" "=z")
 	(sign_extend:SI
 	  (mem:QIHI
-	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "+r")))))]
+	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "r")))))]
   "TARGET_SH2A"
   "mov.<bw>	@%1-,%0"
   [(set_attr "type" "load")])
@@ -7278,13 +7278,13 @@ label:
 (define_insn "*mov<mode>_load_predec"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=z")
 	  (mem:QIHISI
-	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "+r"))))]
+	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "r"))))]
   "TARGET_SH2A"
   "mov.<bwl>	@%1-,%0"
   [(set_attr "type" "load")])
 
 (define_insn "*mov<mode>_store_postinc"
-  [(set (mem:QIHISI (post_inc:SI (match_operand:SI 0 "arith_reg_operand" "+r")))
+  [(set (mem:QIHISI (post_inc:SI (match_operand:SI 0 "arith_reg_operand" "r")))
 	(match_operand:QIHISI 1 "arith_reg_operand" "z"))]
   "TARGET_SH2A"
   "mov.<bwl>	%1,@%0+"
