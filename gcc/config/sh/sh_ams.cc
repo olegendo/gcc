@@ -1592,14 +1592,14 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg)
         ++accs;
     }
 
-  typedef cond_iterator<iterator, access_to_optimize> acc_opt_iter;
+  typedef filter_iterator<iterator, access_to_optimize> acc_opt_iter;
 
   for (acc_opt_iter accs = begin<access_to_optimize> (),
        accs_end = end<access_to_optimize> (); accs != accs_end; ++accs)
     gen_min_mod (accs, dlg, dlg.lookahead_count (*this, (iterator)accs), true);
 
   typedef access_type_matches<reg_mod> reg_mod_match;
-  typedef cond_iterator<iterator, reg_mod_match> reg_mod_iter;
+  typedef filter_iterator<iterator, reg_mod_match> reg_mod_iter;
 
   for (reg_mod_iter accs = begin<reg_mod_match> (),
        accs_end = end<reg_mod_match> (); accs != accs_end; )
@@ -1628,7 +1628,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg)
 // If RECORD_IN_SEQUENCE is false, don't insert the actual modifications
 // in the sequence, only calculate the cost.
 int sh_ams::access_sequence::
-gen_min_mod (cond_iterator<iterator, access_to_optimize> acc, delegate& dlg,
+gen_min_mod (filter_iterator<iterator, access_to_optimize> acc, delegate& dlg,
              int lookahead_num, bool record_in_sequence)
 {
   const addr_expr& ae = acc->address ();
@@ -1646,7 +1646,7 @@ gen_min_mod (cond_iterator<iterator, access_to_optimize> acc, delegate& dlg,
   addr_expr min_end_base, min_end_index;
   mod_tracker tracker;
 
-  cond_iterator<iterator, access_to_optimize> next_acc =
+  filter_iterator<iterator, access_to_optimize> next_acc =
 	lookahead_num ? stdx::next (acc) : end<access_to_optimize> ();
 
   // Go through the alternatives for this access and keep
@@ -2889,7 +2889,7 @@ void
 sh_ams::access_sequence::calculate_adjacency_info (void)
 {
   typedef access_type_matches<load, store, reg_use> match;
-  typedef cond_iterator<iterator, match> iter;
+  typedef filter_iterator<iterator, match> iter;
 
   for (iter m = begin<match> (), mend = end<match> (); m != mend; )
     {
@@ -3066,7 +3066,7 @@ sh_ams::execute (function* fun)
       log_msg ("updating access alternatives\n");
       {
 	typedef access_to_optimize match;
-	typedef cond_iterator<access_sequence::iterator, match> iter;
+	typedef filter_iterator<access_sequence::iterator, match> iter;
 
 	for (iter a = as.begin<match> (), a_end = as.end<match> ();
 	     a != a_end; ++a)
@@ -3076,7 +3076,7 @@ sh_ams::execute (function* fun)
       log_msg ("updating costs\n");
       {
 	typedef access_type_matches<load, store> match;
-	typedef cond_iterator<access_sequence::iterator, match> iter;
+	typedef filter_iterator<access_sequence::iterator, match> iter;
 
 	for (iter m = as.begin<match> (), mend = as.end<match> ();
 	     m != mend; ++m)

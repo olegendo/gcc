@@ -71,7 +71,7 @@
 
 
 template <typename Iter, typename Cond>
-class cond_iterator
+class filter_iterator
   : public std::iterator<std::forward_iterator_tag,
   			 typename std::iterator_traits<Iter>::value_type,
   			 typename std::iterator_traits<Iter>::difference_type,
@@ -82,9 +82,9 @@ public:
   enum make_begin_tag { make_begin };
   enum make_end_tag { make_end };
 
-  cond_iterator (void) { }
+  filter_iterator (void) { }
 
-  cond_iterator (Iter i, Iter iend, make_begin_tag)
+  filter_iterator (Iter i, Iter iend, make_begin_tag)
   {
     Cond cond;
     for (; i != iend && !cond (*i); ++i);
@@ -93,22 +93,22 @@ public:
     m_end = iend;
   }
 
-  cond_iterator (Iter iend, make_end_tag)
+  filter_iterator (Iter iend, make_end_tag)
   : m_i (iend), m_end (iend) { }
 
   operator Iter (void) const { return m_i; }
 
-  // FIXME: the base_iterator wouldn't be needed if conversions to const
+  // FIXME: the base iterator wouldn't be needed if conversions to const
   // iterator and to const iterator of Iter worked.
   Iter base_iterator (void) const { return m_i; }
 
-  void swap (cond_iterator& other)
+  void swap (filter_iterator& other)
   {
     std::swap (m_i, other.m_i);
     std::swap (m_end, other.m_end);
   }
 
-  cond_iterator& operator = (Iter i)
+  filter_iterator& operator = (Iter i)
   {
     Cond cond;
     for (; i != m_end && !cond (*i); ++i);
@@ -117,7 +117,7 @@ public:
     return *this;
   }
 
-  cond_iterator& operator ++ (void)
+  filter_iterator& operator ++ (void)
   {
     Cond cond;
     Iter i = m_i;
@@ -128,15 +128,15 @@ public:
     return *this;
   }
 
-  cond_iterator operator ++ (int)
+  filter_iterator operator ++ (int)
   {
-    cond_iterator r = *this;
+    filter_iterator r = *this;
     operator++ ();
     return r;
   }
 
-  bool operator == (const cond_iterator& rhs) const { return m_i == rhs.m_i; }
-  bool operator != (const cond_iterator& rhs) const { return m_i != rhs.m_i; }
+  bool operator == (const filter_iterator& rhs) const { return m_i == rhs.m_i; }
+  bool operator != (const filter_iterator& rhs) const { return m_i != rhs.m_i; }
 
   bool operator == (const Iter& rhs) const { return m_i == rhs; }
   bool operator != (const Iter& rhs) const { return m_i != rhs; }
@@ -725,30 +725,30 @@ public:
     // iterator decorator for iterating over different types of elements
     // in the access sequence.
     template <typename Match>
-    cond_iterator<iterator, Match> begin (void)
+    filter_iterator<iterator, Match> begin (void)
     {
-      typedef cond_iterator<iterator, Match> iter;
+      typedef filter_iterator<iterator, Match> iter;
       return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
     }
 
     template <typename Match>
-    cond_iterator<iterator, Match> end (void)
+    filter_iterator<iterator, Match> end (void)
     {
-      typedef cond_iterator<iterator, Match> iter;
+      typedef filter_iterator<iterator, Match> iter;
       return iter (m_accs.end (), iter::make_end);
     }
 
     template <typename Match>
-    cond_iterator<const_iterator, Match> begin (void) const
+    filter_iterator<const_iterator, Match> begin (void) const
     {
-      typedef cond_iterator<const_iterator, Match> iter;
+      typedef filter_iterator<const_iterator, Match> iter;
       return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
     }
 
     template <typename Match>
-    cond_iterator<const_iterator, Match> end (void) const
+    filter_iterator<const_iterator, Match> end (void) const
     {
-      typedef cond_iterator<const_iterator, Match> iter;
+      typedef filter_iterator<const_iterator, Match> iter;
       return iter (m_accs.end (), iter::make_end);
     }
 
@@ -804,7 +804,7 @@ public:
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
 
-    int gen_min_mod (cond_iterator<iterator, access_to_optimize> acc,
+    int gen_min_mod (filter_iterator<iterator, access_to_optimize> acc,
                      delegate& dlg, int lookahead_num,
                      bool record_in_sequence);
 
