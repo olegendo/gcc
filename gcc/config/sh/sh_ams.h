@@ -69,38 +69,35 @@
 #include <set>
 #include <iterator>
 
-
-template <typename Iter, typename Cond>
+template <typename Iter, typename Predicate>
 class filter_iterator
   : public std::iterator<std::forward_iterator_tag,
   			 typename std::iterator_traits<Iter>::value_type,
   			 typename std::iterator_traits<Iter>::difference_type,
   			 typename std::iterator_traits<Iter>::pointer,
-  			 typename std::iterator_traits<Iter>::reference>
+			 typename std::iterator_traits<Iter>::reference>,
+    private Predicate
 {
 public:
-  enum make_begin_tag { make_begin };
-  enum make_end_tag { make_end };
-
   filter_iterator (void) { }
 
-  filter_iterator (Iter i, Iter iend, make_begin_tag)
+  filter_iterator (Iter i, Iter iend, const Predicate& p = Predicate ())
+  : Predicate (p)
   {
-    Cond cond;
-    for (; i != iend && !cond (*i); ++i);
+    for (; i != iend && !predicate () (*i); ++i);
 
     m_i = i;
     m_end = iend;
   }
 
-  filter_iterator (Iter iend, make_end_tag)
-  : m_i (iend), m_end (iend) { }
+  Predicate& predicate (void) { return *this; }
+  const Predicate& predicate (void) const { return *this; }
 
   operator Iter (void) const { return m_i; }
 
   // FIXME: the base iterator wouldn't be needed if conversions to const
   // iterator and to const iterator of Iter worked.
-  Iter base_iterator (void) const { return m_i; }
+  const Iter& base_iterator (void) const { return m_i; }
 
   void swap (filter_iterator& other)
   {
@@ -110,8 +107,7 @@ public:
 
   filter_iterator& operator = (Iter i)
   {
-    Cond cond;
-    for (; i != m_end && !cond (*i); ++i);
+    for (; i != m_end && !predicate () (*i); ++i);
 
     m_i = i;
     return *this;
@@ -119,10 +115,9 @@ public:
 
   filter_iterator& operator ++ (void)
   {
-    Cond cond;
     Iter i = m_i;
     ++i;
-    for (; i != m_end && !cond (*i); ++i);
+    for (; i != m_end && !predicate () (*i); ++i);
 
     m_i = i;
     return *this;
@@ -728,28 +723,28 @@ public:
     filter_iterator<iterator, Match> begin (void)
     {
       typedef filter_iterator<iterator, Match> iter;
-      return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
+      return iter (m_accs.begin (), m_accs.end ());
     }
 
     template <typename Match>
     filter_iterator<iterator, Match> end (void)
     {
       typedef filter_iterator<iterator, Match> iter;
-      return iter (m_accs.end (), iter::make_end);
+      return iter (m_accs.end (), m_accs.end ());
     }
 
     template <typename Match>
     filter_iterator<const_iterator, Match> begin (void) const
     {
       typedef filter_iterator<const_iterator, Match> iter;
-      return iter (m_accs.begin (), m_accs.end (), iter::make_begin);
+      return iter (m_accs.begin (), m_accs.end ());
     }
 
     template <typename Match>
     filter_iterator<const_iterator, Match> end (void) const
     {
       typedef filter_iterator<const_iterator, Match> iter;
-      return iter (m_accs.end (), iter::make_end);
+      return iter (m_accs.end (), m_accs.end ());
     }
 
   private:
