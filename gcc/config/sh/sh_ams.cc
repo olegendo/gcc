@@ -2,6 +2,7 @@
 #include "config.h"
 
 #include <iterator>
+#include <sstream>
 
 #include "system.h"
 #include "coretypes.h"
@@ -44,6 +45,8 @@
 #include "stmt.h"
 #include "expr.h"
 #include "rtl-iter.h"
+#include "diagnostic-core.h"
+#include "opts.h"
 
 #include <algorithm>
 #include <list>
@@ -81,7 +84,64 @@
 namespace
 {
 
-void log_reg (rtx x)
+template <typename T> struct parse_result
+{
+  bool valid;
+  T value;
+  
+  parse_result (void) : valid (false) { }
+  parse_result (const T& v) : valid (true), value (v) { }
+  parse_result (const T& v, bool vv) : valid (vv), value (v) { }
+
+  template <typename S> void
+  copy_if_valid_to (S& out) const
+  {
+    if (valid)
+      out = value;
+  }
+};
+
+parse_result<int>
+parse_int (const char* s)
+{
+  while (*s && ISSPACE (*s)) ++s;
+
+  if (s[0] == '\0')
+    return parse_result<int> ();
+
+  bool neg = false;
+  
+  if (*s == '-')
+    {
+      neg = true;
+      ++s;
+    }
+  else if (*s == '+')
+    ++s;
+
+  int val = integral_argument (s);
+  return parse_result<int> (neg ? -val : val, val >= 0);
+}
+
+parse_result<int>
+parse_int (const std::string& s)
+{
+  return parse_int (s.c_str ());
+}
+
+void
+log_options (const sh_ams::options& opt)
+{
+  if (dump_file == NULL)
+    return;
+
+  log_msg ("option check_minimal_cost = %d\n", opt.check_minimal_cost);
+  log_msg ("option check_original_cost = %d\n", opt.check_original_cost);
+  log_msg ("base_lookahead_count = %d", opt.base_lookahead_count);
+}
+
+void
+log_reg (rtx x)
 {
   if (x == sh_ams::invalid_regno)
     log_msg ("(nil)");
@@ -448,9 +508,11 @@ const pass_data sh_ams::default_pass_data =
 const rtx sh_ams::invalid_regno = (const rtx)0;
 const rtx sh_ams::any_regno = (const rtx)1;
 
-sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate& dlg)
+sh_ams::sh_ams (gcc::context* ctx, const char* name, delegate& dlg,
+		const options& opt)
 : rtl_opt_pass (default_pass_data, ctx),
-  m_delegate (dlg)
+  m_delegate (dlg),
+  m_options (opt)
 {
   this->name = name;
 }
@@ -463,6 +525,62 @@ bool sh_ams::gate (function* /*fun*/)
 {
   return optimize > 0;
 }
+
+void sh_ams::set_options (const options& opt)
+{
+  m_options = opt;
+}
+
+sh_ams::options::options (void)
+{
+  // maybe we can use different sets of options based on the global
+  // optimization level.
+  check_minimal_cost = true;
+  check_original_cost = true;
+  base_lookahead_count = 1;
+}
+
+sh_ams::options::options (const char* str)
+{
+  *this = options (std::string (str == NULL ? "" : str));
+}
+
+sh_ams::options::options (const std::string& str)
+{
+  *this = options ();
+
+  std::vector<std::string> tokens;
+  for (std::stringstream ss (str); ss.good (); )
+    {
+      tokens.push_back (std::string ());
+      std::getline (ss, tokens.back (), ',');
+    }
+
+  std::map<std::string, std::string> kv;
+
+  for (std::vector<std::string>::const_iterator i = tokens.begin ();
+       i != tokens.end (); ++i)
+    {
+      std::string::size_type eq_pos = i->find ('=');
+      kv[i->substr (0, eq_pos)] = eq_pos == std::string::npos
+				  ? std::string ()
+				  : i->substr (eq_pos + 1);
+    }
+
+  typedef std::map<std::string, std::string>::iterator kvi;
+
+  for (kvi i = kv.find ("check_minimal_cost"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (check_minimal_cost);
+
+  for (kvi i = kv.find ("check_original_cost"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (check_original_cost);
+    
+  for (kvi i = kv.find ("base_lookahead_count"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (base_lookahead_count);
+
+//  error ("unknown AMS option");
+}
+
 
 sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
                         addr_expr original_addr_expr, addr_expr addr_expr,
@@ -2951,6 +3069,8 @@ unsigned int
 sh_ams::execute (function* fun)
 {
   log_msg ("sh-ams pass\n");
+  log_options (m_options);
+  log_msg ("\n\n");
 
 //  df_set_flags (DF_DEFER_INSN_RESCAN); // needed?
 
@@ -3095,7 +3215,11 @@ sh_ams::execute (function* fun)
       if (as.cost_already_minimal ())
         {
           log_msg ("costs are already minimal\n");
-          continue;
+
+	  if (m_options.check_minimal_cost)
+	    continue;
+
+	  log_msg ("continuing anyway\n");
         }
 
       log_msg ("gen_address_mod\n");
@@ -3107,11 +3231,23 @@ sh_ams::execute (function* fun)
       log_access_sequence (as, false);
       log_msg ("\n");
 
-      if (new_cost < original_cost)
+      bool modify = true;
+      if (new_cost >= original_cost)
+	{
+	  log_msg ("new_cost (%d) >= original_cost (%d)",
+		   new_cost, original_cost);
+
+	  if (m_options.check_original_cost)
+	    {
+	      log_msg ("  not modifying\n");
+	      modify = false;
+	    }
+	  else
+	    log_msg ("  modifying anyway\n");
+	}
+
+      if (modify)
         as.update_insn_stream (sequence_mod_insns);
-      else
-        log_msg ("new_cost (%d) >= original_cost (%d)  not modifying\n",
-		 new_cost, original_cost);
 
       log_msg ("\n\n");
     }

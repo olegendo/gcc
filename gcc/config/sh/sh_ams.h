@@ -68,6 +68,7 @@
 #include <map>
 #include <set>
 #include <iterator>
+#include <string>
 
 template <typename Iter, typename Predicate>
 class filter_iterator
@@ -901,11 +902,28 @@ public:
                                      access_sequence::const_iterator acc) = 0;
   };
 
+  struct options
+  {
+    // use default values.
+    options (void);
 
-  sh_ams (gcc::context* ctx, const char* name, delegate& dlg);
+    // parse options from comma separated key=value list
+    options (const char* str);
+    options (const std::string& str);
+    
+    bool check_minimal_cost;
+    bool check_original_cost;
+    int base_lookahead_count;
+  };
+
+  sh_ams (gcc::context* ctx, const char* name, delegate& dlg,
+	  const options& opt = options ());
+
   virtual ~sh_ams (void);
   virtual bool gate (function* fun);
   virtual unsigned int execute (function* fun);
+
+  void set_options (const options& opt);
 
 private:
   static int
@@ -986,6 +1004,7 @@ private:
   static const pass_data default_pass_data;
 
   delegate& m_delegate;
+  options m_options;
 };
 
 // ---------------------------------------------------------------------------

@@ -874,7 +874,8 @@ register_sh_passes (void)
 
   /* Add AMS pass after auto-inc-dec.  */
   if (sh_ams_enable)
-    register_pass (new sh_ams (g, "sh_ams", g_ams_delegate),
+    register_pass (new sh_ams (g, "sh_ams", g_ams_delegate,
+			       sh_ams::options (sh_ams_opt)),
 		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 
   /* Run AMS again after sh_treg_combine2 as there might be new opportunities
