@@ -6600,7 +6600,7 @@ label:
 	  (mem:QIHI
 	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "r")))))]
   "TARGET_SH2A"
-  "mov.<bw>	@%1-,%0"
+  "mov.<bw>	@-%1,%0"
   [(set_attr "type" "load")])
 
 ;; The *_snd patterns will take care of other QImode/HImode addressing
@@ -7280,7 +7280,7 @@ label:
 	  (mem:QIHISI
 	    (pre_dec:SI (match_operand:SI 1 "arith_reg_operand" "r"))))]
   "TARGET_SH2A"
-  "mov.<bwl>	@%1-,%0"
+  "mov.<bwl>	@-%1,%0"
   [(set_attr "type" "load")])
 
 (define_insn "*mov<mode>_store_postinc"
