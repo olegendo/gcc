@@ -589,7 +589,7 @@ public:
     access_sequence (std::list<mod_insn_list>::iterator mod_insns)
       : m_mod_insns (mod_insns) {}
 
-    void gen_address_mod (delegate& dlg);
+    void gen_address_mod (delegate& dlg, int base_lookahead);
 
     void update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns);
 
@@ -868,38 +868,43 @@ public:
   {
     // provide alternatives for the specified access.
     // use access::add_alternative.
-    virtual void mem_access_alternatives (access::alternative_set& alt,
-                                          const access_sequence& as,
-                                          access_sequence::const_iterator acc) = 0;
+    virtual void
+    mem_access_alternatives (access::alternative_set& alt,
+			     const access_sequence& as,
+			     access_sequence::const_iterator acc) = 0;
 
     // adjust the costs of the specified alternative of the specified
     // access.  called after the alternatives of all accesses have
     // been retrieved.
-    virtual void adjust_alternative_costs (access::alternative& alt,
-                                           const access_sequence& as,
-                                           access_sequence::const_iterator acc) = 0;
+    virtual void
+    adjust_alternative_costs (access::alternative& alt,
+			      const access_sequence& as,
+			      access_sequence::const_iterator acc) = 0;
 
     // provide the number of subsequent accesses that should be taken into
     // account when trying to minimize the costs of the specified access.
-    virtual int lookahead_count (const access_sequence& as,
-                                 access_sequence::const_iterator acc) = 0;
+    virtual int
+    adjust_lookahead_count (const access_sequence& as,
+			    access_sequence::const_iterator acc) = 0;
 
     // provide the cost for setting the specified address register to
     // an rtx expression.
     // the cost must be somehow relative to the cost provided for access
     // alternatives.
-    virtual int addr_reg_mod_cost (const_rtx reg, const_rtx val,
-                                   const access_sequence& as,
-                                   access_sequence::const_iterator acc) = 0;
+    virtual int
+    addr_reg_mod_cost (const_rtx reg, const_rtx val,
+		       const access_sequence& as,
+		       access_sequence::const_iterator acc) = 0;
 
     // provide the cost for cloning the address register, which is usually
     // required when splitting an access sequence.  if (address) register
     // pressure is high, return a higher cost to avoid splitting.
     //
     // FIXME: alternative would be 'sequence_split_cost'
-    virtual int addr_reg_clone_cost (const_rtx reg,
-                                     const access_sequence& as,
-                                     access_sequence::const_iterator acc) = 0;
+    virtual int
+    addr_reg_clone_cost (const_rtx reg,
+			 const access_sequence& as,
+			 access_sequence::const_iterator acc) = 0;
   };
 
   struct options

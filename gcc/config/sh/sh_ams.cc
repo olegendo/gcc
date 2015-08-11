@@ -1697,7 +1697,7 @@ sh_ams::split_access_sequence_2 (std::set<rtx>& addr_regs, sh_ams::access& acc)
 // between the regular accesses.
 // FIXME: Handle trailing reg_mods/uses.
 void
-sh_ams::access_sequence::gen_address_mod (delegate& dlg)
+sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 {
   log_msg ("Generating address modifications\n");
 
@@ -1714,7 +1714,9 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg)
 
   for (acc_opt_iter accs = begin<access_to_optimize> (),
        accs_end = end<access_to_optimize> (); accs != accs_end; ++accs)
-    gen_min_mod (accs, dlg, dlg.lookahead_count (*this, (iterator)accs), true);
+    gen_min_mod (accs, dlg,
+		 base_lookahead + dlg.lookahead_count (*this, (iterator)accs),
+		 true);
 
   typedef access_type_matches<reg_mod> reg_mod_match;
   typedef filter_iterator<iterator, reg_mod_match> reg_mod_iter;
@@ -3223,7 +3225,7 @@ sh_ams::execute (function* fun)
         }
 
       log_msg ("gen_address_mod\n");
-      as.gen_address_mod (m_delegate);
+      as.gen_address_mod (m_delegate, m_options.base_lookahead_count);
 
       as.update_cost (m_delegate);
       int new_cost = as.cost ();

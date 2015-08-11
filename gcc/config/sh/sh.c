@@ -829,8 +829,8 @@ static struct ams_delegate : public sh_ams::delegate
                             const sh_ams::access_sequence& as,
                             sh_ams::access_sequence::const_iterator acc);
   virtual int
-  lookahead_count (const sh_ams::access_sequence& as,
-                   sh_ams::access_sequence::const_iterator acc);
+  adjust_lookahead_count (const sh_ams::access_sequence& as,
+			  sh_ams::access_sequence::const_iterator acc);
   virtual int
   addr_reg_mod_cost (const_rtx reg, const_rtx val,
                      const sh_ams::access_sequence& as,
@@ -13837,23 +13837,25 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
     }
 }
 
-void ams_delegate::
-adjust_alternative_costs (sh_ams::access::alternative& alt ATTRIBUTE_UNUSED,
-                          const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
-                          sh_ams::access_sequence::const_iterator acc ATTRIBUTE_UNUSED)
+void
+ams_delegate
+::adjust_alternative_costs (sh_ams::access::alternative& alt ATTRIBUTE_UNUSED,
+			    const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+			    sh_ams::access_sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
 }
 
-int ams_delegate::
-lookahead_count (const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
-                 sh_ams::access_sequence::const_iterator acc)
+int
+ams_delegate
+::adjust_lookahead_count (const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
+			  sh_ams::access_sequence::const_iterator acc)
 {
   // If the next 2 or more accesses can be reached with post-inc, look
   // a bit further ahead.
   if (acc->inc_chain ().length () >= 3)
-    return 2;
+    return 1;
 
-  return 1;
+  return 0;
 }
 
 int
