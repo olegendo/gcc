@@ -1,4 +1,4 @@
-// 
+//
 // the ams pass obtains a set of alternatives for a given access from the
 // delegate (the target).  an alternative is simply a desired/supported
 // address expression and its cost.  the costs are allowed to vary for
@@ -921,7 +921,7 @@ public:
     // parse options from comma separated key=value list
     options (const char* str);
     options (const std::string& str);
-    
+
     bool check_minimal_cost;
     bool check_original_cost;
     int base_lookahead_count;
@@ -1230,7 +1230,8 @@ inline bool
 sh_ams::adjacent_inc (const access& first, const access& second)
 {
   std::pair<disp_t, bool> distance = second.address () - first.address ();
-  return distance.second && distance.first == first.access_size ();
+  return (first.access_type () == load || first.access_type () == store)
+    && distance.second && distance.first == first.access_size ();
 }
 
 inline bool
@@ -1243,7 +1244,8 @@ inline bool
 sh_ams::adjacent_dec (const access& first, const access& second)
 {
   std::pair<disp_t, bool> distance = first.address () - second.address ();
-  return distance.second && distance.first == first.access_size ();
+  return (first.access_type () == load || first.access_type () == store)
+    && distance.second && distance.first == first.access_size ();
 }
 
 inline bool
