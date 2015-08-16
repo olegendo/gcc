@@ -2212,8 +2212,17 @@ sh_ams::access_sequence
 	  log_rtx (new_addr);
 	  log_msg ("\n");
 
-          bool mem_update_ok = accs->set_insn_mem_rtx (new_addr);
-          gcc_assert (mem_update_ok);
+	  if (bool mem_update_ng = !accs->set_insn_mem_rtx (new_addr))
+	    {
+	      log_msg ("failed to replace mem rtx\n");
+	      log_rtx (accs->addr_rtx_in_insn ());
+	      log_msg ("\nwith new rtx\n");
+	      log_rtx (new_addr);
+	      log_msg ("\nin insn\n");
+	      log_insn (accs->insn ());
+	      log_msg ("\n");
+	      abort ();
+	    }
 
           sh_check_add_incdec_notes (accs->insn ());
         }
