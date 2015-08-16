@@ -626,6 +626,46 @@ sh_ams::addr_expr::to_rtx (void) const
   return m_cached_to_rtx = r;
 }
 
+void
+sh_ams::addr_expr::set_base_reg (rtx val)
+{
+  if (val == m_base_reg)
+    return;
+
+  m_base_reg = val;
+  m_cached_to_rtx = NULL;
+}
+
+void
+sh_ams::addr_expr::set_index_reg (rtx val)
+{
+  if (val == m_index_reg)
+    return;
+
+  m_index_reg = val;
+  m_cached_to_rtx = NULL;
+}
+
+void
+sh_ams::addr_expr::set_disp (disp_t val)
+{
+  if (val == m_disp)
+    return;
+
+  m_disp = m_disp_min = m_disp_max = val;
+  m_cached_to_rtx = NULL;
+}
+
+void
+sh_ams::addr_expr::set_scale (scale_t val)
+{
+  if (val == m_scale)
+    return;
+
+  m_scale = m_scale_min = m_scale_max = val;
+  m_cached_to_rtx = NULL;
+}
+
 sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
                         addr_expr original_addr_expr, addr_expr addr_expr,
                         bool should_optimize, int cost)
@@ -782,10 +822,18 @@ sh_ams::access::set_insn_mem_rtx (rtx new_addr)
 bool
 sh_ams::access::try_set_insn_mem_rtx (rtx new_addr)
 {
-  bool r = validate_change (m_insn, m_mem_ref,
-			    replace_equiv_address (*m_mem_ref, new_addr), true);
-  cancel_changes (0);  
-  return r;
+  rtx prev_rtx = XEXP (*m_mem_ref, 0);
+
+  XEXP (*m_mem_ref, 0) = new_addr;
+
+  int new_insn_code = recog (PATTERN (m_insn), m_insn, NULL);
+/*
+  log_msg ("\nrecog\n");
+  log_rtx (PATTERN (m_insn));
+  log_msg (" = %d\n", new_insn_code);
+*/
+  XEXP (*m_mem_ref, 0) = prev_rtx;
+  return new_insn_code >= 0;
 }
 
 bool
@@ -3079,17 +3127,92 @@ sh_ams::access_sequence
   // The target's delegate implementation might disable validation for insns
   // to speed up processing, if it knows that all the alternatives are valid.
   if (a->validate_alternatives ()
-      && a->access_type () == load || a->access_type () == store)
+      && (a->access_type () == load || a->access_type () == store))
     {
-      log_msg ("validating alternatives\n");
+      log_msg ("\nvalidating alternatives for insn\n");
+      log_insn (a->insn ());
+
+      #define log_invalidate_cont(msg) do { \
+	log_msg ("alternative  "); \
+	log_addr_expr (alt->address ()); \
+	log_msg ("  invalid: %s\n", msg); \
+	alt->set_invalid (); \
+	goto Lcontinue; } while (0)
+
+      // Alternatives might have reg placeholders such as any_regno.
+      // When validating the change in the insn we need to have real pseudos.
+      // To avoid creating a lot of pseudos, use this one.
+      rtx tmp_reg = gen_rtx_REG (Pmode, LAST_VIRTUAL_REGISTER + 1);
+
+      addr_expr tmp_addr;
 
       for (iter alt = iter (a->alternatives ().begin (),
 			    a->alternatives ().end ()),
 	   alt_end = iter (a->alternatives ().end (),
 			   a->alternatives ().end ()); alt != alt_end; ++alt)
 	{
-	  // a->try_set_insn_mem_rtx (...);
+	  if (alt->address ().has_no_base_reg ())
+	    log_invalidate_cont ("has no base reg");
+
+	  tmp_addr = alt->address ();
+	  if (tmp_addr.base_reg () == any_regno)
+	    tmp_addr.set_base_reg (tmp_reg);
+	  if (tmp_addr.index_reg () == any_regno)
+	    tmp_addr.set_index_reg (tmp_reg);
+
+	  if (!a->try_set_insn_mem_rtx (tmp_addr.to_rtx ()))
+	    log_invalidate_cont ("failed to substitute regs");
+
+	  if (alt->address ().disp_min () > alt->address ().disp_max ())
+	    log_invalidate_cont ("min disp > max disp");
+
+	  if (alt->address ().disp_min () != alt->address ().disp_max ())
+	    {
+	      // Probe some displacement values and hope that we cover enough.
+	      tmp_addr.set_disp (alt->address ().disp_min ());
+	      if (!a->try_set_insn_mem_rtx (tmp_addr.to_rtx ()))
+		log_invalidate_cont ("bad min disp");
+
+	      tmp_addr.set_disp (alt->address ().disp_max ());
+	      if (!a->try_set_insn_mem_rtx (tmp_addr.to_rtx ()))
+		log_invalidate_cont ("bad max disp");
+	    }
+
+	  if (alt->address ().has_index_reg ())
+	    {
+	      if (alt->address ().scale_min () > alt->address ().scale_max ())
+		log_invalidate_cont ("min scale > max scale");
+
+	      if (alt->address ().scale_min () != alt->address ().scale_max ())
+		{
+		  // Probe some displacement and index scale combinations and
+		  // hope that we cover enough.
+		  tmp_addr.set_disp (alt->address ().disp_min ());
+		  tmp_addr.set_scale (alt->address ().scale_min ());
+		  if (!a->try_set_insn_mem_rtx (tmp_addr.to_rtx ()))
+		    log_invalidate_cont ("bad min disp min scale");
+
+		  tmp_addr.set_disp (alt->address ().disp_min ());
+		  tmp_addr.set_scale (alt->address ().scale_max ());
+		  if (!a->try_set_insn_mem_rtx (tmp_addr.to_rtx ()))
+		    log_invalidate_cont ("bad min disp max scale");
+
+		  tmp_addr.set_disp (alt->address ().disp_max ());
+		  tmp_addr.set_scale (alt->address ().scale_min ());
+		  if (!a->try_set_insn_mem_rtx (tmp_addr.to_rtx ()))
+		    log_invalidate_cont ("bad max disp min scale");
+
+		  tmp_addr.set_disp (alt->address ().disp_max ());
+		  tmp_addr.set_scale (alt->address ().scale_max ());
+		  if (!a->try_set_insn_mem_rtx (tmp_addr.to_rtx ()))
+		    log_invalidate_cont ("bad max disp max scale");
+		}
+	    }
+
+        Lcontinue:;
 	}
+
+      #undef log_set_invalid_continue
     }
 
   // Remove invalid alternatives from the set.

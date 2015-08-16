@@ -240,6 +240,12 @@ public:
     // rtx might not be completely valid.
     rtx to_rtx (void) const;
 
+    // Mutating functions.
+    void set_base_reg (rtx val);
+    void set_index_reg (rtx val);
+    void set_disp (disp_t val);
+    void set_scale (scale_t val);
+
   protected:
     addr_type_t m_type;
 
