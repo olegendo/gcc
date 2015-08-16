@@ -13731,6 +13731,11 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   validate_alternatives = get_attr_ams_validate_alternatives (acc->insn ())
 			  == AMS_VALIDATE_ALTERNATIVES_YES;
 
+  // FIXME: For now always do alternative validation because AMS can't
+  // handle multi-mem insns properly.  Alternative validation will effectively
+  // disable AMS optimization for those insns.
+  validate_alternatives = true;
+
   // FIXME: determine R0 extra cost dynamically, based on what is happening
   // around the memory access.
   // if there are insns that are likely to use R0 (tst #imm, and/or/xor #imm)
@@ -13795,9 +13800,9 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   // If there is no FPU GP regs will be used for storing FP modes, so we
   // allow normal QIHISImode alternatives also for FP modes.
   if (!TARGET_FPU_ANY
-      || (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
+      || (GET_MODE_CLASS (acc_mode) != MODE_FLOAT
 	  && GET_MODE_CLASS (acc_mode) != MODE_COMPLEX_FLOAT
-	  && GET_MODE_CLASS (acc_mode) != MODE_VECTOR_FLOAT)
+	  && GET_MODE_CLASS (acc_mode) != MODE_VECTOR_FLOAT))
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
       // However, don't use it for DImode since this results in worse code
