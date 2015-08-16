@@ -512,6 +512,7 @@ public:
 
     // If false, AMS skips this access when optimizing.
     bool should_optimize (void) const { return m_should_optimize; }
+    void set_should_optimize (bool val = true) { m_should_optimize = val; }
 
     // For reg_mod accesses, returns the register rtx that is being modified.
     rtx address_reg (void) const { return m_addr_reg; }

@@ -3234,6 +3234,12 @@ sh_ams::access_sequence
       for (; c > 0; --c)
 	a->alternatives ().pop_back ();
     }
+
+  if (a->alternatives ().empty ())
+    {
+      log_msg ("no valid alternatives, not optimizing this access\n");
+      a->set_should_optimize (false);
+    }
 }
 
 int
