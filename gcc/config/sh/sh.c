@@ -13792,9 +13792,12 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
 		       && acc->dec_chain ().length () >= 3
 		       && acc->dec_chain ().first () ? -2 : 0;
 
-  if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT
-      && GET_MODE_CLASS (acc_mode) != MODE_COMPLEX_FLOAT
-      && GET_MODE_CLASS (acc_mode) != MODE_VECTOR_FLOAT)
+  // If there is no FPU GP regs will be used for storing FP modes, so we
+  // allow normal QIHISImode alternatives also for FP modes.
+  if (!TARGET_FPU_ANY
+      || (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
+	  && GET_MODE_CLASS (acc_mode) != MODE_COMPLEX_FLOAT
+	  && GET_MODE_CLASS (acc_mode) != MODE_VECTOR_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
       // However, don't use it for DImode since this results in worse code
