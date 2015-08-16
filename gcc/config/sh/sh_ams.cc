@@ -308,7 +308,8 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
           if (alt_count > 0)
             log_msg ("\n");
 
-          log_msg ("    alt %d, cost %d: ", alt_count, alt->cost ());
+          log_msg ("    alt %d, cost %d, valid %d: ",
+		   alt_count, alt->cost (), alt->valid ());
           log_addr_expr (alt->address ());
           ++alt_count;
         }
@@ -599,6 +600,7 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_should_optimize = should_optimize;
   m_addr_reg = NULL;
   m_used = false;
+  m_validate_alternatives = true;
 }
 
 // Constructor for reg_mod accesses.
@@ -617,6 +619,7 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_should_optimize = true;
   m_addr_reg = mod_reg;
   m_used = false;
+  m_validate_alternatives = true;
 }
 
 // Constructor for reg_use accesses.
@@ -637,6 +640,7 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_should_optimize = true;
   m_addr_reg = NULL;
   m_used = false;
+  m_validate_alternatives = true;
 }
 
 bool
@@ -733,6 +737,15 @@ sh_ams::access::set_insn_mem_rtx (rtx new_addr)
 }
 
 bool
+sh_ams::access::try_set_insn_mem_rtx (rtx new_addr)
+{
+  bool r = validate_change (m_insn, m_mem_ref,
+			    replace_equiv_address (*m_mem_ref, new_addr), true);
+  cancel_changes (0);  
+  return r;
+}
+
+bool
 sh_ams::access::set_insn_use_rtx (rtx new_expr)
 {
   return validate_change (m_insn, m_mem_ref, new_expr, false);
@@ -744,6 +757,16 @@ sh_ams::access::set_insn (rtx_insn* new_insn)
   // FIXME: maybe add some consistency checks here?
   m_insn = new_insn;
 }
+
+struct sh_ams::access::alternative_valid
+{
+  bool operator () (const alternative& a) const { return a.valid (); }
+};
+
+struct sh_ams::access::alternative_invalid
+{
+  bool operator () (const alternative& a) const { return !a.valid (); }
+};
 
 // Create a reg_mod access and add it to the access sequence.
 // This function traverses the insn list backwards starting from INSN to
@@ -3062,6 +3085,47 @@ sh_ams::access_sequence
       // If the access isn't a true memory access, the
       // address has to be loaded into a single register.
       a->alternatives ().push_back (access::alternative (0, make_reg_addr ()));
+      a->set_validate_alternatives (false);
+    }
+    
+  typedef access::alternative_valid match;
+  typedef filter_iterator<access::alternative_set::iterator, match> iter;
+
+  // By default alternative validation is enabled for all accesses.
+  // The target's delegate implementation might disable validation for insns
+  // to speed up processing, if it knows that all the alternatives are valid.
+  if (a->validate_alternatives ()
+      && a->access_type () == load || a->access_type () == store)
+    {
+      log_msg ("validating alternatives\n");
+
+      for (iter alt = iter (a->alternatives ().begin (),
+			    a->alternatives ().end ()),
+	   alt_end = iter (a->alternatives ().end (),
+			   a->alternatives ().end ()); alt != alt_end; ++alt)
+	{
+	  // a->try_set_insn_mem_rtx (...);
+	}
+    }
+
+  // Remove invalid alternatives from the set.
+  // Instead we could also use a filter_iterator each time the
+  // alternatives are accessed.  This would allow for more flexible
+  // alternative valid/invalid scenarios.  Currently we allow invalid
+  // alternatives only right here.
+  access::alternative_set::iterator first_invalid =
+	std::stable_partition (a->alternatives ().begin (),
+			       a->alternatives ().end (),
+			       access::alternative_valid ());
+
+  // FIXME: Implement erase (iter, iter) for alternative_set.
+  if (first_invalid != a->alternatives ().end ())
+    {
+      unsigned int c = std::distance (first_invalid, a->alternatives ().end ());
+      log_msg ("removing %u invalid alternatives\n", c);
+
+      for (; c > 0; --c)
+	a->alternatives ().pop_back ();
     }
 }
 

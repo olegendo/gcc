@@ -323,21 +323,29 @@ public:
     class alternative
     {
     public:
-      alternative (void) { }
+      alternative (void) : m_valid (false) { }
 
       alternative (int cost, const addr_expr& ae)
-      : m_addr_expr (ae), m_cost (cost) { }
+      : m_valid (true), m_addr_expr (ae), m_cost (cost) { }
 
       const addr_expr& address (void) const { return m_addr_expr; }
 
       int cost (void) const { return m_cost; }
       void set_cost (int val) { m_cost = val; }
       void adjust_cost (int val) { m_cost += val; }
+      
+      bool valid (void) const { return m_valid; }
+      void set_valid (bool val = true) { m_valid = val; }
+      void set_invalid (bool val = true) { m_valid = !val; }
 
     private:
+      bool m_valid;
       addr_expr m_addr_expr;
       int m_cost;
     };
+
+    struct alternative_valid;
+    struct alternative_invalid;
 
     // for now the alternative set is basically a boost::static_vector.
     class alternative_set
@@ -534,8 +542,13 @@ public:
     void adjust_cost (int d) { m_cost += d; }
 
     bool set_insn_mem_rtx (rtx new_addr);
+    bool try_set_insn_mem_rtx (rtx new_addr);
+
     bool set_insn_use_rtx (rtx new_expr);
     void set_insn (rtx_insn* new_insn);
+
+    bool validate_alternatives (void) const { return m_validate_alternatives; }
+    void set_validate_alternatives (bool val = true);
 
   private:
     addr_expr m_original_addr_expr;
@@ -552,6 +565,7 @@ public:
     rtx m_addr_rtx;
     rtx m_addr_reg;
     bool m_used;
+    bool m_validate_alternatives;
 
     adjacent_chain m_inc_chain;
     adjacent_chain m_dec_chain;
@@ -1225,6 +1239,12 @@ sh_ams::access::alternative_set::push_back (const value_type& e)
 {
   gcc_assert (size () < max_size ());
   m_data[m_size++] = e;
+}
+
+inline void
+sh_ams::access::set_validate_alternatives (bool val)
+{
+  m_validate_alternatives = val;
 }
 
 inline bool
