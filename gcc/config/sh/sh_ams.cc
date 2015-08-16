@@ -3250,6 +3250,21 @@ sh_ams::access_sequence
       log_msg ("no valid alternatives, not optimizing this access\n");
       a->set_should_optimize (false);
     }
+
+  // At least on clang/libc++ there is a problem with bind1st, mem_fun and
+  // &access::matches_alternative.
+  access::alternative_set::iterator alt_match;
+  for (alt_match = a->alternatives ().begin ();
+       alt_match != a->alternatives ().end (); ++alt_match)
+    if (a->matches_alternative (*alt_match))
+      break;
+
+  if (alt_match == a->alternatives ().end ())
+    {
+      log_msg ("original address does not match any alternative, "
+	       "not optimizing this access\n");
+      a->set_should_optimize (false);
+    }
 }
 
 int
@@ -3391,6 +3406,8 @@ sh_ams::execute (function* fun)
 	  as.update_access_alternatives (m_delegate, a,
 					 m_options.force_alt_validation);
       }
+      log_access_sequence (as, true);
+      log_msg ("\n\n");
 
       log_msg ("updating costs\n");
       {
