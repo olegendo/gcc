@@ -582,6 +582,49 @@ sh_ams::options::options (const std::string& str)
 //  error ("unknown AMS option");
 }
 
+rtx
+sh_ams::addr_expr::to_rtx (void) const
+{
+  if (m_cached_to_rtx != NULL)
+    return m_cached_to_rtx;
+
+  if (!has_base_reg ())
+    return NULL;
+
+  rtx r = base_reg ();
+
+  // Add (possibly scaled) index reg.
+  if (has_index_reg ())
+    {
+      rtx i = index_reg ();
+      int s = scale ();
+
+      if (s != 1)
+	{
+	  int shiftval = exact_log2 (s);
+	  i = shiftval != -1 ? gen_rtx_ASHIFT (Pmode, i, GEN_INT (shiftval))
+			     : gen_rtx_MULT (Pmode, i, GEN_INT (s));
+	}
+
+      r = gen_rtx_PLUS (Pmode, r, i);
+   }
+
+  // Surround with POST/PRE_INC/DEC if it is an auto_mod type.
+  // FIXME: Also handle PRE_MODIFY and POST_MODIFY.  For that we might need
+  // to have the mod being an addr_expr instead of the constant displacement.
+  // Moreover, we can't really distinguish of a post/pre mod with a
+  // displacement != access size from a post/pre inc/dec.
+  if (type () == pre_mod)
+    r = disp () > 0 ? gen_rtx_PRE_INC (Pmode, r) : gen_rtx_PRE_DEC (Pmode, r);
+
+  else if (type () == post_mod)
+    r = disp () > 0 ? gen_rtx_POST_INC (Pmode, r) : gen_rtx_POST_DEC (Pmode, r);
+
+  else if (has_disp ())
+    r = gen_rtx_PLUS (Pmode, r, GEN_INT (disp ()));
+
+  return m_cached_to_rtx = r;
+}
 
 sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
                         addr_expr original_addr_expr, addr_expr addr_expr,
@@ -2171,67 +2214,8 @@ sh_ams::access_sequence
         {
           // Update the access rtx to reflect ORIGINAL_ADDRESS.
 
-          rtx new_addr = accs->original_address ().base_reg ();
-          log_msg ("new addr (1) = ");
-          log_rtx (new_addr);
-          log_msg ("\n");
-
-          // Add (possibly scaled) index reg.
-          if (accs->original_address ().has_index_reg ())
-            {
-	      rtx index = accs->original_address ().index_reg ();
-	      int scale = accs->original_address ().scale ();
-
-	      if (scale != 1)
-	        {
-		  int shiftval = exact_log2 (scale);
-		  index = shiftval != -1
-			  ? gen_rtx_ASHIFT (Pmode, index, GEN_INT (shiftval))
-			  : gen_rtx_MULT (Pmode, index, GEN_INT (scale));
-		}
-
-	      new_addr = gen_rtx_PLUS (Pmode, new_addr, index);
-
-	      log_msg ("new addr (2) = ");
-	      log_rtx (new_addr);
-	      log_msg ("\n");
-            }
-
-          // Surround with POST/PRE_INC/DEC if ORIGINAL_ADDRESS is an
-          // auto_mod type.
-          if (accs->original_address ().type () == pre_mod)
-            {
-	      new_addr = accs->original_address ().disp () > 0
-			 ? gen_rtx_PRE_INC (Pmode, new_addr)
-			 : gen_rtx_PRE_DEC (Pmode, new_addr);
-
-	      log_msg ("new addr (3) = ");
-	      log_rtx (new_addr);
-	      log_msg ("\n");
-            }
-          else if (accs->original_address ().type () == post_mod)
-            {
-	      new_addr = accs->original_address ().disp () > 0
-			 ? gen_rtx_POST_INC (Pmode, new_addr)
-			 : gen_rtx_POST_DEC (Pmode, new_addr);
-
-	      log_msg ("new addr (4) = ");
-	      log_rtx (new_addr);
-	      log_msg ("\n");
-            }
-          else if (accs->original_address ().has_disp ())
-            {
-              // Add constant displacement.
-	      new_addr =
-		  gen_rtx_PLUS (Pmode, new_addr,
-				GEN_INT (accs->original_address ().disp ()));
-
-	      log_msg ("new addr (5) = ");
-	      log_rtx (new_addr);
-	      log_msg ("\n");
-	    }
-
-	  log_msg ("new addr (6) = ");
+          rtx new_addr = accs->original_address ().to_rtx ();
+	  log_msg ("new addr = ");
 	  log_rtx (new_addr);
 	  log_msg ("\n");
 

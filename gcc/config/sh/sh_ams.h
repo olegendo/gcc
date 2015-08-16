@@ -196,6 +196,8 @@ public:
   class addr_expr
   {
   public:
+    addr_expr (void) : m_cached_to_rtx (NULL) { }
+
     addr_type_t type (void) const { return m_type; }
 
     rtx base_reg (void) const { return m_base_reg; }
@@ -233,6 +235,11 @@ public:
     // e.g. a post-inc access will have a post-disp of +mode_size.
     disp_t exit_disp (void) const { return type () == post_mod ? disp () : 0; }
 
+    // Convert this addr_expr into an rtx.
+    // Notice that if it contains the any_regno placeholder, the resulting
+    // rtx might not be completely valid.
+    rtx to_rtx (void) const;
+
   protected:
     addr_type_t m_type;
 
@@ -248,6 +255,7 @@ public:
     scale_t m_scale;
     scale_t m_scale_min;
     scale_t m_scale_max;
+    mutable rtx m_cached_to_rtx;
   };
 
   class non_mod_addr : public addr_expr
