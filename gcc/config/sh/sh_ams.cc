@@ -2517,8 +2517,7 @@ sh_ams::access_sequence
 
   // If the end addr only has a constant displacement, try loading it into
   // the reg directly.
-  if (end_addr.has_no_base_reg () && end_addr.has_no_index_reg ()
-      && end_addr.has_disp ())
+  if (end_addr.has_no_base_reg () && end_addr.has_no_index_reg ())
     {
       rtx const_reg = gen_reg_rtx (Pmode);
       add_reg_mod (accesses ().begin (), make_const_addr (end_addr.disp ()),
