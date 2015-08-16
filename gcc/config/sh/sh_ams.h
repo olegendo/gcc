@@ -644,7 +644,8 @@ public:
 
     void calculate_adjacency_info (void);
 
-    void update_access_alternatives (delegate& d, access_sequence::iterator a);
+    void update_access_alternatives (delegate& d, access_sequence::iterator a,
+				     bool force_validation);
 
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
@@ -945,15 +946,29 @@ public:
 
   struct options
   {
-    // use default values.
+    // Use default values.
     options (void);
 
-    // parse options from comma separated key=value list
+    // Parse options from comma separated key=value list
     options (const char* str);
     options (const std::string& str);
 
+    // Check if the acces sequence costs are minimal.  If so, don't try to
+    // optimize the access sequence if so.  Default is true.
     bool check_minimal_cost;
+
+    // Check if the original access sequence costs are less or equal to the
+    // proposed AMS optimized access sequence costs.  If so, don't try to
+    // optimize the access sequence.  Default is true.
     bool check_original_cost;
+
+    // By default AMS will do alternative validation, but it can be disabled
+    // by the delegate to speed up processing.  This will force the validation.
+    // Default is false.
+    bool force_alt_validation;
+
+    // Use this as a base look ahead count value for the algorithm that selects
+    // alternatives.  Default is 1.
     int base_lookahead_count;
   };
 

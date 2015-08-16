@@ -538,6 +538,7 @@ sh_ams::options::options (void)
   // optimization level.
   check_minimal_cost = true;
   check_original_cost = true;
+  force_alt_validation = false;
   base_lookahead_count = 1;
 }
 
@@ -578,6 +579,9 @@ sh_ams::options::options (const std::string& str)
 
   for (kvi i = kv.find ("base_lookahead_count"); i != kv.end (); i = kv.end ())
     parse_int (i->second).copy_if_valid_to (base_lookahead_count);
+
+  for (kvi i = kv.find ("force_alt_validation"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (force_alt_validation);
 
 //  error ("unknown AMS option");
 }
@@ -3108,7 +3112,8 @@ sh_ams::access_sequence::calculate_adjacency_info (void)
 
 void
 sh_ams::access_sequence
-::update_access_alternatives (delegate& d, access_sequence::iterator a)
+::update_access_alternatives (delegate& d, access_sequence::iterator a,
+			      bool force_validation)
 {
   if (a->access_type () == load || a->access_type () == store)
     d.mem_access_alternatives (a->alternatives (), *this, a);
@@ -3126,7 +3131,7 @@ sh_ams::access_sequence
   // By default alternative validation is enabled for all accesses.
   // The target's delegate implementation might disable validation for insns
   // to speed up processing, if it knows that all the alternatives are valid.
-  if (a->validate_alternatives ()
+  if ((a->validate_alternatives () || force_validation)
       && (a->access_type () == load || a->access_type () == store))
     {
       log_msg ("\nvalidating alternatives for insn\n");
@@ -3378,7 +3383,8 @@ sh_ams::execute (function* fun)
 
 	for (iter a = as.begin<match> (), a_end = as.end<match> ();
 	     a != a_end; ++a)
-	  as.update_access_alternatives (m_delegate, a);
+	  as.update_access_alternatives (m_delegate, a,
+					 m_options.force_alt_validation);
       }
 
       log_msg ("updating costs\n");
