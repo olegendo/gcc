@@ -470,6 +470,12 @@ public:
     // the insn where this access occurs.
     rtx_insn* insn (void) const { return m_insn; }
 
+    // returns the rtx inside the insn that this access refers to.
+    // for mem accesses it will be the address expression inside the mem.
+    // for reg mods it will be the set source rtx.
+    // FIXME: this should actually be addr_rtx.
+    rtx addr_rtx_in_insn (void) const { return m_mem_ref ? *m_mem_ref : NULL; }
+
     // Returns the address rtx if the address expression can't be described
     // with an addr_expr, or null if the address is unknown.
     rtx addr_rtx (void) const { return m_addr_rtx; }

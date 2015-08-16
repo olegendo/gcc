@@ -13788,7 +13788,9 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
 		       && acc->dec_chain ().length () >= 3
 		       && acc->dec_chain ().first () ? -2 : 0;
 
-  if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
+  if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT
+      && GET_MODE_CLASS (acc_mode) != MODE_COMPLEX_FLOAT
+      && GET_MODE_CLASS (acc_mode) != MODE_VECTOR_FLOAT)
     {
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
       // However, don't use it for DImode since this results in worse code
@@ -13813,6 +13815,7 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
     }
 
   // indexed addressing has to use R0 for either base or index reg.
+  // FIXME: may be disallow indexed mode for access size > 4?
   *alts++ = alternative (1 + gbr_extra_cost + r0_extra_cost,
 			 sh_ams::make_index_addr ());
 
