@@ -592,10 +592,7 @@ sh_ams::addr_expr::to_rtx (void) const
   if (m_cached_to_rtx != NULL)
     return m_cached_to_rtx;
 
-  if (!has_base_reg ())
-    return NULL;
-
-  rtx r = base_reg ();
+  rtx r = has_base_reg () ? base_reg () : NULL;
 
   // Add (possibly scaled) index reg.
   if (has_index_reg ())
@@ -610,7 +607,7 @@ sh_ams::addr_expr::to_rtx (void) const
 			     : gen_rtx_MULT (Pmode, i, GEN_INT (s));
 	}
 
-      r = gen_rtx_PLUS (Pmode, r, i);
+      r = r ? gen_rtx_PLUS (Pmode, r, i) : i;
    }
 
   // Surround with POST/PRE_INC/DEC if it is an auto_mod type.
@@ -625,7 +622,7 @@ sh_ams::addr_expr::to_rtx (void) const
     r = disp () > 0 ? gen_rtx_POST_INC (Pmode, r) : gen_rtx_POST_DEC (Pmode, r);
 
   else if (has_disp ())
-    r = gen_rtx_PLUS (Pmode, r, GEN_INT (disp ()));
+    r = r ? gen_rtx_PLUS (Pmode, r, GEN_INT (disp ())) : GEN_INT (disp ());
 
   return m_cached_to_rtx = r;
 }
