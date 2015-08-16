@@ -1229,9 +1229,11 @@ sh_ams::access::alternative_set::push_back (const value_type& e)
 inline bool
 sh_ams::adjacent_inc (const access& first, const access& second)
 {
+  // FIXME: This one checks for adjacent loads/stores only for now.
+  // This will miss cases where reg uses are interleaved with loads/stores.
   std::pair<disp_t, bool> distance = second.address () - first.address ();
   return (first.access_type () == load || first.access_type () == store)
-    && distance.second && distance.first == first.access_size ();
+	 && distance.second && distance.first == first.access_size ();
 }
 
 inline bool
@@ -1243,9 +1245,11 @@ sh_ams::not_adjacent_inc (const access& first, const access& second)
 inline bool
 sh_ams::adjacent_dec (const access& first, const access& second)
 {
+  // FIXME: This one checks for adjacent loads/stores only for now.
+  // This will miss cases where reg uses are interleaved with loads/stores.
   std::pair<disp_t, bool> distance = first.address () - second.address ();
   return (first.access_type () == load || first.access_type () == store)
-    && distance.second && distance.first == first.access_size ();
+	 && distance.second && distance.first == first.access_size ();
 }
 
 inline bool
