@@ -2212,7 +2212,7 @@ sh_ams::access_sequence
 	  log_rtx (new_addr);
 	  log_msg ("\n");
 
-	  if (bool mem_update_ng = !accs->set_insn_mem_rtx (new_addr))
+	  if (!accs->set_insn_mem_rtx (new_addr))
 	    {
 	      log_msg ("failed to replace mem rtx\n");
 	      log_rtx (accs->addr_rtx_in_insn ());
