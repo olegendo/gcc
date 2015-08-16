@@ -3115,8 +3115,13 @@ sh_ams::access_sequence
 ::update_access_alternatives (delegate& d, access_sequence::iterator a,
 			      bool force_validation)
 {
+  bool val_alts = a->validate_alternatives ();
+
   if (a->access_type () == load || a->access_type () == store)
-    d.mem_access_alternatives (a->alternatives (), *this, a);
+    {
+      d.mem_access_alternatives (a->alternatives (), *this, a, val_alts);
+      a->set_validate_alternatives (val_alts);
+    }
   else
     {
       // If the access isn't a true memory access, the
@@ -3124,7 +3129,7 @@ sh_ams::access_sequence
       a->alternatives ().push_back (access::alternative (0, make_reg_addr ()));
       a->set_validate_alternatives (false);
     }
-    
+
   typedef access::alternative_valid match;
   typedef filter_iterator<access::alternative_set::iterator, match> iter;
 

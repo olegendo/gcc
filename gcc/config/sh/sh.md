@@ -486,6 +486,11 @@
 			 (const_int 4)
 			 (const_int 2))))
 
+;; By default the AMS delegate will return valid address expression
+;; alternatives.  Some special insns which are not handled by the AMS delegate
+;; can set the attribute to enable alternative validation by the AMS pass.
+(define_attr "ams_validate_alternatives" "no,yes" (const_string "no"))
+
 ;; DFA descriptions for the pipelines
 
 (include "sh1.md")

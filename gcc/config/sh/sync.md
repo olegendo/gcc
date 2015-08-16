@@ -304,7 +304,8 @@
   else
     FAIL;
 }
-  [(set_attr "length" "14")])
+  [(set_attr "length" "14")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -372,7 +373,8 @@
 	 "	bf	0b"			"\n"
 	 "0:";
 }
-  [(set_attr "length" "30")])
+  [(set_attr "length" "30")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_compare_and_swap<mode>_soft_gusa"
   [(set (match_operand:SI 0 "arith_reg_dest" "=&u")
@@ -401,7 +403,8 @@
 	 "	mov.<bwl>	%3,%1"		"\n"
 	 "1:	mov	r1,r15";
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_compare_and_swap<mode>_soft_tcb"
   [(set (match_operand:SI 0 "arith_reg_dest" "=&r")
@@ -432,7 +435,8 @@
 	 "	mov.<bwl>	%3,%1"		"\n"
 	 "1:	mov.l	r0,@(%O4,gbr)";
 }
-  [(set_attr "length" "22")])
+  [(set_attr "length" "22")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_compare_and_swap<mode>_soft_imask"
   [(set (match_operand:SI 0 "arith_reg_dest" "=&z")
@@ -481,7 +485,8 @@
 }
   [(set (attr "length") (if_then_else (match_test "!TARGET_SH2A")
 				      (const_string "24")
-				      (const_string "22")))])
+				      (const_string "22")))
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;;------------------------------------------------------------------------------
 ;; read - write - return old value
@@ -538,7 +543,8 @@
 	 "	movco.l r0,%1"		"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "10")])
+  [(set_attr "length" "10")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -593,7 +599,8 @@
 	 "	movco.l	r0,@%3"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "24")])
+  [(set_attr "length" "24")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_exchange<mode>_soft_gusa"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&u")
@@ -613,7 +620,8 @@
 	 "	mov.<bwl>	%2,%1"		"\n"
 	 "1:	mov	r1,r15";
 }
-  [(set_attr "length" "14")])
+  [(set_attr "length" "14")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_exchange<mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&r")
@@ -635,7 +643,8 @@
 	 "	mov.<bwl>	%2,%1"		"\n"
 	 "1:	mov.l	r0,@(%O3,gbr)";
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_exchange<mode>_soft_imask"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&z")
@@ -654,7 +663,8 @@
 	 "	mov.<bwl>	%2,%1"		"\n"
 	 "	ldc	%3,sr";
 }
-  [(set_attr "length" "14")])
+  [(set_attr "length" "14")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;;------------------------------------------------------------------------------
 ;; read - add|sub|or|and|xor|nand - write - return old value
@@ -785,7 +795,8 @@
   emit_insn (gen_atomic_<fetchop_name>_fetchsi_hard (gen_reg_rtx (SImode),
 						     operands[1], operands[2]));
 }
-  [(set_attr "length" "10")])
+  [(set_attr "length" "10")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn_and_split "atomic_fetch_notsi_hard"
@@ -810,7 +821,8 @@
 {
   emit_insn (gen_atomic_not_fetchsi_hard (gen_reg_rtx (SImode), operands[1]));
 }
-  [(set_attr "length" "10")])
+  [(set_attr "length" "10")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -879,7 +891,8 @@
 	 "	movco.l	r0,@%3"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "28")])
+  [(set_attr "length" "28")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -935,7 +948,8 @@
 	 "	movco.l	r0,@%2"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "26")])
+  [(set_attr "length" "26")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn_and_split "atomic_fetch_not<mode>_hard"
@@ -976,7 +990,8 @@
   XEXP (XVECEXP (XEXP (XVECEXP (i, 0, 0), 1), 0, 0), 0) = m;
   emit_insn (i);
 }
-  [(set_attr "length" "26")])
+  [(set_attr "length" "26")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_not<mode>_hard"
   [(set (mem:QIHI (match_operand:SI 0 "arith_reg_operand" "r"))
@@ -1001,7 +1016,8 @@
 	 "	movco.l	r0,@%1"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "26")])
+  [(set_attr "length" "26")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_fetch_<fetchop_name><mode>_soft_gusa"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&u")
@@ -1035,7 +1051,8 @@
   emit_insn (gen_atomic_<fetchop_name>_fetch<mode>_soft_gusa (
 		gen_reg_rtx (<MODE>mode), operands[1], operands[2]));
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn_and_split "atomic_fetch_not<mode>_soft_gusa"
@@ -1064,7 +1081,8 @@
   emit_insn (gen_atomic_not_fetch<mode>_soft_gusa (gen_reg_rtx (<MODE>mode),
 						   operands[1]));
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_fetch_<fetchop_name><mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&r")
@@ -1099,7 +1117,8 @@
   emit_insn (gen_atomic_<fetchop_name><mode>_soft_tcb (
 					operands[1], operands[2], operands[3]));
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_<fetchop_name><mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "atomic_mem_operand_1" "=SraSdd")
@@ -1124,7 +1143,8 @@
 	 "1:	mov	#0,r0"			"\n"
 	 "	mov.l	r0,@(%O2,gbr)";
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn_and_split "atomic_fetch_not<mode>_soft_tcb"
@@ -1154,7 +1174,8 @@
 {
   emit_insn (gen_atomic_not<mode>_soft_tcb (operands[1], operands[2]));
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_not<mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "atomic_mem_operand_1" "=SraSdd")
@@ -1174,7 +1195,8 @@
 	 "1:	mov	#0,r0"			"\n"
 	 "	mov.l	r0,@(%O1,gbr)";
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_fetch_<fetchop_name><mode>_soft_imask"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&r")
@@ -1207,7 +1229,8 @@
   emit_insn (gen_atomic_<fetchop_name>_fetch<mode>_soft_imask (
 			gen_reg_rtx (<MODE>mode), operands[1], operands[2]));
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn_and_split "atomic_fetch_not<mode>_soft_imask"
@@ -1236,7 +1259,8 @@
   emit_insn (gen_atomic_not_fetch<mode>_soft_imask (gen_reg_rtx (<MODE>mode),
 						    operands[1]));
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_expand "atomic_fetch_nand<mode>"
   [(set (match_operand:QIHISI 0 "arith_reg_dest")
@@ -1306,7 +1330,8 @@
   emit_insn (gen_atomic_nand_fetchsi_hard (gen_reg_rtx (SImode), operands[1],
 					   operands[2]));
 }
-  [(set_attr "length" "12")])
+  [(set_attr "length" "12")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -1376,7 +1401,8 @@
 	 "	movco.l	r0,@%3"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "30")])
+  [(set_attr "length" "30")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -1432,7 +1458,8 @@
 	 "	movco.l	r0,@%2"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "28")])
+  [(set_attr "length" "28")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_fetch_nand<mode>_soft_gusa"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&u")
@@ -1466,7 +1493,8 @@
   emit_insn (gen_atomic_nand_fetch<mode>_soft_gusa (gen_reg_rtx (<MODE>mode),
 						    operands[1], operands[2]));
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_fetch_nand<mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&r")
@@ -1501,7 +1529,8 @@
   emit_insn (gen_atomic_nand<mode>_soft_tcb (operands[1], operands[2],
 					     operands[3]));
 }
-  [(set_attr "length" "22")])
+  [(set_attr "length" "22")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_nand<mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "atomic_mem_operand_1" "=SraSdd")
@@ -1526,7 +1555,8 @@
 	 "1:	mov	#0,r0"			"\n"
 	 "	mov.l	r0,@(%O2,gbr)";
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_fetch_nand<mode>_soft_imask"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&r")
@@ -1559,7 +1589,8 @@
   emit_insn (gen_atomic_nand_fetch<mode>_soft_imask (gen_reg_rtx (<MODE>mode),
 						     operands[1], operands[2]));
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;;------------------------------------------------------------------------------
 ;; read - add|sub|or|and|xor|nand - write - return new value
@@ -1625,7 +1656,8 @@
 	 "	movco.l	%0,%1"		"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "8")])
+  [(set_attr "length" "8")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn "atomic_not_fetchsi_hard"
@@ -1642,7 +1674,8 @@
 	 "	movco.l	%0,%1"		"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "8")])
+  [(set_attr "length" "8")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -1710,7 +1743,8 @@
 	 "	movco.l	r0,@%3"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "28")])
+  [(set_attr "length" "28")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn_and_split "atomic_not_fetch<mode>_hard"
@@ -1752,7 +1786,8 @@
   XEXP (XVECEXP (XEXP (XVECEXP (i, 0, 0), 1), 0, 0), 0) = m;
   emit_insn (i);
 }
-  [(set_attr "length" "28")])
+  [(set_attr "length" "28")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_<fetchop_name>_fetch<mode>_soft_gusa"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&u")
@@ -1777,7 +1812,8 @@
 	 "	mov.<bwl>	%0,%1"		"\n"
 	 "1:	mov	r1,r15";
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn "atomic_not_fetch<mode>_soft_gusa"
@@ -1798,7 +1834,8 @@
 	 "	mov.<bwl>	%0,%1"		"\n"
 	 "1:	mov	r1,r15";
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_<fetchop_name>_fetch<mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&r")
@@ -1833,7 +1870,8 @@
   emit_insn (gen_atomic_<fetchop_name><mode>_soft_tcb (
 				operands[1], operands[2], operands[3]));
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn_and_split "atomic_not_fetch<mode>_soft_tcb"
@@ -1863,7 +1901,8 @@
 {
   emit_insn (gen_atomic_not<mode>_soft_tcb (operands[1], operands[2]));
 }
-  [(set_attr "length" "20")])
+  [(set_attr "length" "20")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_<fetchop_name>_fetch<mode>_soft_imask"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&z")
@@ -1887,7 +1926,8 @@
 	 "	mov.<bwl>	%0,%1"		"\n"
 	 "	ldc	%3,sr";
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; Combine pattern for xor (val, -1) / nand (val, -1).
 (define_insn "atomic_not_fetch<mode>_soft_imask"
@@ -1907,7 +1947,8 @@
 	 "	mov.<bwl>	%0,%1"		"\n"
 	 "	ldc	%2,sr";
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_expand "atomic_nand_fetch<mode>"
   [(set (match_operand:QIHISI 0 "arith_reg_dest")
@@ -1969,7 +2010,8 @@
 	 "	movco.l	%0,%1"		"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "10")])
+  [(set_attr "length" "10")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;; The QIHImode llcs patterns modify the address register of the memory
 ;; operand.  In order to express that, we have to open code the memory
@@ -2038,7 +2080,8 @@
 	 "	movco.l	r0,@%3"			"\n"
 	 "	bf	0b";
 }
-  [(set_attr "length" "28")])
+  [(set_attr "length" "28")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_nand_fetch<mode>_soft_gusa"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&u")
@@ -2063,7 +2106,8 @@
 	 "	mov.<bwl>	%0,%1"		"\n"
 	 "1:	mov	r1,r15";
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn_and_split "atomic_nand_fetch<mode>_soft_tcb"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&r")
@@ -2098,7 +2142,8 @@
   emit_insn (gen_atomic_nand<mode>_soft_tcb (operands[1], operands[2],
 					     operands[3]));
 }
-  [(set_attr "length" "22")])
+  [(set_attr "length" "22")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_nand_fetch<mode>_soft_imask"
   [(set (match_operand:QIHISI 0 "arith_reg_dest" "=&z")
@@ -2122,7 +2167,8 @@
 	 "	mov.<bwl>	%0,%1"		"\n"
 	 "	ldc	%3,sr";
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 ;;------------------------------------------------------------------------------
 ;; read - test against zero - or with 0x80 - write - return test result
@@ -2170,7 +2216,8 @@
 	(unspec:QI [(const_int 128)] UNSPEC_ATOMIC))]
   "TARGET_ENABLE_TAS && !TARGET_SHMEDIA"
   "tas.b	@%0"
-  [(set_attr "insn_class" "co_group")])
+  [(set_attr "insn_class" "co_group")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_test_and_set_soft_gusa"
   [(set (reg:SI T_REG)
@@ -2192,7 +2239,8 @@
 	 "1:	mov	r1,r15"		"\n"
 	 "	tst	%2,%2";
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_test_and_set_soft_tcb"
   [(set (reg:SI T_REG)
@@ -2216,7 +2264,8 @@
 	 "1:	mov.l	r0,@(%O2,gbr)"	"\n"
 	 "	tst	%3,%3";
 }
-  [(set_attr "length" "18")])
+  [(set_attr "length" "18")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_test_and_set_soft_imask"
   [(set (reg:SI T_REG)
@@ -2237,7 +2286,8 @@
 	 "	ldc	%2,sr"		"\n"
 	 "	tst	r0,r0";
 }
-  [(set_attr "length" "16")])
+  [(set_attr "length" "16")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "atomic_test_and_set_hard"
   [(set (reg:SI T_REG)
@@ -2265,5 +2315,5 @@
 	 "	bf	0b"		"\n"
 	 "	tst	%3,%3";
 }
-  [(set_attr "length" "26")])
-
+  [(set_attr "length" "26")
+   (set_attr "ams_validate_alternatives" "yes")])

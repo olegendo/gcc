@@ -908,7 +908,8 @@ public:
     virtual void
     mem_access_alternatives (access::alternative_set& alt,
 			     const access_sequence& as,
-			     access_sequence::const_iterator acc) = 0;
+			     access_sequence::const_iterator acc,
+			     bool& validate_alternatives) = 0;
 
     // adjust the costs of the specified alternative of the specified
     // access.  called after the alternatives of all accesses have

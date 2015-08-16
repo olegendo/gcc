@@ -823,7 +823,8 @@ static struct ams_delegate : public sh_ams::delegate
   virtual void
   mem_access_alternatives (sh_ams::access::alternative_set& alt,
 			   const sh_ams::access_sequence& as,
-			   sh_ams::access_sequence::const_iterator acc);
+			   sh_ams::access_sequence::const_iterator acc,
+			   bool& validate_alternatives);
   virtual void
   adjust_alternative_costs (sh_ams::access::alternative& alt,
                             const sh_ams::access_sequence& as,
@@ -13716,8 +13717,8 @@ sh_find_equiv_gbr_addr (rtx_insn* insn, rtx mem)
 void ams_delegate::
 mem_access_alternatives (sh_ams::access::alternative_set& alt,
 			 const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
-			 sh_ams::access_sequence::const_iterator acc
-			 ATTRIBUTE_UNUSED)
+			 sh_ams::access_sequence::const_iterator acc,
+			 bool& validate_alternatives)
 
 {
   typedef sh_ams::access::alternative alternative;
@@ -13726,6 +13727,9 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   const machine_mode acc_mode = acc->mach_mode ();
   const int acc_size = acc->access_size ();
   const sh_ams::addr_expr& addr = acc->address ();
+
+  validate_alternatives = get_attr_ams_validate_alternatives (acc->insn ())
+			  == AMS_VALIDATE_ALTERNATIVES_YES;
 
   // FIXME: determine R0 extra cost dynamically, based on what is happening
   // around the memory access.
