@@ -140,8 +140,9 @@ public:
   typename std::iterator_traits<Iter>::reference
   operator * (void) const { return *m_i; }
 
+  // If Iter is a raw pointer we can't invoke m_i.operator -> on it.
   typename std::iterator_traits<Iter>::pointer
-  operator -> (void) const { return m_i.operator -> (); }
+  operator -> (void) const { return &*m_i; }
 
   // FIXME: conversion to const_iterator is not working.
 
