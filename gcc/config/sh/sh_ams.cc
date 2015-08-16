@@ -1715,7 +1715,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   for (acc_opt_iter accs = begin<access_to_optimize> (),
        accs_end = end<access_to_optimize> (); accs != accs_end; ++accs)
     gen_min_mod (accs, dlg,
-		 base_lookahead + dlg.lookahead_count (*this, (iterator)accs),
+		 base_lookahead + dlg.adjust_lookahead_count (*this, (iterator)accs),
 		 true);
 
   typedef access_type_matches<reg_mod> reg_mod_match;
