@@ -891,7 +891,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
            as_it != accesses ().end () && !as_it->insn (); ++as_it)
         {
           if (as_it->access_type () == reg_mod
-              && as_it->address_reg () == reg)
+              && REGNO (as_it->address_reg ()) == REGNO (reg))
             return *as_it;
         }
 
@@ -918,7 +918,8 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
           // If the reg_mod access is already inside the access
           // sequence, don't add it a second time.
           if (as_it->access_type () == reg_mod
-              && as_it->insn () == mod_insn && as_it->address_reg () == reg
+              && as_it->insn () == mod_insn
+              && REGNO (as_it->address_reg ()) == REGNO (reg)
               && as_it->original_address ().base_reg ()
                   == original_addr_expr.base_reg ())
             return *as_it;
@@ -1042,7 +1043,8 @@ sh_ams::access_sequence::start_bb (void) const
 }
 
 // The recursive part of find_reg_value. If REG is modified in INSN,
-// set VALUE to REG's value and return true. Otherwise, return false.
+// return true and the SET pattern that modifies it. Otherwise, return
+// false.
 //
 // FIXME: see if we can re-use find_set_of_reg_bb from sh_treg_combine.cc
 static std::pair<rtx, bool>
@@ -1056,8 +1058,8 @@ find_reg_value_1 (rtx reg, rtx pat)
         if (REG_P (dest) && REGNO (dest) == REGNO (reg))
           {
             // We're in the last insn that modified REG, so return
-            // the expression in SET_SRC.
-            return std::make_pair (SET_SRC (pat), true);
+            // the modifying SET rtx.
+            return std::make_pair (pat, true);
           }
       }
       break;
@@ -1088,14 +1090,15 @@ find_reg_value_1 (rtx reg, rtx pat)
   return std::make_pair (NULL_RTX, false);
 }
 
-// Find the value that REG was last set to. Write the register value
-// into mod_expr and the modifying insn into mod_insn.
+// Find the value that REG was last set to. Return that value, along
+// with the modifying insn and the register in the modifying pattern's
+// SET_SRC (which is always the same register as REG, but might have a
+// different machine mode).
 // If the register was modified because of an auto-inc/dec memory
-// access, set the mode of the access into auto_mod_mode.
+// access, also return the mode of that access.
 // FIXME: make use of other info such as REG_EQUAL notes.
-void sh_ams::find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
-                             rtx_insn** mod_insn,
-                             machine_mode* auto_mod_mode)
+sh_ams::find_reg_value_result sh_ams::
+find_reg_value (rtx reg, rtx_insn* insn)
 {
   std::vector<std::pair<rtx*, access_type_t> > mems;
 
@@ -1112,9 +1115,9 @@ void sh_ams::find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
       std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
       if (r.second)
         {
-          *mod_expr = r.first;
-          *mod_insn = i;
-          return;
+          rtx modified_reg = r.first ? SET_DEST (r.first) : reg;
+          rtx value = r.first ? SET_SRC (r.first) : NULL;
+          return find_reg_value_result (modified_reg, value, i);
         }
       else if (find_regno_note (i, REG_INC, REGNO (reg)) != NULL)
         {
@@ -1132,16 +1135,12 @@ void sh_ams::find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr,
               if (GET_RTX_CLASS (code) == RTX_AUTOINC
                   && REG_P (XEXP (mem_addr, 0))
                   && REGNO (XEXP (mem_addr, 0)) == REGNO (reg))
-                {
-                  *mod_expr = mem_addr;
-                  *mod_insn = i;
-                  *auto_mod_mode = GET_MODE (*(m->first));
-                  return;
-                }
+                return find_reg_value_result (reg, mem_addr, i,
+                                              GET_MODE (*(m->first)));
             }
         }
     }
-  *mod_expr = reg;
+  return find_reg_value_result (reg, reg, NULL);
 }
 
 // Try to create an ADDR_EXPR struct of the form
@@ -1267,16 +1266,13 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
         {
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
-          rtx reg_value;
-          rtx_insn *reg_mod_insn = NULL;
-          machine_mode auto_mod_mode;
+          find_reg_value_result r = find_reg_value (x, insn);
 
-          find_reg_value (x, insn, &reg_value, &reg_mod_insn, &auto_mod_mode);
           // Stop expanding the reg if we reach a hardreg -> pseudo reg
           // copy, or if the reg can't be expanded any further.
-          if (reg_value != NULL_RTX && REG_P (reg_value)
-              && (REGNO (reg_value) == REGNO (x)
-                  || HARD_REGISTER_P (reg_value)))
+          if (r.value != NULL_RTX && REG_P (r.value)
+              && (REGNO (r.value) == REGNO (x)
+                  || HARD_REGISTER_P (r.value)))
             {
               // Add a reg_mod access that sets the reg to itself.
               // This makes it easier for the address modification
@@ -1284,7 +1280,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               if (insn && root_insn)
                 as->add_reg_mod (root_insn,
                                  make_reg_addr (x), make_reg_addr (x),
-                                 reg_mod_insn, x);
+                                 r.mod_insn, x);
               return make_reg_addr (x);
             }
 
@@ -1296,9 +1292,9 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // modified because of an auto-inc/dec memory access, pass
           // down the machine mode of that access.
           addr_expr reg_addr_expr = extract_addr_expr
-            (reg_value, reg_mod_insn, root_insn,
-             find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
-               ? auto_mod_mode
+            (r.value, r.mod_insn, root_insn,
+             find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
+               ? r.auto_mod_mode
                : mem_mach_mode,
              as, inserted_reg_mods);
 
@@ -1310,13 +1306,13 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           if (insn && root_insn)
             {
               addr_expr original_reg_addr_expr
-                = find_reg_note (reg_mod_insn, REG_INC, NULL_RTX)
+                = find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
                   ? make_reg_addr (x)
-                  : extract_addr_expr (reg_value, mem_mach_mode);
+                  : extract_addr_expr (r.value, mem_mach_mode);
               new_reg_mod = &as->add_reg_mod (root_insn,
                                               original_reg_addr_expr,
                                               reg_addr_expr,
-                                              reg_mod_insn, x,
+                                              r.mod_insn, r.reg,
                                               infinite_costs,
                                               true);
               inserted_reg_mods.push_back (new_reg_mod);
@@ -1329,7 +1325,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
             {
               if (new_reg_mod)
                 {
-                  new_reg_mod->set_original_address (0, reg_value);
+                  new_reg_mod->set_original_address (0, r.value);
 
                   // Set all reg_mod accesses that were added while expanding this
                   // register to "unremovable".
@@ -1347,7 +1343,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               // address modification generator.
               if (insn && root_insn)
                 as->add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
-                                 reg_mod_insn, x);
+                                 r.mod_insn, x);
 
               return make_reg_addr (x);
             }
@@ -2443,14 +2439,14 @@ sh_ams::access_sequence::get_clone_cost (access_sequence::iterator& acc,
     return 0;
 
   // There's no cloning cost for accesses that set the reg to itself.
-  if (reused_reg == acc->address_reg ())
+  if (REGNO (reused_reg) == REGNO (acc->address_reg ()))
     return 0;
 
   for (access_sequence::iterator prev_accs = accesses ().begin ();
        prev_accs != acc; ++prev_accs)
     {
       if (prev_accs->access_type () == reg_mod
-          && prev_accs->address_reg () == reused_reg)
+          && REGNO (prev_accs->address_reg ()) == REGNO (reused_reg))
         {
           // If the reused reg is already used by another access,
           // we'll have to clone it.

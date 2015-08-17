@@ -347,7 +347,7 @@ public:
       int cost (void) const { return m_cost; }
       void set_cost (int val) { m_cost = val; }
       void adjust_cost (int val) { m_cost += val; }
-      
+
       bool valid (void) const { return m_valid; }
       void set_valid (bool val = true) { m_valid = val; }
       void set_invalid (bool val = true) { m_valid = !val; }
@@ -1039,9 +1039,25 @@ private:
                            rtx_insn *insn, rtx& x, OutputIterator out,
                            bool skip_addr_reg_mods);
 
-  static void
-  find_reg_value (rtx reg, rtx_insn* insn, rtx* mod_expr, rtx_insn** mod_insn,
-		  machine_mode* auto_mod_mode);
+  struct find_reg_value_result
+  {
+    rtx reg;
+    rtx value;
+    rtx_insn* mod_insn;
+    machine_mode auto_mod_mode;
+
+    find_reg_value_result (void)
+    : reg (NULL), value (NULL), mod_insn (NULL), auto_mod_mode (Pmode) { }
+
+    find_reg_value_result (rtx r, rtx v, rtx_insn* i)
+    : reg (r), value (v), mod_insn (i), auto_mod_mode (Pmode) { }
+
+    find_reg_value_result (rtx r, rtx v, rtx_insn* i, machine_mode m)
+    : reg (r), value (v), mod_insn (i), auto_mod_mode (m) { }
+  };
+
+  static find_reg_value_result
+  find_reg_value (rtx reg, rtx_insn* insn);
 
   static addr_expr
   extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
