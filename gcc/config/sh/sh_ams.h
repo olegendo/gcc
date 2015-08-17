@@ -645,7 +645,8 @@ public:
     void calculate_adjacency_info (void);
 
     void update_access_alternatives (delegate& d, access_sequence::iterator a,
-				     bool force_validation);
+				     bool force_validation,
+				     bool disable_validation);
 
     access&
     add_mem_access (rtx_insn* insn, rtx* mem, access_type_t access_type);
@@ -967,6 +968,10 @@ public:
     // by the delegate to speed up processing.  This will force the validation.
     // Default is false.
     bool force_alt_validation;
+
+    // Disable alternative validation in any case.  This is mainly useful for
+    // debugging.  Default is false.
+    bool disable_alt_validation;
 
     // Use this as a base look ahead count value for the algorithm that selects
     // alternatives.  Default is 1.
