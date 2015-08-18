@@ -688,6 +688,7 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_should_optimize = should_optimize;
   m_addr_reg = NULL;
   m_used = false;
+  m_usable = false;
   m_validate_alternatives = true;
 }
 
@@ -707,6 +708,7 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_should_optimize = true;
   m_addr_reg = mod_reg;
   m_used = false;
+  m_usable = false;
   m_validate_alternatives = true;
 }
 
@@ -728,6 +730,7 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_should_optimize = true;
   m_addr_reg = NULL;
   m_used = false;
+  m_usable = false;
   m_validate_alternatives = true;
 }
 
@@ -1827,11 +1830,18 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 
   typedef filter_iterator<iterator, access_to_optimize> acc_opt_iter;
 
+  make_accesses_usable (accesses ().begin (), begin<access_to_optimize> ());
   for (acc_opt_iter accs = begin<access_to_optimize> (),
-       accs_end = end<access_to_optimize> (); accs != accs_end; ++accs)
-    gen_min_mod (accs, dlg,
-		 base_lookahead + dlg.adjust_lookahead_count (*this, (iterator)accs),
-		 true);
+       accs_end = end<access_to_optimize> (); accs != accs_end;)
+    {
+      gen_min_mod (accs, dlg,
+                   base_lookahead + dlg.adjust_lookahead_count (*this, (iterator)accs),
+                   true);
+      acc_opt_iter next_acc = accs;
+      ++next_acc;
+      make_accesses_usable (accs, next_acc);
+      accs = next_acc;
+    }
 
   typedef access_type_matches<reg_mod> reg_mod_match;
   typedef filter_iterator<iterator, reg_mod_match> reg_mod_iter;
@@ -1855,6 +1865,22 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
             }
         }
       ++accs;
+    }
+}
+
+// Set all accesses between BEGIN and END to usable (not including END).
+// If TRACKER is not null, record these changes in it.
+void
+sh_ams::access_sequence::make_accesses_usable (access_sequence::iterator begin,
+                                               access_sequence::iterator end,
+                                               mod_tracker* tracker)
+{
+  for (access_sequence::iterator accs = begin; accs != end; ++accs)
+    {
+      if (tracker && !accs->usable ())
+        tracker->usable_changed_accs ().push_back (&(*accs));
+      
+      accs->set_usable ();
     }
 }
 
@@ -1946,6 +1972,7 @@ gen_min_mod (filter_iterator<iterator, access_to_optimize> acc, delegate& dlg,
       // inserted address mods.
       if (next_acc != accesses ().end ())
         {
+          make_accesses_usable (acc, next_acc, &tracker);
           gen_mod_for_alt (*alt, base_mod_cost.min_start_addr,
 			   index_mod_cost.min_start_addr,
 			   end_base, end_index, acc, tracker, dlg);
@@ -2075,6 +2102,17 @@ sh_ams::access_sequence::start_addr_list
       for (matching_range::first_type it = r.first; it != r.second; ++it)
         start_addrs.push_back (it->second);
     }
+
+  // Remove non-usable addresses
+  for (std::list<access*>::iterator addr = start_addrs.begin ();
+       addr != start_addrs.end ();)
+    {
+      if ((*addr)->usable ())
+        ++addr;
+      else
+        addr = start_addrs.erase (addr);
+    }
+  
   return start_addrs;
 }
 
@@ -2523,6 +2561,7 @@ sh_ams::access_sequence
       add_reg_mod (accesses ().begin (), make_const_addr (end_addr.disp ()),
 					 make_const_addr (end_addr.disp ()),
 					 NULL, const_reg, 0);
+      accesses ().front ().set_usable ();
       int cost = try_modify_addr (&(*accesses ().begin ()), end_addr,
                                   disp_min, disp_max,
                                   addr_type, insert_before, tracker, dlg).cost;
@@ -2649,10 +2688,12 @@ sh_ams::access_sequence
                  non_mod_addr (invalid_regno,
                                start_addr->address_reg (), scale, 0),
                  c_start_addr, NULL, new_reg, 0);
+      new_addr->set_usable ();
       final_addr_regno = new_reg;
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
+      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_MULT (Pmode,
@@ -2689,10 +2730,12 @@ sh_ams::access_sequence
                                c_end_addr.index_reg (),
                                -1, 0),
                  c_start_addr, NULL, new_reg, 0);
+      new_addr->set_usable ();
       final_addr_regno = new_reg;
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
+      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_PLUS (Pmode,
@@ -2724,10 +2767,12 @@ sh_ams::access_sequence
                  non_mod_addr (c_start_addr.base_reg (),
                                start_addr->address_reg (), 1, 0),
                  c_start_addr, NULL, new_reg, 0);
+      new_addr->set_usable ();
       final_addr_regno = new_reg;
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
+      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_PLUS (Pmode,
@@ -2780,10 +2825,12 @@ sh_ams::access_sequence
                   non_mod_addr (start_addr->address_reg (),
                                 invalid_regno, 1, disp),
                   c_start_addr, NULL, new_reg, 0);
+      new_addr->set_usable ();
       final_addr_regno = new_reg;
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
+      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_PLUS (Pmode,
@@ -2817,10 +2864,12 @@ sh_ams::access_sequence
       new_reg = gen_reg_rtx (Pmode);
       access* new_addr = &add_reg_mod (access_place, make_reg_addr (pre_mod_reg),
                                        c_start_addr, NULL, new_reg, 0);
+      new_addr->set_usable ();
       final_addr_regno = new_reg;
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
+      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
 
       new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;

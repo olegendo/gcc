@@ -524,6 +524,12 @@ public:
     void set_used (void) { m_used = true; }
     void reset_used (void) { m_used = false; }
 
+    // For reg_mod accesses, tells whether the address reg can be used as
+    // a starting address for another access.
+    bool usable (void) const { return m_usable; }
+    void set_usable (void)  { m_usable = true; }
+    void reset_usable (void)  { m_usable = false; }
+
     // Return true if this is a trailing access, i,e. the first use or
     // modification of an address reg that follows the last access in the
     // sequence (which could be possibly in another BB).
@@ -580,6 +586,7 @@ public:
     rtx m_addr_rtx;
     rtx m_addr_reg;
     bool m_used;
+    bool m_usable;
     bool m_validate_alternatives;
 
     adjacent_chain m_inc_chain;
@@ -797,6 +804,7 @@ public:
       {
         m_inserted_accs.reserve (8);
         m_use_changed_accs.reserve (4);
+        m_usable_changed_accs.reserve (4);
         m_addr_changed_accs.reserve (4);
       }
 
@@ -810,6 +818,11 @@ public:
             std::mem_fun (&access::reset_used));
         use_changed_accs ().clear ();
 
+        std::for_each (usable_changed_accs ().begin (),
+                       usable_changed_accs ().end (),
+            std::mem_fun (&access::reset_usable));
+        usable_changed_accs ().clear ();
+
         for (std::vector<std::pair <access* , addr_expr> >::iterator
                it = addr_changed_accs ().begin ();
              it != addr_changed_accs ().end (); ++it)
@@ -821,9 +834,11 @@ public:
       std::vector<access_sequence::iterator>&
       inserted_accs (void) { return m_inserted_accs; }
 
-      // List of accesses whose M_USED field was changed.
+      // List of accesses whose M_USED or M_USABLE field was changed.
       std::vector<access*>&
       use_changed_accs (void) { return m_use_changed_accs; }
+      std::vector<access*>&
+      usable_changed_accs (void) { return m_usable_changed_accs; }
 
       // List of accesses whose M_ORIGINAL_ADDR_EXPR changed, along
       // with their previous values.
@@ -833,10 +848,14 @@ public:
     private:
       std::vector<access_sequence::iterator> m_inserted_accs;
       std::vector<access*> m_use_changed_accs;
+      std::vector<access*> m_usable_changed_accs;
       std::vector<std::pair <access* , addr_expr> > m_addr_changed_accs;
     };
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
+
+    void make_accesses_usable (iterator begin, iterator end,
+                               mod_tracker* tracker = NULL);
 
     int gen_min_mod (filter_iterator<iterator, access_to_optimize> acc,
                      delegate& dlg, int lookahead_num,
