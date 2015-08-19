@@ -2221,16 +2221,22 @@ sh_ams::access_sequence
       if (accs->insn ())
         last_insn = accs->insn ();
 
+      if (!accs->should_optimize ())
+        {
+          log_msg ("access didn't get optimized, skipping\n");
+          continue;
+        }
+
+      if (accs->original_address ().is_invalid ())
+        {
+          log_msg ("original address not valid\n");
+          continue;
+        }
+
       if (accs->access_type () == reg_mod)
         {
-          // Skip accesses with unknown values, the ones that
-          // don't modify anything, or those that already have
-          // an insn.
-          if (accs->original_address ().is_invalid ())
-	    {
-	      log_msg ("access original address not valid\n");
-	      continue;
-	    }
+          // Skip accesses that don't modify anything
+          // and those that already have an insn.
           if (accs->original_address ().base_reg () == accs->address_reg ()
               && accs->original_address ().has_no_index_reg ()
               && accs->original_address ().has_no_disp ())
