@@ -176,6 +176,7 @@ public:
 
   class access;
   class access_sequence;
+  class shared_insn;
   struct delegate;
 
 
@@ -493,6 +494,11 @@ public:
     // the insn where this access occurs.
     rtx_insn* insn (void) const { return m_insn; }
 
+    // for address modifying accesses, shows how many other accesses
+    // share the same insn as this access
+    shared_insn* mod_insn (void) const { return m_mod_insn; }
+    void set_mod_insn (shared_insn* mod_insn) {m_mod_insn = mod_insn; }
+
     // returns the rtx inside the insn that this access refers to.
     // for mem accesses it will be the address expression inside the mem.
     // for reg mods it will be the set source rtx.
@@ -579,6 +585,7 @@ public:
     addr_space_t m_addr_space;
     int m_cost;
     rtx_insn* m_insn;
+    shared_insn* m_mod_insn;
     std::vector<rtx_insn*> m_trailing_insns;
     rtx* m_mem_ref; // reference to the mem rtx inside the insn.
     bool m_removable;
@@ -627,14 +634,9 @@ public:
     typedef std::list<access>::reverse_iterator reverse_iterator;
     typedef std::list<access>::const_reverse_iterator const_reverse_iterator;
 
-    class mod_insn_list;
-
-    access_sequence (std::list<mod_insn_list>::iterator mod_insns)
-      : m_mod_insns (mod_insns) {}
-
     void gen_address_mod (delegate& dlg, int base_lookahead);
 
-    void update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns);
+    void update_insn_stream (std::list<shared_insn>& shared_insn_list);
 
     int cost (void) const;
     void update_cost (delegate& dlg);
@@ -702,34 +704,17 @@ public:
     std::list<access>& accesses (void) { return m_accs; }
     const std::list<access>& accesses (void) const { return m_accs; }
 
-    // A structure used to store the address modifying insns of this
-    // sequence, which might be shared by other sequences.
-    class mod_insn_list
-    {
-    public:
-      mod_insn_list (void) { m_use_count = 0; }
-
-      void use (void) { ++m_use_count; }
-      void release (void) { --m_use_count; }
-
-      bool is_used (void) { return (m_use_count > 0); }
-
-      std::vector<rtx_insn*>& insns (void) { return m_insns; };
-    private:
-      std::vector<rtx_insn*> m_insns;
-      int m_use_count;
-    };
-
-    // The address modifying insns related to this access sequence.
+    // The address modifying insns of this access sequence,
+    // which might be shared by other accesses.
     // Used to delete the original insns in update_insn_stream.
     // Multiple access sequences might share the same insns, so this
     // is stored externally.
-    std::list<mod_insn_list>::iterator mod_insns (void) { return m_mod_insns; }
+    std::vector<shared_insn*>& mod_insns (void) { return m_mod_insns; }
 
-    void update_mod_insns (std::list<mod_insn_list>::iterator new_insns)
-    {
-      m_mod_insns = new_insns;
-    }
+    void release_mod_insns (void);
+
+    shared_insn* create_mod_insn (rtx_insn* insn,
+                                  std::list<shared_insn>& shared_insn_list);
 
     // A map containing the address regs of the sequence and the last
     // reg_mod access that modified them.
@@ -917,7 +902,30 @@ public:
     std::list<access> m_accs;
     std::map<rtx, access*> m_addr_regs;
     start_addr_list m_start_addr_list;
-    std::list<mod_insn_list>::iterator m_mod_insns;
+    std::vector<shared_insn*> m_mod_insns;
+  };
+
+  // A structure used to store an insn which might be
+  // shared between multiple access sequences.
+  class shared_insn
+  {
+  public:
+    shared_insn (rtx_insn* i) : m_use_count (0), m_insn (i) {}
+
+    void use (void) { ++m_use_count; }
+    void release (void) { --m_use_count; }
+    bool is_used (void) { return (m_use_count > 0); }
+
+    rtx_insn* insn (void) { return m_insn; };
+
+    // An iterator pointing to this shared_insn in the global list.
+    std::list<shared_insn>::iterator iter (void) { return m_iter; }
+    void set_iter (std::list<shared_insn>::iterator iter)  { m_iter = iter; }
+
+  private:
+    int m_use_count;
+    rtx_insn* m_insn;
+    std::list<shared_insn>::iterator m_iter;
   };
 
   // a delegate for the ams pass.  usually implemented by the target.

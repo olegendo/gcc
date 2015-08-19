@@ -680,6 +680,7 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_addr_space = MEM_ADDR_SPACE (*mem);
   m_cost = cost;
   m_insn = insn;
+  m_mod_insn = NULL;
   m_mem_ref = mem;
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
@@ -700,6 +701,7 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_access_type = reg_mod;
   m_cost = cost;
   m_insn = insn;
+  m_mod_insn = NULL;
   m_mem_ref = NULL;
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
@@ -721,6 +723,7 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_access_type = reg_use;
   m_cost = cost;
   m_insn = insn;
+  m_mod_insn = NULL;
   m_trailing_insns = trailing_insns;
   m_mem_ref = reg_ref;
   m_original_addr_expr = original_addr_expr;
@@ -1700,8 +1703,7 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
       if (new_seq == new_seqs.end ())
         {
           access_sequence& new_as =
-            *sequences.insert (as_it, access_sequence (as.mod_insns ()));
-          new_as.mod_insns ()->use ();
+            *sequences.insert (as_it, access_sequence ());
           new_seqs.insert (std::make_pair (key,
                                            std::make_pair (&new_as,
                                                            std::set<rtx> ())));
@@ -1734,6 +1736,11 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 
           split_access_sequence_2 (addr_regs, *accs);
           as.accesses ().push_front (*accs);
+          if (accs->mod_insn ())
+            {
+              as.mod_insns ().push_back (accs->mod_insn ());
+              accs->mod_insn ()->use ();
+            }
         }
     }
 
@@ -1749,7 +1756,7 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 
   // Remove the old sequence and return the next element after the
   // newly inserted sequences.
-  as_it->mod_insns ()->release ();
+  as_it->release_mod_insns ();
   return sequences.erase (as_it);
 }
 
@@ -1779,6 +1786,11 @@ sh_ams::split_access_sequence_1 (
         as.accesses ().push_front (acc);
       else
         as.accesses ().push_back (acc);
+      if (acc.mod_insn ())
+        {
+          as.mod_insns ().push_back (acc.mod_insn ());
+          acc.mod_insn ()->use ();
+        }
       as.start_addresses ().add (&as.accesses ().front ());
     }
 }
@@ -2180,27 +2192,24 @@ start_addr_list::remove (access* start_addr)
 // Write the sequence into the insn stream.
 void
 sh_ams::access_sequence
-::update_insn_stream (std::list<mod_insn_list>& sequence_mod_insns)
+::update_insn_stream (std::list<shared_insn>& shared_insn_list)
 {
   log_msg ("Updating insn list\n");
 
   // The original insns are no longer used by this sequence.
-  mod_insns ()->release ();
+  release_mod_insns ();
 
-  // If the original address modifying insns were only used by this
-  // sequence, remove them.
-  if (!mod_insns ()->is_used ())
+  // Remove those previous modifying insns that were only
+  // used by this sequence.
+  for (std::vector<shared_insn*>::iterator
+         it = mod_insns ().begin (); it != mod_insns ().end (); ++it)
     {
-      for (std::vector<rtx_insn*>::iterator
-             it = mod_insns ()->insns ().begin ();
-           it != mod_insns ()->insns ().end (); ++it)
-        set_insn_deleted (*it);
-      sequence_mod_insns.erase (mod_insns ());
+      if (!(*it)->is_used ())
+        {
+          set_insn_deleted ((*it)->insn ());
+          shared_insn_list.erase ((*it)->iter ());
+        }
     }
-
-  // Create a new insn list for this sequence.
-  sequence_mod_insns.push_back (mod_insn_list ());
-  update_mod_insns (stdx::prev (sequence_mod_insns.end ()));
 
   bool sequence_started = false;
   rtx_insn* last_insn = NULL;
@@ -2288,7 +2297,7 @@ sh_ams::access_sequence
             }
 
           accs->set_insn (emit_move_insn (accs->address_reg (), new_val));
-          mod_insns ()->insns ().push_back (accs->insn ());
+          accs->set_mod_insn (create_mod_insn (accs->insn (), shared_insn_list));
         }
       else if (accs->access_type () == reg_use && !accs->is_trailing ())
         {
@@ -2878,6 +2887,30 @@ sh_ams::access_sequence
   return mod_addr_result (cost, final_addr_regno, c_start_addr.disp ());
 }
 
+// Release all the mod_insns held by this sequence.
+// FIXME: This should be called by the sequence's destructor.
+void
+sh_ams::access_sequence
+::release_mod_insns (void)
+{
+  std::for_each (mod_insns ().begin (), mod_insns ().end (),
+                 std::mem_fun (&shared_insn::release));
+}
+
+// Create an entry in the global shared insn list for INSN and add
+// it to the sequence's MOD_INSN_LIST.
+sh_ams::shared_insn*
+sh_ams::access_sequence
+::create_mod_insn (rtx_insn* insn,
+                   std::list<shared_insn>& shared_insn_list)
+{
+  shared_insn_list.push_back (shared_insn (insn));
+  shared_insn_list.back ().set_iter (stdx::prev (shared_insn_list.end ()));
+  mod_insns ().push_back (&shared_insn_list.back ());
+  shared_insn_list.back ().use ();
+  return &shared_insn_list.back ();
+}
+
 // Find all the address regs in the access sequence (i.e. the regs whose value
 // was changed by a reg_mod access) and place them into M_ADDR_REGS. Pair them
 // with the last reg_mod access that modified them, or NULL if they are dead
@@ -3337,7 +3370,7 @@ sh_ams::execute (function* fun)
   df_analyze ();
 
   std::list<access_sequence> sequences;
-  std::list<access_sequence::mod_insn_list > sequence_mod_insns;
+  std::list<shared_insn> shared_insn_list;
   std::vector<std::pair<rtx*, access_type_t> > mems;
 
   log_msg ("extracting access sequences\n");
@@ -3350,12 +3383,7 @@ sh_ams::execute (function* fun)
       log_msg ("finding mem accesses\n");
 
       // Construct the access sequence from the access insns.
-      sequence_mod_insns.push_back (access_sequence::mod_insn_list ());
-      std::list<access_sequence::mod_insn_list>::iterator mod_insns =
-					stdx::prev (sequence_mod_insns.end ());
-
-      sequences.push_back (access_sequence (mod_insns));
-      mod_insns->use ();
+      sequences.push_back (access_sequence ());
       access_sequence& as = sequences.back ();
 
       FOR_BB_INSNS (bb, i)
@@ -3415,7 +3443,7 @@ sh_ams::execute (function* fun)
           if (it->removable ()
               // Auto-mod mem access insns shouldn't be removed.
               && !find_reg_note (it->insn (), REG_INC, NULL_RTX))
-            as.mod_insns ()->insns ().push_back (it->insn ());
+            it->set_mod_insn (as.create_mod_insn (it->insn (), shared_insn_list));
         }
 
       log_msg ("split_access_sequence\n");
@@ -3510,7 +3538,7 @@ sh_ams::execute (function* fun)
 	}
 
       if (modify)
-        as.update_insn_stream (sequence_mod_insns);
+        as.update_insn_stream (shared_insn_list);
 
       log_msg ("\n\n");
     }
