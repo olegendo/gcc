@@ -1879,7 +1879,7 @@ sh_ams::access_sequence::make_accesses_usable (access_sequence::iterator begin,
     {
       if (tracker && !accs->usable ())
         tracker->usable_changed_accs ().push_back (&(*accs));
-      
+
       accs->set_usable ();
     }
 }
@@ -2112,7 +2112,7 @@ sh_ams::access_sequence::start_addr_list
       else
         addr = start_addrs.erase (addr);
     }
-  
+
   return start_addrs;
 }
 
@@ -2294,7 +2294,7 @@ sh_ams::access_sequence
         {
           gcc_assert (accs->original_address ().has_base_reg ());
           bool r = accs->set_insn_use_rtx (
-			accs->original_address ().base_reg ());
+			accs->original_address ().to_rtx ());
 	  gcc_assert (r);
         }
       else if (accs->access_type () == load || accs->access_type () == store)
