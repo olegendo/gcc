@@ -2194,22 +2194,26 @@ void
 sh_ams::access_sequence
 ::update_insn_stream (std::list<shared_insn>& shared_insn_list)
 {
-  log_msg ("Updating insn list\n");
+  log_msg ("update_insn_stream\n");
 
-  // The original insns are no longer used by this sequence.
-  release_mod_insns ();
-
-  // Remove those previous modifying insns that were only
-  // used by this sequence.
+  // Remove those previous modifying insns that
+  // aren't used by other sequences.
   for (std::vector<shared_insn*>::iterator
          it = mod_insns ().begin (); it != mod_insns ().end (); ++it)
     {
-      if (!(*it)->is_used ())
+      shared_insn* si = *it;
+      if (!si->is_used ())
         {
-          set_insn_deleted ((*it)->insn ());
-          shared_insn_list.erase ((*it)->iter ());
+          set_insn_deleted (si->insn ());
+
+          if (si->iter () != shared_insn_list.end ())
+            {
+              shared_insn_list.erase (si->iter ());
+              si->set_iter (shared_insn_list.end ());
+            }
         }
     }
+  mod_insns ().clear ();
 
   bool sequence_started = false;
   rtx_insn* last_insn = NULL;
@@ -2898,7 +2902,7 @@ sh_ams::access_sequence
 }
 
 // Create an entry in the global shared insn list for INSN and add
-// it to the sequence's MOD_INSN_LIST.
+// it to the sequence's MOD_INSNS.
 sh_ams::shared_insn*
 sh_ams::access_sequence
 ::create_mod_insn (rtx_insn* insn,
@@ -3522,7 +3526,7 @@ sh_ams::execute (function* fun)
       log_access_sequence (as, false);
       log_msg ("\n");
 
-      bool modify = true;
+      as.set_modify_insns (true);
       if (new_cost >= original_cost)
 	{
 	  log_msg ("new_cost (%d) >= original_cost (%d)",
@@ -3531,16 +3535,30 @@ sh_ams::execute (function* fun)
 	  if (m_options.check_original_cost)
 	    {
 	      log_msg ("  not modifying\n");
-	      modify = false;
+	      as.set_modify_insns (false);
 	    }
 	  else
 	    log_msg ("  modifying anyway\n");
 	}
 
-      if (modify)
-        as.update_insn_stream (shared_insn_list);
+      if (as.modify_insns ())
+        as.release_mod_insns ();
 
       log_msg ("\n\n");
+    }
+
+  log_msg ("\nupdating sequence insns\n");
+  for (std::list<access_sequence>::iterator as_it = sequences.begin ();
+       as_it != sequences.end (); ++as_it)
+    {
+      access_sequence& as = *as_it;
+      if (as.modify_insns ())
+        {
+          log_access_sequence (as, false);
+          log_msg ("\n");
+          as.update_insn_stream (shared_insn_list);
+          log_msg ("\n\n");
+        }
     }
 
   log_return (0, "\n\n");

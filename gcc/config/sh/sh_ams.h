@@ -634,9 +634,13 @@ public:
     typedef std::list<access>::reverse_iterator reverse_iterator;
     typedef std::list<access>::const_reverse_iterator const_reverse_iterator;
 
+    access_sequence (void) : m_modify_insns (false) {}
+
     void gen_address_mod (delegate& dlg, int base_lookahead);
 
     void update_insn_stream (std::list<shared_insn>& shared_insn_list);
+    bool modify_insns (void) const { return m_modify_insns; }
+    void set_modify_insns (bool mod) { m_modify_insns = mod; }
 
     int cost (void) const;
     void update_cost (delegate& dlg);
@@ -903,6 +907,7 @@ public:
     std::map<rtx, access*> m_addr_regs;
     start_addr_list m_start_addr_list;
     std::vector<shared_insn*> m_mod_insns;
+    bool m_modify_insns;
   };
 
   // A structure used to store an insn which might be
