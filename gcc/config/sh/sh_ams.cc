@@ -2208,15 +2208,7 @@ sh_ams::access_sequence
     {
       shared_insn* si = *it;
       if (!si->is_used ())
-        {
-          set_insn_deleted (si->insn ());
-
-          if (si->iter () != shared_insn_list.end ())
-            {
-              shared_insn_list.erase (si->iter ());
-              si->set_iter (shared_insn_list.end ());
-            }
-        }
+        set_insn_deleted (si->insn ());
     }
   mod_insns ().clear ();
 
@@ -2914,7 +2906,6 @@ sh_ams::access_sequence
                    std::list<shared_insn>& shared_insn_list)
 {
   shared_insn_list.push_back (shared_insn (insn));
-  shared_insn_list.back ().set_iter (stdx::prev (shared_insn_list.end ()));
   mod_insns ().push_back (&shared_insn_list.back ());
   shared_insn_list.back ().use ();
   return &shared_insn_list.back ();

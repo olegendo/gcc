@@ -923,14 +923,9 @@ public:
 
     rtx_insn* insn (void) { return m_insn; };
 
-    // An iterator pointing to this shared_insn in the global list.
-    std::list<shared_insn>::iterator iter (void) { return m_iter; }
-    void set_iter (std::list<shared_insn>::iterator iter)  { m_iter = iter; }
-
   private:
     int m_use_count;
     rtx_insn* m_insn;
-    std::list<shared_insn>::iterator m_iter;
   };
 
   // a delegate for the ams pass.  usually implemented by the target.
