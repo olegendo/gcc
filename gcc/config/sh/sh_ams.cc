@@ -1586,9 +1586,7 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
   switch (GET_CODE (x))
     {
     case REG:
-      if (x == addr_reg
-	  || (addr_reg == NULL
-	      && as.addr_regs ().find (x) != as.addr_regs ().end ()))
+      if (usable_addr_reg (x, addr_reg, as))
         {
           *out++ = std::make_pair (&x, insn);
           return true;
@@ -1610,8 +1608,7 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
         {
           if (SET_DEST (x) == addr_reg)
             break;
-          if (addr_reg == NULL
-	      && as.addr_regs ().find (SET_DEST (x)) != as.addr_regs ().end ())
+          if (usable_addr_reg (SET_DEST (x), addr_reg, as))
             break;
         }
 
@@ -1627,10 +1624,7 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
           addr_expr use_expr = extract_addr_expr (x);
           if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
               && use_expr.has_base_reg () && use_expr.has_disp ()
-              && (use_expr.base_reg () == addr_reg
-                  || (addr_reg == NULL
-		      && as.addr_regs ().find (use_expr.base_reg ())
-			 != as.addr_regs ().end ())))
+              && usable_addr_reg (use_expr.base_reg (), addr_reg, as))
             {
               *out++ = std::make_pair (&x, insn);
               return true;
@@ -1643,6 +1637,17 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
       break;
     }
   return found;
+}
+
+// Returns true if X is the same register as ADDR_REG or if X is an
+// usable address reg of the sequence AS.  Used by collect_addr_reg_uses_2.
+bool sh_ams::usable_addr_reg (rtx x, rtx addr_reg, access_sequence& as)
+{
+  if (addr_reg)
+    return x == addr_reg;
+  std::map<rtx, access*>::iterator found_addr_reg = as.addr_regs ().find (x);
+  return found_addr_reg != as.addr_regs ().end ()
+    && found_addr_reg->second->usable ();
 }
 
 // Collect uses of the address registers in all basic blocks that are reachable
@@ -2917,11 +2922,13 @@ sh_ams::access_sequence
 
 // Find all the address regs in the access sequence (i.e. the regs whose value
 // was changed by a reg_mod access) and place them into M_ADDR_REGS. Pair them
-// with the last reg_mod access that modified them, or NULL if they are dead
-// at the end of the sequence.
+// with the last reg_mod access that modified them.  If ERASE_DEAD_REGS is true,
+// set the accesses to NULL if they are dead at the end of the sequence.
 void
-sh_ams::access_sequence::find_addr_regs (void)
+sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs)
 {
+  addr_regs ().clear ();
+
   for (access_sequence::iterator accs = accesses ().begin ();
        accs != accesses ().end (); ++accs)
     {
@@ -2930,6 +2937,9 @@ sh_ams::access_sequence::find_addr_regs (void)
 
       if (accs->access_type () == reg_mod)
         addr_regs ()[accs->address_reg ()] = &(*accs);
+
+      if (!erase_dead_regs)
+        continue;
 
       // Search for REG_DEAD notes in the insns between this and the next access.
       access_sequence::iterator next = stdx::next (accs);
@@ -3020,6 +3030,8 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
   for (access_sequence::iterator accs = accesses ().begin ();
        accs != accesses ().end (); ++accs)
     {
+      accs->set_usable ();
+
       if (!accs->insn ())
         continue;
       last_insn = accs->insn ();
@@ -3100,6 +3112,10 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
                                                 *this, acc));
         }
     }
+
+  // Reset the "usable" flags.
+  std::for_each (accesses ().begin (), accesses ().end (),
+                 std::mem_fun_ref (&access::reset_usable));
 }
 
 // Find the values of all address registers that are still alive
@@ -3110,7 +3126,7 @@ void
 sh_ams::access_sequence::find_reg_end_values (void)
 {
   // Update the address regs' final values.
-  find_addr_regs ();
+  find_addr_regs (true);
 
   for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)

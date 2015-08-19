@@ -646,7 +646,7 @@ public:
     void update_cost (delegate& dlg);
     bool cost_already_minimal (void) const;
 
-    void find_addr_regs (void);
+    void find_addr_regs (bool erase_dead_regs = false);
     void add_missing_reg_mods (void);
 
     bool reg_used_in_sequence (rtx reg, access_sequence::iterator search_start);
@@ -1070,6 +1070,8 @@ private:
   collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
                            rtx_insn *insn, rtx& x, OutputIterator out,
                            bool skip_addr_reg_mods);
+
+  static bool usable_addr_reg (rtx x, rtx addr_reg, access_sequence& as);
 
   struct find_reg_value_result
   {
