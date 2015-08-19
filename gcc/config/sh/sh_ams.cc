@@ -2357,15 +2357,23 @@ sh_ams::access_sequence
   // Emit remaining address modifying insns after the last insn in the access.
   if (sequence_started && last_insn)
     {
+      bool emit_after = (GET_CODE (last_insn) == INSN);
+
       rtx_insn* new_insns = get_insns ();
       end_sequence ();
 
       log_msg ("emitting new insns = \n");
       log_rtx (new_insns);
-      log_msg ("\nafter insn\n");
+      if (emit_after)
+        log_msg ("\nafter insn\n");
+      else
+        log_msg ("\nbefore insn\n");
       log_insn (last_insn);
       log_msg ("\n");
-      emit_insn_after (new_insns, last_insn);
+      if (emit_after)
+        emit_insn_after (new_insns, last_insn);
+      else
+        emit_insn_before (new_insns, last_insn);
     }
 }
 
