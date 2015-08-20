@@ -3257,18 +3257,17 @@ sh_ams::access_sequence
 {
   bool val_alts = a->validate_alternatives ();
 
-  if (a->access_type () == load || a->access_type () == store)
-    {
-      d.mem_access_alternatives (a->alternatives (), *this, a, val_alts);
-      a->set_validate_alternatives (val_alts);
-    }
-  else
+  if (a->access_type () != load && a->access_type () != store)
     {
       // If the access isn't a true memory access, the
       // address has to be loaded into a single register.
       a->alternatives ().push_back (access::alternative (0, make_reg_addr ()));
       a->set_validate_alternatives (false);
+      return;
     }
+
+  d.mem_access_alternatives (a->alternatives (), *this, a, val_alts);
+  a->set_validate_alternatives (val_alts);
 
   typedef access::alternative_valid match;
   typedef filter_iterator<access::alternative_set::iterator, match> iter;
