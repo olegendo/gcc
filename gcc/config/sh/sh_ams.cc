@@ -737,6 +737,40 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_validate_alternatives = true;
 }
 
+// Mark the access as "shouldn't be optimized" and set all the
+// reg_mod accesses it uses to "unremovable".
+void sh_ams::access::dont_optimize (access_sequence& as,
+                                    access_sequence::iterator acc_it)
+{
+  m_should_optimize = false;
+
+  std::set<rtx> used_regs;
+  const addr_expr& ae = original_address ();
+  if (ae.has_base_reg ())
+    used_regs.insert (ae.base_reg ());
+  if (ae.has_index_reg ())
+    used_regs.insert (ae.index_reg ());
+
+  for (access_sequence::iterator accs = stdx::prev (acc_it); ; --accs)
+    {
+      if (accs->access_type () == reg_mod)
+        {
+          const addr_expr& ae = original_address ();
+          if ((ae.has_base_reg ()
+               && used_regs.find (ae.base_reg ()) != used_regs.end ())
+              || (ae.has_index_reg ()
+                  && used_regs.find (ae.index_reg ()) != used_regs.end ()))
+            {
+              used_regs.insert (accs->address_reg ());
+              accs->mark_unremovable ();
+            }
+        }
+
+      if (accs == as.accesses ().begin ())
+        break;
+    }
+}
+
 bool
 sh_ams::access::matches_alternative (const alternative& alt) const
 {
@@ -3355,7 +3389,7 @@ sh_ams::access_sequence
   if (a->alternatives ().empty ())
     {
       log_msg ("no valid alternatives, not optimizing this access\n");
-      a->set_should_optimize (false);
+      a->dont_optimize (*this, a);
     }
 
   // At least on clang/libc++ there is a problem with bind1st, mem_fun and
@@ -3370,7 +3404,7 @@ sh_ams::access_sequence
     {
       log_msg ("original address does not match any alternative, "
 	       "not optimizing this access\n");
-      a->set_should_optimize (false);
+      a->dont_optimize (*this, a);
     }
 }
 
