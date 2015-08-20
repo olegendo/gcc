@@ -3032,11 +3032,11 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
   std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
   rtx_insn* last_insn = NULL;
 
+  accesses ().begin ()->set_usable ();
+
   for (access_sequence::iterator accs = accesses ().begin ();
        accs != accesses ().end (); ++accs)
     {
-      accs->set_usable ();
-
       if (!accs->insn ())
         continue;
       last_insn = accs->insn ();
@@ -3045,6 +3045,9 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
         continue;
 
       access_sequence::iterator next_acc = stdx::next (accs);
+      if (next_acc != accesses ().end ())
+        next_acc->set_usable ();
+
       used_regs.clear ();
       collect_addr_reg_uses (*this, accs->insn (),
                              next_acc == accesses ().end ()
