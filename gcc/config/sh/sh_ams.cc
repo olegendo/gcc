@@ -3071,16 +3071,16 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
   for (access_sequence::iterator accs = accesses ().begin ();
        accs != accesses ().end (); ++accs)
     {
+      access_sequence::iterator next_acc = stdx::next (accs);
+      if (next_acc != accesses ().end ())
+        next_acc->set_usable ();
+
       if (!accs->insn ())
         continue;
       last_insn = accs->insn ();
 
       if (accs->access_type () == reg_use)
         continue;
-
-      access_sequence::iterator next_acc = stdx::next (accs);
-      if (next_acc != accesses ().end ())
-        next_acc->set_usable ();
 
       used_regs.clear ();
       collect_addr_reg_uses (*this, accs->insn (),
