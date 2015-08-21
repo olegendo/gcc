@@ -1021,17 +1021,67 @@ private:
                     const access_sequence& as,
                     access_sequence::const_iterator acc);
 
+  // Used to store information about newly created sequences during
+  // sequence splitting.
+  class split_sequence_info
+  {
+  public:
+    split_sequence_info (access_sequence* as)
+      : m_as (as), m_addr_regs (), m_hard_addr_regs () {}
+
+    // The sequence itself.
+    access_sequence* as (void) const { return m_as; }
+
+    // Return true if REG is present in m_addr_regs or m_hard_addr_regs.
+    bool uses_addr_reg (rtx reg) const
+    {
+      if (m_addr_regs.find (reg) != m_addr_regs.end ())
+        return true;
+
+      if (HARD_REGISTER_P (reg))
+        {
+          for (std::vector<rtx>::const_iterator it = m_hard_addr_regs.begin ();
+               it != m_hard_addr_regs.end (); ++it)
+            {
+              if (REGNO (*it) == REGNO (reg))
+                return true;
+            }
+        }
+      return false;
+    }
+
+    // Add REG to the address reg lists.
+    void add_reg (rtx reg)
+    {
+      if (uses_addr_reg (reg)) return;
+
+      if (HARD_REGISTER_P (reg))
+        m_hard_addr_regs.push_back (reg);
+      m_addr_regs.insert (reg);
+    }
+
+  private:
+    access_sequence *m_as;
+
+    // A set of the address registers used in the sequence.
+    std::set<rtx> m_addr_regs;
+
+    // A list of the hard addr regs. When searching for a specific hardreg
+    // in the sequence, we go through this list and look for a regno match
+    // instead of only comparing the rtx pointers.
+    std::vector<rtx> m_hard_addr_regs;
+  };
+
   static std::list<access_sequence>::iterator
   split_access_sequence (std::list<access_sequence>::iterator as_it,
                          std::list<access_sequence>& sequences);
 
   static void
-  split_access_sequence_1 (std::map<rtx, std::pair<sh_ams::access_sequence*,
-						   std::set<rtx> > >& new_seqs,
+  split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
 			   sh_ams::access &acc, bool add_to_front);
 
   static void
-  split_access_sequence_2 (std::set<rtx>& addr_regs, sh_ams::access& acc);
+  split_access_sequence_2 (split_sequence_info& addr_regs, sh_ams::access& acc);
 
   template <typename OutputIterator> static void
   collect_addr_reg_uses (access_sequence& as, rtx addr_reg,
