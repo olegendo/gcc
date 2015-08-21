@@ -2956,10 +2956,15 @@ sh_ams::access_sequence
 // was changed by a reg_mod access) and place them into M_ADDR_REGS. Pair them
 // with the last reg_mod access that modified them.  If ERASE_DEAD_REGS is true,
 // set the accesses to NULL if they are dead at the end of the sequence.
+// If HANDLE_CALL_USED_REGS is true, add reg_mod accesses before any call insn
+// to ensure that the regs used by the call take on their correct values by then.
 void
-sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs)
+sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs,
+                                         bool handle_call_used_regs)
 {
   addr_regs ().clear ();
+
+  std::map<rtx, access*> hard_addr_regs;
 
   for (access_sequence::iterator accs = accesses ().begin ();
        accs != accesses ().end (); ++accs)
@@ -2967,13 +2972,31 @@ sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs)
       if (accs->is_trailing ())
         break;
 
+      // If this is a reg_mod access, add its address register to addr_regs.
       if (accs->access_type () == reg_mod)
-        addr_regs ()[accs->address_reg ()] = &(*accs);
+        {
+          std::map<rtx, access*>::iterator
+            prev_addr_reg = addr_regs ().find (accs->address_reg ());
 
-      if (!erase_dead_regs)
+          // Don't add it if there's already an entry and this reg_mod
+          // only sets the reg to itself.
+          if (prev_addr_reg == addr_regs ().end ()
+              || prev_addr_reg->second == NULL
+              || accs->original_address ().has_index_reg ()
+              || accs->original_address ().has_disp ()
+              || accs->original_address ().base_reg () != accs->address_reg ())
+            {
+              addr_regs ()[accs->address_reg ()] = &(*accs);
+              if (HARD_REGISTER_P (accs->address_reg ()))
+                hard_addr_regs[accs->address_reg ()] = &(*accs);
+            }
+        }
+
+      if (!erase_dead_regs && !handle_call_used_regs)
         continue;
 
-      // Search for REG_DEAD notes in the insns between this and the next access.
+      // Search for call insns and REG_DEAD notes in the insns between
+      // this and the next access.
       access_sequence::iterator next = stdx::next (accs);
       if (accs->insn () && next != accesses ().end () && !next->is_trailing ())
         {
@@ -2982,16 +3005,52 @@ sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs)
               if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
                 continue;
 
-              for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
+              if (handle_call_used_regs && i != accs->insn ()
+                  && GET_CODE (i) == CALL_INSN)
                 {
-                  // Set the value of any address reg that's no longer
-                  // alive to NULL.
-                  if (REG_NOTE_KIND (note) == REG_DEAD
-                      && addr_regs ().find (XEXP (note, 0)) != addr_regs ().end ())
-                    addr_regs ()[XEXP (note, 0)] = NULL;
+                  std::map<rtx, access*>::iterator addr_reg;
+                  for (std::map<rtx, access*>::iterator it = hard_addr_regs.begin ();
+                       it != hard_addr_regs.end (); ++it)
+                    {
+                      access* acc = it->second;
+
+                      if (acc == NULL || acc->address ().is_invalid ())
+                        continue;
+
+                      // Don't add any reg_mod if it'd just set the hardreg
+                      // to itself.
+                      const addr_expr& ae = acc->address ();
+                      if (ae.has_no_index_reg () && ae.has_no_disp ()
+                          && ae.base_reg () == acc->address_reg ())
+                        continue;
+
+                      if (find_reg_fusage (i, USE, it->first))
+                        add_reg_mod (next,
+                                     make_invalid_addr (),
+                                     acc->address (),
+                                     NULL, acc->address_reg (),
+                                     0, false, false);
+                    }
                 }
-              if (i == next->insn ())
-                break;
+                if (erase_dead_regs)
+                  {
+                    for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
+                      {
+                        // Set the value of any address reg that's no longer
+                        // alive to NULL.
+                        if (REG_NOTE_KIND (note) == REG_DEAD
+                            && addr_regs ().find (XEXP (note, 0))
+                              != addr_regs ().end ())
+                          {
+                            addr_regs ()[XEXP (note, 0)] = NULL;
+                            if (HARD_REGISTER_P (XEXP (note, 0)))
+                              hard_addr_regs[XEXP (note, 0)] = NULL;
+                          }
+                      }
+                  }
+
+                if (i == next->insn ())
+                  break;
             }
         }
     }
@@ -3161,7 +3220,7 @@ void
 sh_ams::access_sequence::find_reg_end_values (void)
 {
   // Update the address regs' final values.
-  find_addr_regs (true);
+  find_addr_regs (true, true);
 
   for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
@@ -3444,6 +3503,22 @@ sh_ams::execute (function* fun)
         {
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
             continue;
+
+          if (GET_CODE (i) == CALL_INSN)
+            {
+              log_msg ("call_insn (1):\n");
+              log_insn (i);
+              log_msg ("fusage:\n");
+              for (rtx link = CALL_INSN_FUNCTION_USAGE (i); link;
+                   link = XEXP (link, 1))
+                {
+                  if (GET_CODE (XEXP (link, 0)) == USE)
+                    {
+                      log_rtx (XEXP (XEXP (link, 0), 0));
+                      log_msg ("\n");
+                    }
+                }
+            }
 
           // Search for memory accesses inside the current insn
           // and add them to the address sequence.

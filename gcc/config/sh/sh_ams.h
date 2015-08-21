@@ -647,7 +647,8 @@ public:
     void update_cost (delegate& dlg);
     bool cost_already_minimal (void) const;
 
-    void find_addr_regs (bool erase_dead_regs = false);
+    void find_addr_regs (bool erase_dead_regs = false,
+                         bool handle_call_used_regs = false);
     void add_missing_reg_mods (void);
 
     bool reg_used_in_sequence (rtx reg, access_sequence::iterator search_start);
