@@ -529,13 +529,13 @@ public:
     // account when using it a second time.
     bool is_used (void) const { return m_used; }
     void set_used (void) { m_used = true; }
-    void reset_used (void) { m_used = false; }
+    void set_unused (void) { m_used = false; }
 
     // For reg_mod accesses, tells whether the address reg can be used as
     // a starting address for another access.
     bool usable (void) const { return m_usable; }
     void set_usable (void)  { m_usable = true; }
-    void reset_usable (void)  { m_usable = false; }
+    void set_unusable (void)  { m_usable = false; }
 
     // For reg_mod accesses, true if the address reg still has the
     // same value at the sequence's end as in this access and the
@@ -813,15 +813,21 @@ public:
         inserted_accs ().clear ();
 
         std::for_each (use_changed_accs ().begin (), use_changed_accs ().end (),
-            std::mem_fun (&access::reset_used));
+            std::mem_fun (&access::set_unused));
         use_changed_accs ().clear ();
 
-        std::for_each (usable_changed_accs ().begin (),
-                       usable_changed_accs ().end (),
-            std::mem_fun (&access::reset_usable));
+        for (std::vector<std::pair <access* , bool> >::iterator
+               it = usable_changed_accs ().begin ();
+             it != usable_changed_accs ().end (); ++it)
+          {
+            if (it->second)
+              it->first->set_usable ();
+            else
+              it->first->set_unusable ();
+          }
         usable_changed_accs ().clear ();
 
-        for (std::vector<std::pair <access* , addr_expr> >::iterator
+        for (std::vector<std::pair <access*, addr_expr> >::iterator
                it = addr_changed_accs ().begin ();
              it != addr_changed_accs ().end (); ++it)
           it->first->set_original_address (0, it->second);
@@ -832,10 +838,13 @@ public:
       std::vector<access_sequence::iterator>&
       inserted_accs (void) { return m_inserted_accs; }
 
-      // List of accesses whose M_USED or M_USABLE field was changed.
+      // List of accesses whose M_USED field was changed.
       std::vector<access*>&
       use_changed_accs (void) { return m_use_changed_accs; }
-      std::vector<access*>&
+
+      // List of accesses whose M_USABLE field was changed,
+      // along with their previous values.
+      std::vector<std::pair<access*, bool> >&
       usable_changed_accs (void) { return m_usable_changed_accs; }
 
       // List of accesses whose M_ORIGINAL_ADDR_EXPR changed, along
@@ -846,14 +855,14 @@ public:
     private:
       std::vector<access_sequence::iterator> m_inserted_accs;
       std::vector<access*> m_use_changed_accs;
-      std::vector<access*> m_usable_changed_accs;
+      std::vector<std::pair<access*, bool> > m_usable_changed_accs;
       std::vector<std::pair <access* , addr_expr> > m_addr_changed_accs;
     };
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
 
-    void make_accesses_usable (iterator begin, iterator end,
-                               mod_tracker* tracker = NULL);
+    void make_most_recent_accs_usable (iterator begin, iterator end,
+                                       mod_tracker* tracker = NULL);
 
     int gen_min_mod (filter_iterator<iterator, access_to_optimize> acc,
                      delegate& dlg, int lookahead_num,

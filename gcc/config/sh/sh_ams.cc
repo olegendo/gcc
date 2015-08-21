@@ -1055,8 +1055,24 @@ sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
 sh_ams::access_sequence::iterator
 sh_ams::access_sequence::remove_access (access_sequence::iterator acc)
 {
+  // Remove the access from the start_addresses and
+  // addr_regs list first.
+
   if (acc->access_type () == reg_mod)
     start_addresses ().remove (&(*acc));
+
+  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
+  std::pair <addr_reg_iter, addr_reg_iter> reg_mods =
+    addr_regs ().equal_range (acc->address_reg ());
+  for (addr_reg_iter it = reg_mods.first; it!= reg_mods.second; ++it)
+    {
+      if (it->second == &*acc)
+        {
+          addr_regs ().erase (it);
+          break;
+        }
+    }
+
   return accesses ().erase (acc);
 }
 
@@ -1875,6 +1891,8 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 {
   log_msg ("Generating address modifications\n");
 
+  find_addr_regs ();
+
   // Remove the original reg_mod accesses.
   for (iterator accs = accesses ().begin (); accs != accesses ().end (); )
     {
@@ -1886,7 +1904,8 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 
   typedef filter_iterator<iterator, access_to_optimize> acc_opt_iter;
 
-  make_accesses_usable (accesses ().begin (), begin<access_to_optimize> ());
+  make_most_recent_accs_usable (accesses ().begin (),
+                                begin<access_to_optimize> ());
   for (acc_opt_iter accs = begin<access_to_optimize> (),
        accs_end = end<access_to_optimize> (); accs != accs_end;)
     {
@@ -1895,7 +1914,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
                    true);
       acc_opt_iter next_acc = accs;
       ++next_acc;
-      make_accesses_usable (accs, next_acc);
+      make_most_recent_accs_usable (accs, next_acc);
       accs = next_acc;
     }
 
@@ -1906,7 +1925,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
        accs_end = end<reg_mod_match> (); accs != accs_end; )
     {
       // Mark the reg_mod accesses as "unused" again.
-      accs->reset_used ();
+      accs->set_unused ();
 
       // Remove any unused reg <- constant copy that might have been
       // added while trying different accesses.
@@ -1924,19 +1943,38 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     }
 }
 
-// Set all accesses between BEGIN and END to usable (not including END).
+// Set all accesses between BEGIN and END to "usable" (not including END).
+// If one of these access modified an address reg, mark the previous accesses
+// that modified the reg "unusable".
 // If TRACKER is not null, record these changes in it.
-void
-sh_ams::access_sequence::make_accesses_usable (access_sequence::iterator begin,
-                                               access_sequence::iterator end,
-                                               mod_tracker* tracker)
+void sh_ams::access_sequence
+::make_most_recent_accs_usable (access_sequence::iterator begin,
+                                access_sequence::iterator end,
+                                mod_tracker* tracker)
 {
+  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
   for (access_sequence::iterator accs = begin; accs != end; ++accs)
     {
       if (tracker && !accs->usable ())
-        tracker->usable_changed_accs ().push_back (&(*accs));
+        tracker->usable_changed_accs ().push_back (std::make_pair (&(*accs), false));
 
       accs->set_usable ();
+      if (accs->access_type () == reg_mod)
+        {
+          // Mark the other reg_mods that set this address reg "unusable".
+          std::pair <addr_reg_iter, addr_reg_iter> reg_mods =
+            addr_regs ().equal_range (accs->address_reg ());
+          for (addr_reg_iter it = reg_mods.first; it!= reg_mods.second; ++it)
+            {
+              if (it->second != &*accs && it->second->usable ())
+                {
+                  if (tracker)
+                    tracker->usable_changed_accs ()
+                      .push_back (std::make_pair (it->second, true));
+                  it->second->set_unusable ();
+                }
+            }
+        }
     }
 }
 
@@ -2028,7 +2066,7 @@ gen_min_mod (filter_iterator<iterator, access_to_optimize> acc, delegate& dlg,
       // inserted address mods.
       if (next_acc != accesses ().end ())
         {
-          make_accesses_usable (acc, next_acc, &tracker);
+          make_most_recent_accs_usable (acc, next_acc, &tracker);
           gen_mod_for_alt (*alt, base_mod_cost.min_start_addr,
 			   index_mod_cost.min_start_addr,
 			   end_base, end_index, acc, tracker, dlg);
@@ -2523,7 +2561,7 @@ sh_ams::access_sequence::update_cost (delegate& dlg)
 
   // Mark the reg_mod accesses as "unused" again.
   std::for_each (accesses ().begin (), accesses ().end (),
-                 std::mem_fun_ref (&access::reset_used));
+                 std::mem_fun_ref (&access::set_unused));
 }
 
 // Get the cloning costs associated with ACC, if any.
@@ -2756,7 +2794,8 @@ sh_ams::access_sequence
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
-      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
+      mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
+                                                                    false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_MULT (Pmode,
@@ -2798,7 +2837,8 @@ sh_ams::access_sequence
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
-      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
+      mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
+                                                                    false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_PLUS (Pmode,
@@ -2835,7 +2875,8 @@ sh_ams::access_sequence
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
-      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
+      mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
+                                                                    false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_PLUS (Pmode,
@@ -2893,7 +2934,8 @@ sh_ams::access_sequence
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
-      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
+      mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
+                                                                    false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
                                 gen_rtx_PLUS (Pmode,
@@ -2932,7 +2974,8 @@ sh_ams::access_sequence
 
       ins_place = stdx::prev (access_place);
       mod_tracker.inserted_accs ().push_back (ins_place);
-      mod_tracker.usable_changed_accs ().push_back (&(*ins_place));
+      mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
+                                                                    false));
 
       new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
@@ -3243,7 +3286,7 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
 
   // Reset the "usable" flags.
   std::for_each (accesses ().begin (), accesses ().end (),
-                 std::mem_fun_ref (&access::reset_usable));
+                 std::mem_fun_ref (&access::set_unusable));
 }
 
 // Find the values of all address registers that are still alive
