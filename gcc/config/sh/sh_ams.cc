@@ -1359,7 +1359,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
             }
 
           // If the expression is something AMS can't handle, use the original
-          // reg instead, and update the INSERTED_MOD to store the reg's value
+          // reg instead, and update the NEW_REG_MOD to store the reg's value
           // as an rtx instead of an addr_expr.
           if (reg_addr_expr.is_invalid ())
             {
@@ -3072,17 +3072,34 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
 
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
-      inserted_reg_mods.clear ();
       basic_block bb = start_bb ();
-      addr_expr expr = extract_addr_expr (reg, BB_END (bb), BB_END (bb),
-					  Pmode, this, inserted_reg_mods);
+      rtx_insn* end_insn = BB_END (bb);
 
-      // If the final expression created by these modifications
-      // is too complicated for AMS to handle, the address mod
-      // generator shouldn't try to replace them.
-      if (expr.is_invalid ())
-	std::for_each (inserted_reg_mods.begin (), inserted_reg_mods.end (),
-		       std::mem_fun (&access::mark_unremovable));
+      while (end_insn)
+        {
+          inserted_reg_mods.clear ();
+          addr_expr expr = extract_addr_expr (reg, end_insn, BB_END (bb),
+                                              Pmode, this, inserted_reg_mods);
+
+          // If the final expression created by these modifications
+          // is too complicated for AMS to handle, the address mod
+          // generator shouldn't try to replace them.
+          if (expr.is_invalid ())
+            std::for_each (inserted_reg_mods.begin (), inserted_reg_mods.end (),
+                           std::mem_fun (&access::mark_unremovable));
+
+          end_insn = NULL;
+          for (std::vector<access*>::iterator mods = inserted_reg_mods.begin ();
+               mods != inserted_reg_mods.end (); ++mods)
+            {
+              access& acc = **mods;
+              if (REGNO (acc.address_reg ()) == REGNO (reg) && acc.insn ())
+                {
+                  end_insn = acc.insn ();
+                  break;
+                }
+            }
+        }
     }
 }
 
