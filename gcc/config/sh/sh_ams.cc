@@ -690,6 +690,7 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_addr_reg = NULL;
   m_used = false;
   m_usable = false;
+  m_valid_at_end = false;
   m_validate_alternatives = true;
 }
 
@@ -711,6 +712,7 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_addr_reg = mod_reg;
   m_used = false;
   m_usable = false;
+  m_valid_at_end = false;
   m_validate_alternatives = true;
 }
 
@@ -734,6 +736,7 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_addr_reg = NULL;
   m_used = false;
   m_usable = false;
+  m_valid_at_end = false;
   m_validate_alternatives = true;
 }
 
@@ -1677,11 +1680,20 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
 // usable address reg of the sequence AS.  Used by collect_addr_reg_uses_2.
 bool sh_ams::usable_addr_reg (rtx x, rtx addr_reg, access_sequence& as)
 {
+  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
   if (addr_reg)
     return x == addr_reg;
-  std::map<rtx, access*>::iterator found_addr_reg = as.addr_regs ().find (x);
-  return found_addr_reg != as.addr_regs ().end ()
-    && found_addr_reg->second->usable ();
+  std::pair <addr_reg_iter, addr_reg_iter> found_addr_reg =
+    as.addr_regs ().equal_range (x);
+  if (found_addr_reg.first == found_addr_reg.second)
+    return false;
+
+  for (addr_reg_iter it = found_addr_reg.first; it != found_addr_reg.second; ++it)
+    {
+      if (it->second->usable ())
+        return true;
+    }
+  return false;
 }
 
 // Collect uses of the address registers in all basic blocks that are reachable
@@ -2954,17 +2966,17 @@ sh_ams::access_sequence
 
 // Find all the address regs in the access sequence (i.e. the regs whose value
 // was changed by a reg_mod access) and place them into M_ADDR_REGS. Pair them
-// with the last reg_mod access that modified them.  If ERASE_DEAD_REGS is true,
-// set the accesses to NULL if they are dead at the end of the sequence.
+// with the reg_mod accesses that modified them and set those accesses'
+// M_VALID_AT_END field as needed.
 // If HANDLE_CALL_USED_REGS is true, add reg_mod accesses before any call insn
 // to ensure that the regs used by the call take on their correct values by then.
 void
-sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs,
-                                         bool handle_call_used_regs)
+sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
 {
+  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
   addr_regs ().clear ();
 
-  std::map<rtx, access*> hard_addr_regs;
+  std::multimap<rtx, access*> hard_addr_regs;
 
   for (access_sequence::iterator accs = accesses ().begin ();
        accs != accesses ().end (); ++accs)
@@ -2975,24 +2987,31 @@ sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs,
       // If this is a reg_mod access, add its address register to addr_regs.
       if (accs->access_type () == reg_mod)
         {
-          std::map<rtx, access*>::iterator
-            prev_addr_reg = addr_regs ().find (accs->address_reg ());
+          std::pair <addr_reg_iter, addr_reg_iter>
+            prev_values = addr_regs ().equal_range (accs->address_reg ());
 
           // Don't add it if there's already an entry and this reg_mod
           // only sets the reg to itself.
-          if (prev_addr_reg == addr_regs ().end ()
-              || prev_addr_reg->second == NULL
+          if (prev_values.first == prev_values.second
               || accs->original_address ().has_index_reg ()
               || accs->original_address ().has_disp ()
               || accs->original_address ().base_reg () != accs->address_reg ())
             {
-              addr_regs ()[accs->address_reg ()] = &(*accs);
+              // Since we found a new version of this addr reg, the previous
+              // ones won't be valid at the sequence's end.
+              for (addr_reg_iter it = prev_values.first; it!= prev_values.second; ++it)
+                it->second->set_invalid_at_end ();
+              accs->set_valid_at_end ();
+
+              addr_regs ().insert (std::make_pair (accs->address_reg (),
+                                                   &(*accs)));
               if (HARD_REGISTER_P (accs->address_reg ()))
-                hard_addr_regs[accs->address_reg ()] = &(*accs);
+                hard_addr_regs.insert (std::make_pair (accs->address_reg (),
+                                                       &(*accs)));
             }
         }
 
-      if (!erase_dead_regs && !handle_call_used_regs)
+      if (!handle_call_used_regs)
         continue;
 
       // Search for call insns and REG_DEAD notes in the insns between
@@ -3009,12 +3028,13 @@ sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs,
                   && GET_CODE (i) == CALL_INSN)
                 {
                   std::map<rtx, access*>::iterator addr_reg;
-                  for (std::map<rtx, access*>::iterator it = hard_addr_regs.begin ();
+                  for (std::multimap<rtx, access*>::iterator it =
+                         hard_addr_regs.begin ();
                        it != hard_addr_regs.end (); ++it)
                     {
                       access* acc = it->second;
 
-                      if (acc == NULL || acc->address ().is_invalid ())
+                      if (!acc->valid_at_end () || acc->address ().is_invalid ())
                         continue;
 
                       // Don't add any reg_mod if it'd just set the hardreg
@@ -3032,22 +3052,19 @@ sh_ams::access_sequence::find_addr_regs (bool erase_dead_regs,
                                      0, false, false);
                     }
                 }
-                if (erase_dead_regs)
-                  {
-                    for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
-                      {
-                        // Set the value of any address reg that's no longer
-                        // alive to NULL.
-                        if (REG_NOTE_KIND (note) == REG_DEAD
-                            && addr_regs ().find (XEXP (note, 0))
-                              != addr_regs ().end ())
-                          {
-                            addr_regs ()[XEXP (note, 0)] = NULL;
-                            if (HARD_REGISTER_P (XEXP (note, 0)))
-                              hard_addr_regs[XEXP (note, 0)] = NULL;
-                          }
-                      }
-                  }
+              for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
+                {
+                  if (REG_NOTE_KIND (note) != REG_DEAD)
+                    continue;
+
+                  // If an addr reg is no longer alive, set all its
+                  // accesses' M_VALID_AT_END to false.
+                  std::pair <addr_reg_iter, addr_reg_iter>
+                    found_accs = addr_regs ().equal_range (XEXP (note, 0));
+                  for (addr_reg_iter it = found_accs.first;
+                       it!= found_accs.second; ++it)
+                    it->second->set_invalid_at_end ();
+                }
 
                 if (i == next->insn ())
                   break;
@@ -3065,7 +3082,7 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
   find_addr_regs ();
 
   std::vector<access*> inserted_reg_mods;
-  for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (std::multimap<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       rtx reg = it->first;
@@ -3182,7 +3199,7 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
     return;
 
   // Add trailing address reg uses to the end of the sequence.
-  for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (std::multimap<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       used_regs.clear ();
@@ -3237,16 +3254,16 @@ void
 sh_ams::access_sequence::find_reg_end_values (void)
 {
   // Update the address regs' final values.
-  find_addr_regs (true, true);
+  find_addr_regs (true);
 
-  for (std::map<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (std::multimap<rtx, access*>::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       access* acc = it->second;
 
-      // Address regs that have NULL as their value are dead,
-      // so we can skip those.
-      if (!acc)
+      // Skip the reg_mod access if it isn't alive or has a different value
+      // at the sequence's end.
+      if (!acc->valid_at_end ())
         continue;
 
       // Don't add the addr reg if it wasn't modified during the sequence

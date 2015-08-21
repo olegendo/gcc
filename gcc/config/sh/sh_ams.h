@@ -537,6 +537,13 @@ public:
     void set_usable (void)  { m_usable = true; }
     void reset_usable (void)  { m_usable = false; }
 
+    // For reg_mod accesses, true if the address reg still has the
+    // same value at the sequence's end as in this access and the
+    // register is not dead by that time.
+    bool valid_at_end (void) const { return m_valid_at_end; }
+    void set_valid_at_end (void) { m_valid_at_end = true; }
+    void set_invalid_at_end (void) { m_valid_at_end = false; }
+
     // Return true if this is a trailing access, i,e. the first use or
     // modification of an address reg that follows the last access in the
     // sequence (which could be possibly in another BB).
@@ -595,6 +602,7 @@ public:
     rtx m_addr_reg;
     bool m_used;
     bool m_usable;
+    bool m_valid_at_end;
     bool m_validate_alternatives;
 
     adjacent_chain m_inc_chain;
@@ -647,8 +655,7 @@ public:
     void update_cost (delegate& dlg);
     bool cost_already_minimal (void) const;
 
-    void find_addr_regs (bool erase_dead_regs = false,
-                         bool handle_call_used_regs = false);
+    void find_addr_regs (bool handle_call_used_regs = false);
     void add_missing_reg_mods (void);
 
     bool reg_used_in_sequence (rtx reg, access_sequence::iterator search_start);
@@ -724,7 +731,7 @@ public:
 
     // A map containing the address regs of the sequence and the last
     // reg_mod access that modified them.
-    std::map<rtx, access*>& addr_regs (void) { return m_addr_regs; }
+    std::multimap<rtx, access*>& addr_regs (void) { return m_addr_regs; }
 
     // A structure used to store the address regs that can be used as a starting
     // point to arrive at another address during address mod generation.
@@ -906,7 +913,7 @@ public:
 		     delegate& dlg);
 
     std::list<access> m_accs;
-    std::map<rtx, access*> m_addr_regs;
+    std::multimap<rtx, access*> m_addr_regs;
     start_addr_list m_start_addr_list;
     std::vector<shared_insn*> m_mod_insns;
     bool m_modify_insns;
