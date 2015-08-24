@@ -1381,28 +1381,36 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           access* new_reg_mod = NULL;
           if (insn && root_insn)
             {
-              addr_expr original_reg_addr_expr
-                = find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
-                  ? make_reg_addr (x)
-                  : extract_addr_expr (r.value, mem_mach_mode);
-              new_reg_mod = &as->add_reg_mod (root_insn,
-                                              original_reg_addr_expr,
-                                              reg_addr_expr,
-                                              r.mod_insn, r.reg,
-                                              infinite_costs,
-                                              true);
-              inserted_reg_mods.push_back (new_reg_mod);
+              // If the expression is something AMS can't handle, store the
+              // reg's original address as an rtx instead of an addr_expr.
+              if (reg_addr_expr.is_invalid ())
+                new_reg_mod = &as->add_reg_mod (root_insn, r.value,
+                                                r.mod_insn, r.reg, 0,
+                                                true);
+
+              // Otherwise, store it as a normal addr_expr.
+              else
+                {
+                  addr_expr original_reg_addr_expr
+                    = find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
+                      ? make_reg_addr (x)
+                      : extract_addr_expr (r.value, mem_mach_mode);
+                  new_reg_mod = &as->add_reg_mod (root_insn,
+                                                  original_reg_addr_expr,
+                                                  reg_addr_expr,
+                                                  r.mod_insn, r.reg,
+                                                  infinite_costs,
+                                                  true);
+                  inserted_reg_mods.push_back (new_reg_mod);
+                }
             }
 
           // If the expression is something AMS can't handle, use the original
-          // reg instead, and update the NEW_REG_MOD to store the reg's value
-          // as an rtx instead of an addr_expr.
+          // reg instead.
           if (reg_addr_expr.is_invalid ())
             {
               if (new_reg_mod)
                 {
-                  new_reg_mod->set_original_address (0, r.value);
-
                   // Set all reg_mod accesses that were added while expanding this
                   // register to "unremovable".
                   while (!inserted_reg_mods.empty ())
