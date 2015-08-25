@@ -894,7 +894,7 @@ public:
 
     min_mod_cost_result
     find_min_mod_cost (const addr_expr& end_addr,
-		       access_sequence::iterator insert_before,
+		       access_sequence::iterator acc,
 		       disp_t disp_min, disp_t disp_max,
 		       addr_type_t addr_type, delegate& dlg);
 
@@ -920,7 +920,8 @@ public:
     mod_addr_result
     try_modify_addr (access* start_addr, const addr_expr& end_addr,
 		     disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-		     access_sequence::iterator &access_place,
+		     machine_mode mode,
+		     access_sequence::iterator &acc,
 		     mod_tracker &mod_tracker,
 		     delegate& dlg);
 

@@ -2154,6 +2154,8 @@ sh_ams::access_sequence::gen_mod_for_alt (access::alternative& alternative,
                      alternative.address ().disp_min (),
                      alternative.address ().disp_max (),
                      alternative.address ().type (),
+                     acc->access_type () == reg_mod ?
+                       GET_MODE (acc->address_reg ()) : Pmode,
                      acc, mod_tracker, dlg);
 
   const addr_expr& ae = acc->address ();
@@ -2172,6 +2174,8 @@ sh_ams::access_sequence::gen_mod_for_alt (access::alternative& alternative,
         try_modify_addr (start_index, end_index,
                          0, 0,
                          alternative.address ().type (),
+                         acc->access_type () == reg_mod ?
+                           GET_MODE (acc->address_reg ()) : Pmode,
                          acc, mod_tracker, dlg);
       new_addr_expr = non_mod_addr (base_insert_result.addr_reg,
                                     index_insert_result.addr_reg, 1, 0);
@@ -2656,13 +2660,15 @@ bool sh_ams::access_sequence::cost_already_minimal (void) const
 sh_ams::access_sequence::min_mod_cost_result
 sh_ams::access_sequence
 ::find_min_mod_cost (const addr_expr& end_addr,
-		     access_sequence::iterator insert_before,
+		     access_sequence::iterator acc,
 		     disp_t disp_min, disp_t disp_max,
 		     addr_type_t addr_type, delegate& dlg)
 {
   int min_cost = infinite_costs;
   access* min_start_addr = NULL;
   mod_tracker tracker;
+  machine_mode acc_mode = acc->access_type () == reg_mod ?
+    GET_MODE (acc->address_reg ()) : Pmode;
 
   std::list<access*> start_addrs =
     start_addresses ().get_relevant_addresses (end_addr);
@@ -2670,7 +2676,7 @@ sh_ams::access_sequence
        it != start_addrs.end (); ++it)
     {
       int cost = try_modify_addr (*it, end_addr, disp_min, disp_max,
-                                  addr_type, insert_before, tracker, dlg).cost;
+                                  addr_type, acc_mode, acc, tracker, dlg).cost;
       tracker.reset_changes (*this);
       if (cost < min_cost)
         {
@@ -2683,14 +2689,14 @@ sh_ams::access_sequence
   // the reg directly.
   if (end_addr.has_no_base_reg () && end_addr.has_no_index_reg ())
     {
-      rtx const_reg = gen_reg_rtx (Pmode);
+      rtx const_reg = gen_reg_rtx (acc_mode);
       add_reg_mod (accesses ().begin (), make_const_addr (end_addr.disp ()),
 					 make_const_addr (end_addr.disp ()),
 					 NULL, const_reg, 0);
       accesses ().front ().set_usable ();
       int cost = try_modify_addr (&(*accesses ().begin ()), end_addr,
                                   disp_min, disp_max,
-                                  addr_type, insert_before, tracker, dlg).cost;
+                                  addr_type, acc_mode, acc, tracker, dlg).cost;
       cost += get_reg_mod_cost (dlg, const_reg, GEN_INT (end_addr.disp ()),
                                 *this, accesses ().begin ());
 
@@ -2725,7 +2731,8 @@ sh_ams::access_sequence::mod_addr_result
 sh_ams::access_sequence
 ::try_modify_addr (access* start_addr, const addr_expr& end_addr,
 		   disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
-		   access_sequence::iterator &access_place,
+		   machine_mode mode,
+		   access_sequence::iterator &acc,
 		   mod_tracker &mod_tracker,
 		   delegate& dlg)
 {
@@ -2733,7 +2740,7 @@ sh_ams::access_sequence
   rtx new_reg = start_addr->address_reg ();
   int cost = start_addr->is_used ()
              ? dlg.addr_reg_clone_cost (start_addr->address_reg (),
-                                        *this, access_place)
+                                        *this, acc)
              : 0;
   int prev_cost = 0;
   rtx final_addr_regno = start_addr->address_reg ();
@@ -2783,6 +2790,15 @@ sh_ams::access_sequence
         return mod_addr_result (infinite_costs, invalid_regno, 0);
     }
 
+  // The start address' regs need to have the
+  // same machine mode as the access.
+  if (c_start_addr.has_base_reg ()
+      && GET_MODE (c_start_addr.base_reg ()) != mode)
+    return mod_addr_result (infinite_costs, invalid_regno, 0);
+  if (c_start_addr.has_index_reg ()
+      && GET_MODE (c_start_addr.index_reg ()) != mode)
+    return mod_addr_result (infinite_costs, invalid_regno, 0);
+
   // Add scaling.
   if (c_start_addr.has_index_reg ()
       && c_start_addr.index_reg () == c_end_addr.index_reg ()
@@ -2808,22 +2824,22 @@ sh_ams::access_sequence
           mod_tracker.use_changed_accs ().push_back (start_addr);
         }
 
-      new_reg = gen_reg_rtx (Pmode);
+      new_reg = gen_reg_rtx (mode);
       access* new_addr = &add_reg_mod (
-                 access_place,
+                 acc,
                  non_mod_addr (invalid_regno,
                                start_addr->address_reg (), scale, 0),
                  c_start_addr, NULL, new_reg, 0);
       new_addr->set_usable ();
       final_addr_regno = new_reg;
 
-      ins_place = stdx::prev (access_place);
+      ins_place = stdx::prev (acc);
       mod_tracker.inserted_accs ().push_back (ins_place);
       mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
                                                                     false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
-                                gen_rtx_MULT (Pmode,
+                                gen_rtx_MULT (mode,
                                               start_addr->address_reg (),
                                               GEN_INT (scale)),
                                 *this, ins_place);
@@ -2850,9 +2866,9 @@ sh_ams::access_sequence
           mod_tracker.use_changed_accs ().push_back (start_addr);
         }
 
-      new_reg = gen_reg_rtx (Pmode);
+      new_reg = gen_reg_rtx (mode);
       access* new_addr = &add_reg_mod (
-                 access_place,
+                 acc,
                  non_mod_addr (start_addr->address_reg (),
                                c_end_addr.index_reg (),
                                -1, 0),
@@ -2860,13 +2876,13 @@ sh_ams::access_sequence
       new_addr->set_usable ();
       final_addr_regno = new_reg;
 
-      ins_place = stdx::prev (access_place);
+      ins_place = stdx::prev (acc);
       mod_tracker.inserted_accs ().push_back (ins_place);
       mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
                                                                     false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
-                                gen_rtx_PLUS (Pmode,
+                                gen_rtx_PLUS (mode,
                                               start_addr->address_reg (),
                                               c_end_addr.index_reg ()),
                                 *this, ins_place);
@@ -2889,22 +2905,22 @@ sh_ams::access_sequence
           mod_tracker.use_changed_accs ().push_back (start_addr);
         }
 
-      new_reg = gen_reg_rtx (Pmode);
+      new_reg = gen_reg_rtx (mode);
       access* new_addr = &add_reg_mod (
-                 access_place,
+                 acc,
                  non_mod_addr (c_start_addr.base_reg (),
                                start_addr->address_reg (), 1, 0),
                  c_start_addr, NULL, new_reg, 0);
       new_addr->set_usable ();
       final_addr_regno = new_reg;
 
-      ins_place = stdx::prev (access_place);
+      ins_place = stdx::prev (acc);
       mod_tracker.inserted_accs ().push_back (ins_place);
       mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
                                                                     false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
-                                gen_rtx_PLUS (Pmode,
+                                gen_rtx_PLUS (mode,
                                               start_addr->address_reg (),
                                               c_end_addr.base_reg ()),
                                 *this, ins_place);
@@ -2948,22 +2964,22 @@ sh_ams::access_sequence
           mod_tracker.use_changed_accs ().push_back (start_addr);
         }
 
-      new_reg = gen_reg_rtx (Pmode);
+      new_reg = gen_reg_rtx (mode);
       access* new_addr = &add_reg_mod (
-                  access_place,
+                  acc,
                   non_mod_addr (start_addr->address_reg (),
                                 invalid_regno, 1, disp),
                   c_start_addr, NULL, new_reg, 0);
       new_addr->set_usable ();
       final_addr_regno = new_reg;
 
-      ins_place = stdx::prev (access_place);
+      ins_place = stdx::prev (acc);
       mod_tracker.inserted_accs ().push_back (ins_place);
       mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
                                                                     false));
 
       cost += get_reg_mod_cost (dlg, new_reg,
-                                gen_rtx_PLUS (Pmode,
+                                gen_rtx_PLUS (mode,
                                               start_addr->address_reg (),
                                               GEN_INT (disp)),
                                 *this, ins_place);
@@ -2991,13 +3007,13 @@ sh_ams::access_sequence
         }
 
       rtx pre_mod_reg = new_reg;
-      new_reg = gen_reg_rtx (Pmode);
-      access* new_addr = &add_reg_mod (access_place, make_reg_addr (pre_mod_reg),
+      new_reg = gen_reg_rtx (mode);
+      access* new_addr = &add_reg_mod (acc, make_reg_addr (pre_mod_reg),
                                        c_start_addr, NULL, new_reg, 0);
       new_addr->set_usable ();
       final_addr_regno = new_reg;
 
-      ins_place = stdx::prev (access_place);
+      ins_place = stdx::prev (acc);
       mod_tracker.inserted_accs ().push_back (ins_place);
       mod_tracker.usable_changed_accs ().push_back (std::make_pair (&(*ins_place),
                                                                     false));
