@@ -2339,6 +2339,12 @@ sh_ams::access_sequence
           continue;
         }
 
+      if (accs->is_trailing ())
+        {
+          log_msg ("skipping trailing access\n");
+          continue;
+        }
+
       if (accs->access_type () == reg_mod)
         {
           // Skip accesses that don't modify anything
@@ -2412,7 +2418,7 @@ sh_ams::access_sequence
           accs->set_insn (emit_move_insn (accs->address_reg (), new_val));
           accs->set_mod_insn (create_mod_insn (accs->insn (), shared_insn_list));
         }
-      else if (accs->access_type () == reg_use && !accs->is_trailing ())
+      else if (accs->access_type () == reg_use)
         {
           gcc_assert (accs->original_address ().has_base_reg ());
           bool r = accs->set_insn_use_rtx (
