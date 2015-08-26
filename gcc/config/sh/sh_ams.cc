@@ -1350,13 +1350,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               && (REGNO (r.value) == REGNO (x)
                   || HARD_REGISTER_P (r.value)))
             {
-              // Add a reg_mod access that sets the reg to itself.
-              // This makes it easier for the address modification
-              // generator to find all possible starting addresses.
+              // Add to the sequence's start a reg_mod access that sets
+              // the reg to itself. This makes it easier for the address
+              // modification generator to find all possible starting
+              // addresses.
               if (insn && root_insn)
                 as->add_reg_mod (root_insn,
                                  make_reg_addr (x), make_reg_addr (x),
-                                 r.mod_insn, x);
+                                 NULL, x);
               return make_reg_addr (x);
             }
 
@@ -1427,7 +1428,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               // address modification generator.
               if (insn && root_insn)
                 as->add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
-                                 r.mod_insn, x);
+                                 NULL, x);
 
               return make_reg_addr (x);
             }
