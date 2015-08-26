@@ -3098,7 +3098,11 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
           if (prev_values.first == prev_values.second
               || accs->original_address ().has_index_reg ()
               || accs->original_address ().has_disp ()
-              || accs->original_address ().base_reg () != accs->address_reg ())
+              || accs->original_address ().base_reg () != accs->address_reg ()
+              || (!accs->address ().is_invalid ()
+                  && (accs->address ().has_index_reg ()
+                      || accs->address ().has_disp ()
+                      || accs->address ().base_reg () != accs->address_reg ())))
             {
               // Since we found a new version of this addr reg, the previous
               // ones won't be valid at the sequence's end.
