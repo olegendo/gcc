@@ -184,7 +184,7 @@ log_addr_expr (const sh_ams::addr_expr& ae)
 	  log_msg (" + ");
 	  log_reg (ae.index_reg ());
 	  if (ae.scale () != 1)
-	    log_msg (" * %d", ae.scale ());
+	    log_msg (" * %lld", ae.scale ());
 	}
 
       if (ae.disp () != 0)
@@ -819,15 +819,27 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
   std::vector<access*> inserted_reg_mods;
   addr_expr expr = extract_addr_expr ((XEXP (*mem, 0)), insn, insn,
 				      m_mode, this, inserted_reg_mods);
+  bool should_optimize = true;
 
   // If the effective address doesn't fit into an addr_expr,
   // don't try to optimize it.
-  bool should_optimize = true;
   if (expr.is_invalid ())
     {
       expr = original_expr;
       should_optimize = false;
+    }
 
+  // Also don't optimize if the effective displacement or scale is too large
+  // for the access mode.
+  if (expr.has_disp () && (expr.has_base_reg () || expr.has_index_reg ())
+      && sext_hwi (expr.disp (), GET_MODE_PRECISION (m_mode)) != expr.disp ())
+    should_optimize = false;
+    if (expr.has_index_reg ()
+        && sext_hwi (expr.scale (), GET_MODE_PRECISION (m_mode)) != expr.scale ())
+    should_optimize = false;
+
+  if (!should_optimize)
+    {
       // The reg modifications that were used to arrive at the address
       // shouldn't be removed in this case.
       std::for_each (inserted_reg_mods.begin (), inserted_reg_mods.end (),
@@ -2816,7 +2828,7 @@ sh_ams::access_sequence
         return mod_addr_result (infinite_costs, invalid_regno, 0);
 
       // We can only scale by integers.
-      std::div_t sr = std::div (c_end_addr.scale (), c_start_addr.scale ());
+      std::lldiv_t sr = std::div (c_end_addr.scale (), c_start_addr.scale ());
 
       if (sr.rem != 0)
         return mod_addr_result (infinite_costs, invalid_regno, 0);

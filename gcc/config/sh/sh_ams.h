@@ -162,7 +162,7 @@ public:
   // for a constant displacement using a 32 bit int should be sufficient.
   // however, we use it also to represent constant addresses.
   typedef HOST_WIDE_INT disp_t;
-  typedef int scale_t;
+  typedef HOST_WIDE_INT scale_t;
 
   enum
   {
