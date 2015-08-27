@@ -1414,8 +1414,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                                                   r.mod_insn, r.reg,
                                                   infinite_costs,
                                                   true);
-                  inserted_reg_mods.push_back (new_reg_mod);
                 }
+              inserted_reg_mods.push_back (new_reg_mod);
             }
 
           // If the expression is something AMS can't handle, use the original
