@@ -3731,6 +3731,13 @@ sh_ams::execute (function* fun)
           continue;
         }
 
+      typedef access_type_matches<load, store> mem_match;
+      if (as.begin<mem_match> () == as.end<mem_match> ())
+        {
+          log_msg ("access sequence doesn't have any real memory accesses\n\n");
+          continue;
+        }
+
       log_access_sequence (as, false);
       log_msg ("\n\n");
 
