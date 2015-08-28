@@ -3260,6 +3260,8 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
   std::vector<std::pair<rtx*, rtx_insn*> > used_regs;
   rtx_insn* last_insn = NULL;
 
+  find_addr_regs ();
+
   accesses ().begin ()->set_usable ();
 
   for (access_sequence::iterator accs = accesses ().begin ();
