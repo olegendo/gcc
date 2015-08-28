@@ -1090,10 +1090,9 @@ sh_ams::access_sequence::remove_access (access_sequence::iterator acc)
   if (acc->access_type () == reg_mod)
     start_addresses ().remove (&(*acc));
 
-  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
-  std::pair <addr_reg_iter, addr_reg_iter> reg_mods =
+  std::pair <addr_reg_map::iterator, addr_reg_map::iterator> reg_mods =
     addr_regs ().equal_range (acc->address_reg ());
-  for (addr_reg_iter it = reg_mods.first; it!= reg_mods.second; ++it)
+  for (addr_reg_map::iterator it = reg_mods.first; it!= reg_mods.second; ++it)
     {
       if (it->second == &*acc)
         {
@@ -1734,15 +1733,17 @@ sh_ams::collect_addr_reg_uses_2 (access_sequence& as, rtx addr_reg,
 // usable address reg of the sequence AS.  Used by collect_addr_reg_uses_2.
 bool sh_ams::usable_addr_reg (rtx x, rtx addr_reg, access_sequence& as)
 {
-  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
   if (addr_reg)
     return x == addr_reg;
-  std::pair <addr_reg_iter, addr_reg_iter> found_addr_reg =
+
+  std::pair <access_sequence::addr_reg_map::iterator,
+             access_sequence::addr_reg_map::iterator> found_addr_reg =
     as.addr_regs ().equal_range (x);
   if (found_addr_reg.first == found_addr_reg.second)
     return false;
 
-  for (addr_reg_iter it = found_addr_reg.first; it != found_addr_reg.second; ++it)
+  for (access_sequence::addr_reg_map::iterator it = found_addr_reg.first;
+       it != found_addr_reg.second; ++it)
     {
       if (it->second->usable ())
         return true;
@@ -1990,7 +1991,6 @@ void sh_ams::access_sequence
                                 access_sequence::iterator end,
                                 mod_tracker* tracker)
 {
-  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
   for (access_sequence::iterator accs = begin; accs != end; ++accs)
     {
       if (tracker && !accs->usable ())
@@ -2000,9 +2000,10 @@ void sh_ams::access_sequence
       if (accs->access_type () == reg_mod)
         {
           // Mark the other reg_mods that set this address reg "unusable".
-          std::pair <addr_reg_iter, addr_reg_iter> reg_mods =
+          std::pair <addr_reg_map::iterator, addr_reg_map::iterator> reg_mods =
             addr_regs ().equal_range (accs->address_reg ());
-          for (addr_reg_iter it = reg_mods.first; it!= reg_mods.second; ++it)
+          for (addr_reg_map::iterator it = reg_mods.first;
+               it!= reg_mods.second; ++it)
             {
               if (it->second != &*accs && it->second->usable ())
                 {
@@ -2225,17 +2226,17 @@ sh_ams::access_sequence::start_addr_list
   // Addresses containing registers might be used if they have a
   // register in common with the end address.
   typedef std::pair <std::multimap<rtx, access*>::iterator,
-		     std::multimap<rtx, access*>::iterator> matching_range;
+                     std::multimap<rtx, access*>::iterator > matching_range_t;
   if (end_addr.has_base_reg ())
     {
-      matching_range r = m_reg_addresses.equal_range (end_addr.base_reg ());
-      for (matching_range::first_type it = r.first; it != r.second; ++it)
+      matching_range_t r = m_reg_addresses.equal_range (end_addr.base_reg ());
+      for (matching_range_t::first_type it = r.first; it != r.second; ++it)
         start_addrs.push_back (it->second);
     }
   if (end_addr.has_index_reg ())
     {
-      matching_range r = m_reg_addresses.equal_range (end_addr.index_reg ());
-      for (matching_range::first_type it = r.first; it != r.second; ++it)
+      matching_range_t r = m_reg_addresses.equal_range (end_addr.index_reg ());
+      for (matching_range_t::first_type it = r.first; it != r.second; ++it)
         start_addrs.push_back (it->second);
     }
 
@@ -2278,7 +2279,7 @@ void sh_ams::access_sequence::
 start_addr_list::remove (access* start_addr)
 {
   std::pair <std::multimap<rtx, access*>::iterator,
-             std::multimap<rtx, access*>::iterator> matching_range;
+             std::multimap<rtx, access*>::iterator > matching_range;
   if (start_addr->valid_address ().has_base_reg ())
     {
       matching_range
@@ -3076,10 +3077,9 @@ sh_ams::access_sequence
 void
 sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
 {
-  typedef std::multimap<rtx, access*>::iterator addr_reg_iter;
   addr_regs ().clear ();
 
-  std::multimap<rtx, access*> hard_addr_regs;
+  addr_reg_map hard_addr_regs;
 
   for (access_sequence::iterator accs = accesses ().begin ();
        accs != accesses ().end (); ++accs)
@@ -3090,7 +3090,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
       // If this is a reg_mod access, add its address register to addr_regs.
       if (accs->access_type () == reg_mod)
         {
-          std::pair <addr_reg_iter, addr_reg_iter>
+          std::pair <addr_reg_map::iterator, addr_reg_map::iterator>
             prev_values = addr_regs ().equal_range (accs->address_reg ());
 
           // Don't add it if there's already an entry and this reg_mod
@@ -3106,7 +3106,8 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
             {
               // Since we found a new version of this addr reg, the previous
               // ones won't be valid at the sequence's end.
-              for (addr_reg_iter it = prev_values.first; it!= prev_values.second; ++it)
+              for (addr_reg_map::iterator it = prev_values.first;
+                   it!= prev_values.second; ++it)
                 it->second->set_invalid_at_end ();
               accs->set_valid_at_end ();
 
@@ -3135,7 +3136,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                   && GET_CODE (i) == CALL_INSN)
                 {
                   std::map<rtx, access*>::iterator addr_reg;
-                  for (std::multimap<rtx, access*>::iterator it =
+                  for (addr_reg_map::iterator it =
                          hard_addr_regs.begin ();
                        it != hard_addr_regs.end (); ++it)
                     {
@@ -3166,9 +3167,9 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
 
                   // If an addr reg is no longer alive, set all its
                   // accesses' M_VALID_AT_END to false.
-                  std::pair <addr_reg_iter, addr_reg_iter>
+                  std::pair <addr_reg_map::iterator, addr_reg_map::iterator>
                     found_accs = addr_regs ().equal_range (XEXP (note, 0));
-                  for (addr_reg_iter it = found_accs.first;
+                  for (addr_reg_map::iterator it = found_accs.first;
                        it!= found_accs.second; ++it)
                     it->second->set_invalid_at_end ();
                 }
@@ -3189,7 +3190,7 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
   find_addr_regs ();
 
   std::vector<access*> inserted_reg_mods;
-  for (std::multimap<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       rtx reg = it->first;
@@ -3306,7 +3307,7 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
     return;
 
   // Add trailing address reg uses to the end of the sequence.
-  for (std::multimap<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       used_regs.clear ();
@@ -3363,7 +3364,7 @@ sh_ams::access_sequence::find_reg_end_values (void)
   // Update the address regs' final values.
   find_addr_regs (true);
 
-  for (std::multimap<rtx, access*>::iterator it = addr_regs ().begin ();
+  for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       access* acc = it->second;

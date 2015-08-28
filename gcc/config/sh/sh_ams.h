@@ -732,9 +732,19 @@ public:
     shared_insn* create_mod_insn (rtx_insn* insn,
                                   std::list<shared_insn>& shared_insn_list);
 
+    // Comparison struct for m_addr_regs
+    struct cmp_by_regno {
+      bool operator () (const rtx a, const rtx b) const
+      {
+        return REGNO (a) < REGNO (b);
+      }
+    };
+
+    typedef std::multimap<rtx, access*, cmp_by_regno> addr_reg_map;
+
     // A map containing the address regs of the sequence and the last
     // reg_mod access that modified them.
-    std::multimap<rtx, access*>& addr_regs (void) { return m_addr_regs; }
+    addr_reg_map& addr_regs (void) { return m_addr_regs; }
 
     // A structure used to store the address regs that can be used as a starting
     // point to arrive at another address during address mod generation.
@@ -926,7 +936,7 @@ public:
 		     delegate& dlg);
 
     std::list<access> m_accs;
-    std::multimap<rtx, access*> m_addr_regs;
+    addr_reg_map m_addr_regs;
     start_addr_list m_start_addr_list;
     std::vector<shared_insn*> m_mod_insns;
     bool m_modify_insns;
