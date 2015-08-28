@@ -2839,6 +2839,7 @@ sh_ams::access_sequence
         return mod_addr_result (infinite_costs, invalid_regno, 0);
 
       // We can only scale by integers.
+      gcc_assert (c_start_addr.scale () != 0);
       std::lldiv_t sr = std::div (c_end_addr.scale (), c_start_addr.scale ());
 
       if (sr.rem != 0)
