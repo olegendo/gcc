@@ -516,7 +516,7 @@ public:
     // found in the original insn list.
     bool removable (void) const { return m_removable; }
 
-    void mark_unremovable (void) { m_removable = false; }
+    void mark_unremovable (void);
 
     // If false, AMS skips this access when optimizing.
     bool should_optimize (void) const { return m_should_optimize; }

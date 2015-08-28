@@ -743,6 +743,16 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_validate_alternatives = true;
 }
 
+// Mark the access as "unremovable" and prevent its insn from being erased.
+void sh_ams::access::mark_unremovable (void)
+{
+  m_removable = false;
+
+  // Ensure that the shared insn's use count never reaches 0.
+  if (m_mod_insn)
+    m_mod_insn->use ();
+}
+
 // Mark the access as "shouldn't be optimized" and set all the
 // reg_mod accesses it uses to "unremovable".
 void sh_ams::access::dont_optimize (access_sequence& as,
@@ -3115,7 +3125,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                                                    &(*accs)));
               if (HARD_REGISTER_P (accs->address_reg ()))
                 hard_addr_regs.insert (std::make_pair (accs->address_reg (),
-                                                       &(*accs)));
+                                                       &(*accs)));;
             }
         }
 
