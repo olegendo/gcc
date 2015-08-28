@@ -3658,22 +3658,6 @@ sh_ams::execute (function* fun)
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
             continue;
 
-          if (GET_CODE (i) == CALL_INSN)
-            {
-              log_msg ("call_insn (1):\n");
-              log_insn (i);
-              log_msg ("fusage:\n");
-              for (rtx link = CALL_INSN_FUNCTION_USAGE (i); link;
-                   link = XEXP (link, 1))
-                {
-                  if (GET_CODE (XEXP (link, 0)) == USE)
-                    {
-                      log_rtx (XEXP (XEXP (link, 0), 0));
-                      log_msg ("\n");
-                    }
-                }
-            }
-
           // Search for memory accesses inside the current insn
           // and add them to the address sequence.
           mems.clear ();
