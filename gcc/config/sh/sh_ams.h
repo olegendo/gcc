@@ -1317,6 +1317,8 @@ inline sh_ams::non_mod_addr
   m_disp_max = disp_max;
   m_index_reg = index_reg;
   m_scale = scale;
+  if (m_scale == 0)
+    m_index_reg = invalid_regno;
   m_scale_min = scale_min;
   m_scale_max = scale_max;
 }
@@ -1331,6 +1333,8 @@ inline sh_ams::non_mod_addr
   m_disp_max = disp;
   m_index_reg = index_reg;
   m_scale = scale;
+  if (m_scale == 0)
+    m_index_reg = invalid_regno;
   m_scale_min = scale;
   m_scale_max = scale;
 }
