@@ -1396,6 +1396,11 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                : mem_mach_mode,
              as, inserted_reg_mods);
 
+          addr_expr original_reg_addr_expr
+            = find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
+            ? make_reg_addr (x)
+            : extract_addr_expr (r.value, mem_mach_mode);
+
           // Place all the insns that are used to arrive at the address
           // into AS in the form of reg_mod accesses that can be replaced
           // during address mod generation.
@@ -1403,9 +1408,12 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           access* new_reg_mod = NULL;
           if (insn && root_insn)
             {
-              // If the expression is something AMS can't handle, store the
-              // reg's original address as an rtx instead of an addr_expr.
-              if (reg_addr_expr.is_invalid ())
+
+              // If the original or effective address is something AMS can't
+              // handle, store the reg's original address as an rtx instead of
+              // an addr_expr.
+              if (reg_addr_expr.is_invalid ()
+                  || original_reg_addr_expr.is_invalid ())
                 new_reg_mod = &as->add_reg_mod (root_insn, r.value,
                                                 r.mod_insn, r.reg, 0,
                                                 true);
@@ -1413,10 +1421,6 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
               // Otherwise, store it as a normal addr_expr.
               else
                 {
-                  addr_expr original_reg_addr_expr
-                    = find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
-                      ? make_reg_addr (x)
-                      : extract_addr_expr (r.value, mem_mach_mode);
                   new_reg_mod = &as->add_reg_mod (root_insn,
                                                   original_reg_addr_expr,
                                                   reg_addr_expr,
@@ -1429,7 +1433,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
           // If the expression is something AMS can't handle, use the original
           // reg instead.
-          if (reg_addr_expr.is_invalid ())
+          if (reg_addr_expr.is_invalid ()
+              || original_reg_addr_expr.is_invalid ())
             {
               if (new_reg_mod)
                 {
