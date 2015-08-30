@@ -179,6 +179,15 @@ public:
   class shared_insn;
   struct delegate;
 
+  // Comparison struct for sets and maps containing reg rtx-es.
+  struct cmp_by_regno
+  {
+    bool operator () (const rtx a, const rtx b) const
+    {
+      return REGNO (a) < REGNO (b);
+    }
+  };
+
 
   // the most complex non modifying address is of the form
   // 'base_reg + index_reg*scale + disp'.
@@ -732,14 +741,6 @@ public:
     shared_insn* create_mod_insn (rtx_insn* insn,
                                   std::list<shared_insn>& shared_insn_list);
 
-    // Comparison struct for m_addr_regs
-    struct cmp_by_regno {
-      bool operator () (const rtx a, const rtx b) const
-      {
-        return REGNO (a) < REGNO (b);
-      }
-    };
-
     typedef std::multimap<rtx, access*, cmp_by_regno> addr_reg_map;
 
     // A map containing the address regs of the sequence and the last
@@ -1058,49 +1059,25 @@ private:
   {
   public:
     split_sequence_info (access_sequence* as)
-      : m_as (as), m_addr_regs (), m_hard_addr_regs () {}
+      : m_as (as), m_addr_regs () {}
 
     // The sequence itself.
     access_sequence* as (void) const { return m_as; }
 
-    // Return true if REG is present in m_addr_regs or m_hard_addr_regs.
+    // Return true if REG is present in m_addr_regs.
     bool uses_addr_reg (rtx reg) const
     {
-      if (m_addr_regs.find (reg) != m_addr_regs.end ())
-        return true;
-
-      if (HARD_REGISTER_P (reg))
-        {
-          for (std::vector<rtx>::const_iterator it = m_hard_addr_regs.begin ();
-               it != m_hard_addr_regs.end (); ++it)
-            {
-              if (REGNO (*it) == REGNO (reg))
-                return true;
-            }
-        }
-      return false;
+      return m_addr_regs.find (reg) != m_addr_regs.end ();
     }
 
     // Add REG to the address reg lists.
-    void add_reg (rtx reg)
-    {
-      if (uses_addr_reg (reg)) return;
-
-      if (HARD_REGISTER_P (reg))
-        m_hard_addr_regs.push_back (reg);
-      m_addr_regs.insert (reg);
-    }
+    void add_reg (rtx reg) { m_addr_regs.insert (reg); }
 
   private:
     access_sequence *m_as;
 
     // A set of the address registers used in the sequence.
-    std::set<rtx> m_addr_regs;
-
-    // A list of the hard addr regs. When searching for a specific hardreg
-    // in the sequence, we go through this list and look for a regno match
-    // instead of only comparing the rtx pointers.
-    std::vector<rtx> m_hard_addr_regs;
+    std::set<rtx, cmp_by_regno> m_addr_regs;
   };
 
   static std::list<access_sequence>::iterator
