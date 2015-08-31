@@ -1070,6 +1070,11 @@ sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
     accesses ().insert (insert_before,
                         access (use_insn, std::vector<rtx_insn*> (), reg_ref,
                                 original_addr_expr, addr_expr, cost));
+  if (!inserted->try_set_insn_mem_rtx (gen_reg_rtx (Pmode)))
+    {
+      log_msg ("failed to substitute reg_use rtx, not optimizing");
+      inserted->dont_optimize (*this, inserted);
+    }
   return *inserted;
 }
 
