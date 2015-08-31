@@ -2463,6 +2463,17 @@ sh_ams::access_sequence
 	  log_rtx (new_addr);
 	  log_msg ("\n");
 
+          // If the original access used an auto-mod addressing mode,
+          // remove the original REG_INC note.
+          for (rtx note = REG_NOTES (accs->insn ()); note; note = XEXP (note, 1))
+            {
+              if (REG_NOTE_KIND (note) == REG_INC)
+                {
+                  remove_note (accs->insn (), note);
+                  break;
+                }
+            }
+
 	  if (!accs->set_insn_mem_rtx (new_addr))
 	    {
 	      log_msg ("failed to replace mem rtx\n");
