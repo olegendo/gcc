@@ -2894,7 +2894,7 @@ sh_ams::access_sequence
                                 gen_rtx_MULT (mode,
                                               start_addr->address_reg (),
                                               GEN_INT (scale)),
-                                *this, ins_place);
+                                *this, acc);
       new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
@@ -2937,7 +2937,7 @@ sh_ams::access_sequence
                                 gen_rtx_PLUS (mode,
                                               start_addr->address_reg (),
                                               c_end_addr.index_reg ()),
-                                *this, ins_place);
+                                *this, acc);
       new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
@@ -2975,7 +2975,7 @@ sh_ams::access_sequence
                                 gen_rtx_PLUS (mode,
                                               start_addr->address_reg (),
                                               c_end_addr.base_reg ()),
-                                *this, ins_place);
+                                *this, acc);
       new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
@@ -3034,7 +3034,7 @@ sh_ams::access_sequence
                                 gen_rtx_PLUS (mode,
                                               start_addr->address_reg (),
                                               GEN_INT (disp)),
-                                *this, ins_place);
+                                *this, acc);
       new_addr->set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = new_addr;
