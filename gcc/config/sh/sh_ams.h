@@ -162,7 +162,7 @@ public:
   // for a constant displacement using a 32 bit int should be sufficient.
   // however, we use it also to represent constant addresses.
   typedef HOST_WIDE_INT disp_t;
-  typedef HOST_WIDE_INT scale_t;
+  typedef int scale_t;
 
   enum
   {
@@ -320,6 +320,11 @@ public:
 
   static addr_expr
   make_index_addr (void);
+
+  static addr_expr
+  check_make_non_mod_addr (rtx base_reg, rtx index_reg,
+                           HOST_WIDE_INT scale, HOST_WIDE_INT disp,
+                           machine_mode mach_mode);
 
   static addr_expr
   make_post_inc_addr (machine_mode mode, rtx base_rtx = any_regno);

@@ -184,7 +184,7 @@ log_addr_expr (const sh_ams::addr_expr& ae)
 	  log_msg (" + ");
 	  log_reg (ae.index_reg ());
 	  if (ae.scale () != 1)
-	    log_msg (" * %lld", ae.scale ());
+	    log_msg (" * %d", ae.scale ());
 	}
 
       if (ae.disp () != 0)
@@ -837,19 +837,7 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
     {
       expr = original_expr;
       should_optimize = false;
-    }
 
-  // Also don't optimize if the effective displacement or scale is too large
-  // for the access mode.
-  if (expr.has_disp () && (expr.has_base_reg () || expr.has_index_reg ())
-      && sext_hwi (expr.disp (), GET_MODE_PRECISION (m_mode)) != expr.disp ())
-    should_optimize = false;
-    if (expr.has_index_reg ()
-        && sext_hwi (expr.scale (), GET_MODE_PRECISION (m_mode)) != expr.scale ())
-    should_optimize = false;
-
-  if (!should_optimize)
-    {
       // The reg modifications that were used to arrive at the address
       // shouldn't be removed in this case.
       std::for_each (inserted_reg_mods.begin (), inserted_reg_mods.end (),
@@ -1245,6 +1233,21 @@ find_reg_value (rtx reg, rtx_insn* insn)
   return find_reg_value_result (reg, reg, NULL);
 }
 
+// Return a non_mod_addr if it can be created with the given scale and
+// displacement.  Otherwise, return an invalid address.
+sh_ams::addr_expr
+sh_ams::check_make_non_mod_addr (rtx base_reg, rtx index_reg,
+                                 HOST_WIDE_INT scale, HOST_WIDE_INT disp,
+                                 machine_mode mach_mode)
+{
+  if (((base_reg || index_reg)
+       && sext_hwi (disp, GET_MODE_PRECISION (mach_mode)) != disp)
+      || sext_hwi (scale, GET_MODE_PRECISION (mach_mode)) != scale)
+    return make_invalid_addr ();
+
+  return non_mod_addr (base_reg, index_reg, scale, disp);
+}
+
 // Try to create an ADDR_EXPR struct of the form
 // base_reg + index_reg * scale + disp from the access expression X.
 // If AS is not NULL, trace the original value of the registers in X
@@ -1264,8 +1267,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
-  disp_t disp;
-  scale_t scale;
+  HOST_WIDE_INT disp;
+  HOST_WIDE_INT scale;
   rtx base_reg, index_reg;
 
   if (x == NULL_RTX)
@@ -1328,6 +1331,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 	    addr_expr a = extract_addr_expr (XEXP (x, use_post_disp ? 1 : 0),
 					     insn, root_insn, mem_mach_mode,
 					     as, inserted_reg_mods);
+            if (a.is_invalid ())
+              return make_invalid_addr ();
 	    return expand_regs ? a : post_mod_addr (a.base_reg (), a.disp ());
 	  }
         case PRE_MODIFY:
@@ -1335,6 +1340,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
             addr_expr a = extract_addr_expr (XEXP (x, 1), insn, root_insn,
 					     mem_mach_mode, as,
 					     inserted_reg_mods);
+            if (a.is_invalid ())
+              return make_invalid_addr ();
 	    return expand_regs ? a : pre_mod_addr (a.base_reg (), a.disp ());
 	  }
 
@@ -1344,10 +1351,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 
       op1 = extract_addr_expr (XEXP (x, 0), insn, root_insn, mem_mach_mode, as,
 			       inserted_reg_mods);
+      if (op1.is_invalid ())
+        return op1;
+
       disp += op1.disp ();
 
       if (expand_regs)
-        return non_mod_addr (op1.base_reg (), invalid_regno, 1, disp);
+        return check_make_non_mod_addr (op1.base_reg (), invalid_regno,
+                                        1, disp, mem_mach_mode);
 
       if (mod_type == post_mod)
         return post_mod_addr (op1.base_reg (), disp);
@@ -1485,9 +1496,10 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       else
         scale = 1;
 
-      op1 = non_mod_addr (op1.index_reg (), op1.base_reg (),
-                          -scale, -op1.disp ());
-      if (code == NEG)
+      op1 = check_make_non_mod_addr (op1.index_reg (), op1.base_reg (),
+                                     -scale, -op1.disp (), mem_mach_mode);
+
+      if (code == NEG || op1.is_invalid ())
         return op1;
 
     case PLUS:
@@ -1501,39 +1513,56 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
         {
 	  if (op0.has_no_index_reg ())
             {
-              op1 = non_mod_addr (invalid_regno, op1.index_reg (),
-                                  op1.scale (), op1.disp ());
-              op0 = non_mod_addr (invalid_regno, op0.base_reg (),
-                                  2, op0.disp ());
+              op1 = check_make_non_mod_addr (invalid_regno, op1.index_reg (),
+                                             op1.scale (), op1.disp (),
+                                             mem_mach_mode);
+              op0 = check_make_non_mod_addr (invalid_regno, op0.base_reg (),
+                                             2, op0.disp (), mem_mach_mode);
             }
           else if (op1.has_no_index_reg ())
             {
-              op0 = non_mod_addr (invalid_regno, op0.index_reg (),
-                                  op0.scale (), op0.disp ());
-              op1 = non_mod_addr (invalid_regno, op1.base_reg (),
-                                  2, op1.disp ());
+              op0 = check_make_non_mod_addr (invalid_regno, op0.index_reg (),
+                                             op0.scale (), op0.disp (),
+                                             mem_mach_mode);
+              op1 = check_make_non_mod_addr (invalid_regno, op1.base_reg (),
+                                             2, op1.disp (), mem_mach_mode);
+              if (op1.is_invalid ())
+                break;
             }
         }
       if (op0.base_reg () == op1.index_reg ())
         {
-          op0 = non_mod_addr (invalid_regno, op0.index_reg (),
-                              op0.scale (), op0.disp ());
+          op0 = check_make_non_mod_addr (invalid_regno, op0.index_reg (),
+                                         op0.scale (), op0.disp (),
+                                         mem_mach_mode);
 
-          op1 = non_mod_addr (op1.base_reg (), op1.index_reg (),
-                              op1.scale () + 1, op1.disp ());
+          op1 = check_make_non_mod_addr (op1.base_reg (), op1.index_reg (),
+                                         op1.scale () + 1, op1.disp (),
+                                         mem_mach_mode);
+          if (op1.is_invalid ())
+            break;
         }
       if (op1.base_reg () == op0.index_reg ())
         {
-          op1 = non_mod_addr (invalid_regno, op1.index_reg (),
-                              op1.scale (), op1.disp ());
-          op0 = non_mod_addr (op0.base_reg (), op0.index_reg (),
-                              op0.scale () + 1, op0.disp ());
+          op1 = check_make_non_mod_addr (invalid_regno, op1.index_reg (),
+                                         op1.scale (), op1.disp (),
+                                         mem_mach_mode);
+          op0 = check_make_non_mod_addr (op0.base_reg (), op0.index_reg (),
+                                         op0.scale () + 1, op0.disp (),
+                                         mem_mach_mode);
+          if (op0.is_invalid ())
+            break;
+
         }
       if (op0.index_reg () == op1.index_reg ())
         {
-          op0 = non_mod_addr (op0.base_reg (), op0.index_reg (),
-                              op0.scale () + op1.scale (), op0.disp ());
-          op1 = non_mod_addr (op1.base_reg (), invalid_regno, 0, op1.disp ());
+          op0 = check_make_non_mod_addr (op0.base_reg (), op0.index_reg (),
+                                         op0.scale () + op1.scale (), op0.disp (),
+                                         mem_mach_mode);
+          op1 = check_make_non_mod_addr (op1.base_reg (), invalid_regno,
+                                         0, op1.disp (), mem_mach_mode);
+          if (op0.is_invalid ())
+            break;
         }
 
       // If only one operand has a base register, that will
@@ -1574,7 +1603,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           else
             break;
         }
-      return non_mod_addr (base_reg, index_reg, scale, disp);
+      return check_make_non_mod_addr (base_reg, index_reg, scale, disp,
+                                      mem_mach_mode);
 
     // Change shift into multiply.
     case ASHIFT:
@@ -1584,7 +1614,10 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           && op1.disp () >= 0)
         {
           disp_t mul = disp_t (1) << op1.disp ();
-          op1 = non_mod_addr (invalid_regno, invalid_regno, 0, mul);
+          op1 = check_make_non_mod_addr (invalid_regno, invalid_regno, 0, mul,
+                                         mem_mach_mode);
+          if (op1.is_invalid ())
+            break;
         }
       else
         break;
@@ -1611,8 +1644,9 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
         }
       else
         break;
-      return non_mod_addr (invalid_regno, index_reg,
-                           scale, op0.disp () * op1.disp ());
+      return check_make_non_mod_addr (invalid_regno, index_reg,
+                                      scale, op0.disp () * op1.disp (),
+                                      mem_mach_mode);
     default:
       break;
     }
@@ -2861,7 +2895,7 @@ sh_ams::access_sequence
 
       // We can only scale by integers.
       gcc_assert (c_start_addr.scale () != 0);
-      std::lldiv_t sr = std::div (c_end_addr.scale (), c_start_addr.scale ());
+      std::div_t sr = std::div (c_end_addr.scale (), c_start_addr.scale ());
 
       if (sr.rem != 0)
         return mod_addr_result (infinite_costs, invalid_regno, 0);
