@@ -966,7 +966,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
            as_it != accesses ().end () && !as_it->insn (); ++as_it)
         {
           if (as_it->access_type () == reg_mod
-              && REGNO (as_it->address_reg ()) == REGNO (reg))
+              && regs_equal (as_it->address_reg (), reg))
             return *as_it;
         }
 
@@ -994,7 +994,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
           // sequence, don't add it a second time.
           if (as_it->access_type () == reg_mod
               && as_it->insn () == mod_insn
-              && REGNO (as_it->address_reg ()) == REGNO (reg)
+              && regs_equal (as_it->address_reg (), reg)
               && as_it->original_address ().base_reg ()
                   == original_addr_expr.base_reg ())
             return *as_it;
@@ -1142,15 +1142,15 @@ sh_ams::access_sequence::start_bb (void) const
 // false.
 //
 // FIXME: see if we can re-use find_set_of_reg_bb from sh_treg_combine.cc
-static std::pair<rtx, bool>
-find_reg_value_1 (rtx reg, rtx pat)
+std::pair<rtx, bool> sh_ams
+::find_reg_value_1 (rtx reg, rtx pat)
 {
   switch (GET_CODE (pat))
     {
     case SET:
       {
         rtx dest = SET_DEST (pat);
-        if (REG_P (dest) && REGNO (dest) == REGNO (reg))
+        if (REG_P (dest) && regs_equal (dest, reg))
           {
             // We're in the last insn that modified REG, so return
             // the modifying SET rtx.
@@ -1162,7 +1162,7 @@ find_reg_value_1 (rtx reg, rtx pat)
     case CLOBBER:
       {
         rtx dest = XEXP (pat, 0);
-        if (REG_P (dest) && REGNO (dest) == REGNO (reg))
+        if (REG_P (dest) && regs_equal (dest, reg))
 	  {
 	    // The value of REG is unknown.
 	    return std::make_pair (NULL_RTX, true);
@@ -1229,7 +1229,7 @@ find_reg_value (rtx reg, rtx_insn* insn)
               rtx_code code = GET_CODE (mem_addr);
               if (GET_RTX_CLASS (code) == RTX_AUTOINC
                   && REG_P (XEXP (mem_addr, 0))
-                  && REGNO (XEXP (mem_addr, 0)) == REGNO (reg))
+                  && regs_equal (XEXP (mem_addr, 0), reg))
                 return find_reg_value_result (reg, mem_addr, i,
                                               GET_MODE (*(m->first)));
             }
@@ -1389,7 +1389,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
           // Stop expanding the reg if we reach a hardreg -> pseudo reg
           // copy, or if the reg can't be expanded any further.
           if (r.value != NULL_RTX && REG_P (r.value)
-              && (REGNO (r.value) == REGNO (x)
+              && (regs_equal (r.value, x)
                   || HARD_REGISTER_P (r.value)))
             {
               // Add to the sequence's start a reg_mod access that sets
@@ -2696,14 +2696,14 @@ sh_ams::access_sequence::get_clone_cost (access_sequence::iterator& acc,
     return 0;
 
   // There's no cloning cost for accesses that set the reg to itself.
-  if (REGNO (reused_reg) == REGNO (acc->address_reg ()))
+  if (regs_equal (reused_reg, acc->address_reg ()))
     return 0;
 
   for (access_sequence::iterator prev_accs = accesses ().begin ();
        prev_accs != acc; ++prev_accs)
     {
       if (prev_accs->access_type () == reg_mod
-          && REGNO (prev_accs->address_reg ()) == REGNO (reused_reg))
+          && regs_equal (prev_accs->address_reg (), reused_reg))
         {
           // If the reused reg is already used by another access,
           // we'll have to clone it.
@@ -2847,7 +2847,7 @@ sh_ams::access_sequence
 
   // If one of the addresses has the form base+index*1, it
   // might be better to switch its base and index reg.
-  if (c_start_addr.index_reg () == c_end_addr.base_reg ())
+  if (regs_equal (c_start_addr.index_reg (), c_end_addr.base_reg ()))
     {
       if (c_end_addr.has_base_reg ()
           && c_end_addr.has_index_reg () && c_end_addr.scale () == 1)
@@ -2864,16 +2864,16 @@ sh_ams::access_sequence
   // If the start address has a base reg, and it's different
   // from that of the end address, give up.
   if (c_start_addr.has_base_reg ()
-      && c_start_addr.base_reg () != c_end_addr.base_reg ())
+      && !regs_equal (c_start_addr.base_reg (), c_end_addr.base_reg ()))
     return mod_addr_result (infinite_costs, invalid_regno, 0);
 
   // Same for index regs, unless we can get to the end address
   // by subtracting.
-  if (c_start_addr.index_reg () != c_end_addr.index_reg ())
+  if (!regs_equal (c_start_addr.index_reg (), c_end_addr.index_reg ()))
     {
       if (!(c_start_addr.has_no_base_reg ()
             && c_end_addr.has_index_reg ()
-            && c_start_addr.index_reg () == c_end_addr.base_reg ()
+            && regs_equal (c_start_addr.index_reg (), c_end_addr.base_reg ())
             && c_start_addr.scale () == 1
             && c_end_addr.scale () == -1))
         return mod_addr_result (infinite_costs, invalid_regno, 0);
@@ -2890,7 +2890,7 @@ sh_ams::access_sequence
 
   // Add scaling.
   if (c_start_addr.has_index_reg ()
-      && c_start_addr.index_reg () == c_end_addr.index_reg ()
+      && regs_equal (c_start_addr.index_reg (), c_end_addr.index_reg ())
       && c_start_addr.scale () != c_end_addr.scale ())
     {
       // We can't scale if the address has displacement or a base reg.
@@ -2941,7 +2941,7 @@ sh_ams::access_sequence
   // Try subtracting regs.
   if (c_start_addr.has_no_base_reg ()
       && c_end_addr.has_index_reg ()
-      && c_start_addr.index_reg () == c_end_addr.base_reg ()
+      && regs_equal (c_start_addr.index_reg (), c_end_addr.base_reg ())
       && c_start_addr.scale () == 1
       && c_end_addr.scale () == -1)
     {
@@ -3288,7 +3288,7 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
                mods != inserted_reg_mods.end (); ++mods)
             {
               access& acc = **mods;
-              if (REGNO (acc.address_reg ()) == REGNO (reg) && acc.insn ())
+              if (regs_equal (acc.address_reg (), reg) && acc.insn ())
                 {
                   end_insn = acc.insn ();
                   break;

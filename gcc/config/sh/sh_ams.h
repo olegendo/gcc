@@ -188,6 +188,17 @@ public:
     }
   };
 
+  // Return true if R1 and R2 is the same reg, or if both are NULL.
+  static bool
+  regs_equal (const rtx r1, const rtx r2)
+  {
+    if (!r1 && !r2)
+      return true;
+    if (!r1 || !r2)
+      return false;
+    return REGNO (r1) == REGNO (r2);
+  }
+
 
   // the most complex non modifying address is of the form
   // 'base_reg + index_reg*scale + disp'.
@@ -1156,6 +1167,9 @@ private:
 
   static find_reg_value_result
   find_reg_value (rtx reg, rtx_insn* insn);
+
+  static std::pair<rtx, bool>
+  find_reg_value_1 (rtx reg, rtx pat);
 
   static addr_expr
   extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
