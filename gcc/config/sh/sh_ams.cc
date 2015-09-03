@@ -2284,8 +2284,8 @@ sh_ams::access_sequence::start_addr_list
 
   // Addresses containing registers might be used if they have a
   // register in common with the end address.
-  typedef std::pair <std::multimap<rtx, access*>::iterator,
-                     std::multimap<rtx, access*>::iterator > matching_range_t;
+  typedef std::pair <addr_reg_map::iterator,
+                     addr_reg_map::iterator> matching_range_t;
   if (end_addr.has_base_reg ())
     {
       matching_range_t r = m_reg_addresses.equal_range (end_addr.base_reg ());
@@ -2337,13 +2337,12 @@ sh_ams::access_sequence::start_addr_list::add (access* start_addr)
 void sh_ams::access_sequence::
 start_addr_list::remove (access* start_addr)
 {
-  std::pair <std::multimap<rtx, access*>::iterator,
-             std::multimap<rtx, access*>::iterator > matching_range;
+  std::pair <addr_reg_map::iterator, addr_reg_map::iterator> matching_range;
   if (start_addr->valid_address ().has_base_reg ())
     {
       matching_range
         = m_reg_addresses.equal_range (start_addr->valid_address ().base_reg ());
-      for (std::multimap<rtx, access*>::iterator it = matching_range.first;
+      for (addr_reg_map::iterator it = matching_range.first;
            it != matching_range.second; ++it)
         {
           if (it->second == start_addr)
@@ -2357,7 +2356,7 @@ start_addr_list::remove (access* start_addr)
     {
       matching_range
         = m_reg_addresses.equal_range (start_addr->valid_address ().index_reg ());
-      for (std::multimap<rtx, access*>::iterator it = matching_range.first;
+      for (addr_reg_map::iterator it = matching_range.first;
            it != matching_range.second; ++it)
         {
           if (it->second == start_addr)

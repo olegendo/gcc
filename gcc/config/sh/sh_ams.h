@@ -772,7 +772,7 @@ public:
       // A map for storing addresses that have a base and/or index reg.
       // The key of each stored address is its base or index reg (the
       // address is stored twice if it has both).
-      std::multimap<rtx, access*> m_reg_addresses;
+      addr_reg_map m_reg_addresses;
     };
 
     // A structure storing the reg_mod accesses from the sequence in such way
