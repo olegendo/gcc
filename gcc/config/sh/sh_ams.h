@@ -1021,13 +1021,18 @@ public:
     options (const std::string& str);
 
     // Check if the acces sequence costs are minimal.  If so, don't try to
-    // optimize the access sequence if so.  Default is true.
+    // optimize the access sequence.  Default is true.
     bool check_minimal_cost;
 
     // Check if the original access sequence costs are less or equal to the
     // proposed AMS optimized access sequence costs.  If so, don't try to
     // optimize the access sequence.  Default is true.
     bool check_original_cost;
+
+    // Split the access sequences into multiple smaller ones by placing
+    // accesses that share the same base reg into separate sequences.
+    // Default is true.
+    bool split_sequences;
 
     // By default AMS will do alternative validation, but it can be disabled
     // by the delegate to speed up processing.  This will force the validation.

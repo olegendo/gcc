@@ -137,6 +137,7 @@ log_options (const sh_ams::options& opt)
 
   log_msg ("option check_minimal_cost = %d\n", opt.check_minimal_cost);
   log_msg ("option check_original_cost = %d\n", opt.check_original_cost);
+  log_msg ("option split_sequences = %d\n", opt.split_sequences);
   log_msg ("base_lookahead_count = %d", opt.base_lookahead_count);
 }
 
@@ -538,6 +539,7 @@ sh_ams::options::options (void)
   // optimization level.
   check_minimal_cost = true;
   check_original_cost = true;
+  split_sequences = true;
   force_alt_validation = false;
   disable_alt_validation = false;
   base_lookahead_count = 1;
@@ -577,6 +579,9 @@ sh_ams::options::options (const std::string& str)
 
   for (kvi i = kv.find ("check_original_cost"); i != kv.end (); i = kv.end ())
     parse_int (i->second).copy_if_valid_to (check_original_cost);
+
+    for (kvi i = kv.find ("split_sequences"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (split_sequences);
 
   for (kvi i = kv.find ("base_lookahead_count"); i != kv.end (); i = kv.end ())
     parse_int (i->second).copy_if_valid_to (base_lookahead_count);
@@ -3770,7 +3775,10 @@ sh_ams::execute (function* fun)
         }
 
       log_msg ("split_access_sequence\n");
-      as_it = split_access_sequence (as_it, sequences);
+      if (m_options.split_sequences)
+        as_it = split_access_sequence (as_it, sequences);
+      else
+        ++as_it;
     }
 
   log_msg ("\nprocessing split sequences\n");
