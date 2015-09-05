@@ -542,11 +542,12 @@ public:
     bool removable (void) const { return m_removable; }
 
     void mark_unremovable (void);
+    void mark_dependent_mods_unremovable (access_sequence& as,
+                                          std::list<access>::iterator acc);
 
     // If false, AMS skips this access when optimizing.
     bool should_optimize (void) const { return m_should_optimize; }
-    void dont_optimize (access_sequence& as,
-                        std::list<access>::iterator acc_it);
+    void set_should_optimize (bool val) { m_should_optimize = val; }
 
     // For reg_mod accesses, returns the register rtx that is being modified.
     rtx address_reg (void) const { return m_addr_reg; }

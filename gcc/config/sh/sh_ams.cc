@@ -774,13 +774,11 @@ void sh_ams::access::mark_unremovable (void)
     m_mod_insn->use ();
 }
 
-// Mark the access as "shouldn't be optimized" and set all the
-// reg_mod accesses it uses to "unremovable".
-void sh_ams::access::dont_optimize (access_sequence& as,
-                                    access_sequence::iterator acc_it)
+// Set all the reg_mod accesses that ACC uses to "unremovable".
+void sh_ams::access
+::mark_dependent_mods_unremovable (access_sequence& as,
+                                   access_sequence::iterator acc)
 {
-  m_should_optimize = false;
-
   std::set<rtx> used_regs;
   const addr_expr& ae = original_address ();
   if (ae.has_base_reg ())
@@ -788,17 +786,17 @@ void sh_ams::access::dont_optimize (access_sequence& as,
   if (ae.has_index_reg ())
     used_regs.insert (ae.index_reg ());
 
-  for (access_sequence::iterator accs = stdx::prev (acc_it); ; --accs)
+  for (access_sequence::iterator accs = stdx::prev (acc); ; --accs)
     {
-      if (accs->access_type () == reg_mod)
+      if (accs->access_type () == reg_mod && accs->removable ())
         {
-          const addr_expr& ae = original_address ();
-          if ((ae.has_base_reg ()
-               && used_regs.find (ae.base_reg ()) != used_regs.end ())
-              || (ae.has_index_reg ()
-                  && used_regs.find (ae.index_reg ()) != used_regs.end ()))
+          if (used_regs.find (accs->address_reg ()) != used_regs.end ())
             {
-              used_regs.insert (accs->address_reg ());
+              const addr_expr& ae = accs->original_address ();
+              if (ae.has_base_reg ())
+                used_regs.insert (ae.base_reg ());
+              if (ae.has_index_reg ())
+                used_regs.insert (ae.index_reg ());
               accs->mark_unremovable ();
             }
         }
@@ -858,11 +856,6 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
     {
       expr = original_expr;
       should_optimize = false;
-
-      // The reg modifications that were used to arrive at the address
-      // shouldn't be removed in this case.
-      std::for_each (inserted_reg_mods.begin (), inserted_reg_mods.end (),
-                     std::mem_fun (&access::mark_unremovable));
     }
 
   accesses ().push_back (access (insn, mem, access_type,
@@ -1082,7 +1075,7 @@ sh_ams::access_sequence::add_reg_use (access_sequence::iterator insert_before,
   if (!inserted->try_set_insn_mem_rtx (gen_reg_rtx (Pmode)))
     {
       log_msg ("failed to substitute reg_use rtx, not optimizing");
-      inserted->dont_optimize (*this, inserted);
+      inserted->set_should_optimize (false);
     }
   return *inserted;
 }
@@ -2006,6 +1999,13 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   log_msg ("Generating address modifications\n");
 
   find_addr_regs ();
+
+  // Mark the reg_mods used by unoptimizable accesses as "unremovable"
+  for (iterator accs = accesses ().begin (); accs != accesses ().end (); ++accs)
+    {
+      if (!accs->should_optimize ())
+        accs->mark_dependent_mods_unremovable (*this, accs);
+    }
 
   // Remove the original reg_mod accesses.
   for (iterator accs = accesses ().begin (); accs != accesses ().end (); )
@@ -3670,7 +3670,7 @@ sh_ams::access_sequence
   if (a->alternatives ().empty ())
     {
       log_msg ("no valid alternatives, not optimizing this access\n");
-      a->dont_optimize (*this, a);
+      a->set_should_optimize (false);
     }
 
   // At least on clang/libc++ there is a problem with bind1st, mem_fun and
@@ -3685,7 +3685,7 @@ sh_ams::access_sequence
     {
       log_msg ("original address does not match any alternative, "
 	       "not optimizing this access\n");
-      a->dont_optimize (*this, a);
+      a->set_should_optimize (false);
     }
 }
 
