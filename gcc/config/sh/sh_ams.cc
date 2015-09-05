@@ -58,6 +58,10 @@
 
 #include "sh-protos.h"
 
+extern unsigned int rest_of_handle_cse (void);
+extern unsigned int rest_of_handle_cse2 (void);
+extern unsigned int rest_of_handle_cse_after_global_opts (void);
+
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 // Helper functions
@@ -542,6 +546,9 @@ sh_ams::options::options (void)
   split_sequences = true;
   force_alt_validation = false;
   disable_alt_validation = false;
+  cse = false;
+  cse2 = false;
+  gcse = false;
   base_lookahead_count = 1;
 }
 
@@ -591,6 +598,15 @@ sh_ams::options::options (const std::string& str)
 
   for (kvi i = kv.find ("disable_alt_validation"); i != kv.end (); i = kv.end ())
     parse_int (i->second).copy_if_valid_to (disable_alt_validation);
+
+  for (kvi i = kv.find ("cse"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (cse);
+
+  for (kvi i = kv.find ("cse2"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (cse2);
+
+  for (kvi i = kv.find ("gcse"); i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (gcse);
 
 //  error ("unknown AMS option");
 }
@@ -3892,6 +3908,22 @@ sh_ams::execute (function* fun)
           as.update_insn_stream (shared_insn_list);
           log_msg ("\n\n");
         }
+    }
+
+  if (m_options.cse)
+    {
+      log_msg ("\nrunning CSE\n");
+      rest_of_handle_cse ();
+    }
+  if (m_options.cse2)
+    {
+      log_msg ("\nrunning CSE2\n");
+      rest_of_handle_cse2 ();
+    }
+  if (m_options.gcse)
+    {
+      log_msg ("\nrunning GCSE\n");
+      rest_of_handle_cse_after_global_opts ();
     }
 
   log_return (0, "\n\n");

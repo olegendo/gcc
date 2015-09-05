@@ -1054,6 +1054,15 @@ public:
     // debugging.  Default is false.
     bool disable_alt_validation;
 
+    // Run CSE after AMS.
+    bool cse;
+
+    // Run CSE2 after AMS.
+    bool cse2;
+
+    // Run global CSE after AMS.
+    bool gcse;
+
     // Use this as a base look ahead count value for the algorithm that selects
     // alternatives.  Default is 1.
     int base_lookahead_count;
