@@ -779,7 +779,7 @@ void sh_ams::access
 ::mark_dependent_mods_unremovable (access_sequence& as,
                                    access_sequence::iterator acc)
 {
-  std::set<rtx> used_regs;
+  std::set<rtx, cmp_by_regno> used_regs;
   const addr_expr& ae = original_address ();
   if (ae.has_base_reg ())
     used_regs.insert (ae.base_reg ());
@@ -788,17 +788,29 @@ void sh_ams::access
 
   for (access_sequence::iterator accs = stdx::prev (acc); ; --accs)
     {
-      if (accs->access_type () == reg_mod && accs->removable ())
+      const addr_expr& ae = accs->original_address ();
+      if (accs->access_type () == reg_mod && accs->removable ()
+          && used_regs.find (accs->address_reg ()) != used_regs.end ())
         {
-          if (used_regs.find (accs->address_reg ()) != used_regs.end ())
-            {
-              const addr_expr& ae = accs->original_address ();
-              if (ae.has_base_reg ())
-                used_regs.insert (ae.base_reg ());
-              if (ae.has_index_reg ())
-                used_regs.insert (ae.index_reg ());
-              accs->mark_unremovable ();
-            }
+          if (ae.has_base_reg ())
+            used_regs.insert (ae.base_reg ());
+          if (ae.has_index_reg ())
+            used_regs.insert (ae.index_reg ());
+          accs->mark_unremovable ();
+        }
+
+      // If one of the used regs got changed by an auto-mod access,
+      // prevent the address mod generator from changing that access.
+      else if ((accs->access_type () == load || accs->access_type () == store)
+               && accs->should_optimize () && accs->insn ()
+               && find_reg_note (accs->insn (), REG_INC, NULL_RTX)
+               && ae.has_base_reg ()
+               && used_regs.find (ae.base_reg ()) != used_regs.end ())
+        {
+          accs->set_should_optimize (false);
+          used_regs.insert (ae.base_reg ());
+          if (ae.has_index_reg ())
+            used_regs.insert (ae.index_reg ());
         }
 
       if (accs == as.accesses ().begin ())
