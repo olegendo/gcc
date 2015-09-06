@@ -1383,8 +1383,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
       disp += op1.disp ();
 
       if (expand_regs)
-        return check_make_non_mod_addr (op1.base_reg (), invalid_regno,
-                                        1, disp, mem_mach_mode);
+        return check_make_non_mod_addr (op1.base_reg (), op1.index_reg (),
+                                        op1.scale (), disp, mem_mach_mode);
 
       if (mod_type == post_mod)
         return post_mod_addr (op1.base_reg (), disp);
