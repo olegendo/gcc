@@ -3,6 +3,7 @@
 
 #include <iterator>
 #include <sstream>
+#include <memory>
 
 #include "system.h"
 #include "coretypes.h"
@@ -48,6 +49,9 @@
 #include "diagnostic-core.h"
 #include "opts.h"
 
+// For global variable flag_rerun_cse_after_global_opts.
+#include "toplev.h"
+
 #include <algorithm>
 #include <list>
 #include <vector>
@@ -57,11 +61,6 @@
 #include "sh_ams.h"
 
 #include "sh-protos.h"
-
-extern unsigned int rest_of_handle_cse (void);
-extern unsigned int rest_of_handle_cse2 (void);
-extern unsigned int rest_of_handle_cse_after_global_opts (void);
-
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 // Helper functions
@@ -3922,21 +3921,39 @@ sh_ams::execute (function* fun)
         }
     }
 
+  // Unfortunately, passes tend to access global variables to see if they
+  // are supposed to actually execute.  Save those variables, set them
+  // and restore them afterwards.
+  int f0 = flag_rerun_cse_after_global_opts;
+  int f1 = flag_rerun_cse_after_loop;
+  int f2 = optimize;
+
+  flag_rerun_cse_after_global_opts = 1;
+  flag_rerun_cse_after_loop = 1;
+  optimize = 2;
+
   if (m_options.cse)
     {
       log_msg ("\nrunning CSE\n");
-      rest_of_handle_cse ();
+      std::auto_ptr<rtl_opt_pass> p (make_pass_cse (m_ctxt));
+      p->execute (fun);
     }
   if (m_options.cse2)
     {
       log_msg ("\nrunning CSE2\n");
-      rest_of_handle_cse2 ();
+      std::auto_ptr<rtl_opt_pass> p (make_pass_cse2 (m_ctxt));
+      p->execute (fun);
     }
   if (m_options.gcse)
     {
       log_msg ("\nrunning GCSE\n");
-      rest_of_handle_cse_after_global_opts ();
+      std::auto_ptr<rtl_opt_pass> p (make_pass_cse_after_global_opts (m_ctxt));
+      p->execute (fun);
     }
+
+  flag_rerun_cse_after_global_opts = f0;
+  flag_rerun_cse_after_loop = f1;
+  optimize = f2;
 
   log_return (0, "\n\n");
 }
