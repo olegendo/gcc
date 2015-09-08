@@ -466,6 +466,28 @@ registers_match (rtx a, rtx b)
   return REGNO (a) == REGNO (b);
 }
 
+void
+remove_incdec_notes (rtx_insn* i)
+{
+  for (bool retry = true; retry; )
+    {
+      retry = false;
+      for (rtx note = REG_NOTES (i); note; note = XEXP (note, 1))
+	if (REG_NOTE_KIND (note) == REG_INC)
+	  {
+	    remove_note (i, note);
+	    retry = true;
+	    break;
+	  }
+    }
+}
+
+void
+remove_incdec_note (rtx_insn* i, rtx reg)
+{
+  if (rtx n = find_regno_note (i, REG_INC, REGNO (reg)))
+    remove_note (i, n);
+}
 
 } // anonymous namespace
 
@@ -2532,16 +2554,12 @@ sh_ams::access_sequence
 	  log_rtx (new_addr);
 	  log_msg ("\n");
 
-          // If the original access used an auto-mod addressing mode,
-          // remove the original REG_INC note.
-          for (rtx note = REG_NOTES (accs->insn ()); note; note = XEXP (note, 1))
-            {
-              if (REG_NOTE_KIND (note) == REG_INC)
-                {
-                  remove_note (accs->insn (), note);
-                  break;
-                }
-            }
+	  // If the original access used an auto-mod addressing mode,
+	  // remove the original REG_INC note.
+	  // FIXME: Maybe remove only the notes for the particular regs
+	  // instead of removing them all?  Might be interesting for multi-mem
+	  // insns (which we don't handle right now at all).
+	  remove_incdec_notes (accs->insn ());
 
 	  if (!accs->set_insn_mem_rtx (new_addr))
 	    {
@@ -3931,28 +3949,66 @@ sh_ams::execute (function* fun)
   flag_rerun_cse_after_loop = 1;
   optimize = 2;
 
+  // The CSE passes below don't pay attention to REG_INC notes when they
+  // propagate/rename regs inside mems.  Thus we have to fix those up
+  // or else wrong REG_INC notes will produce wrong code later on.
+  bool recreate_reginc_notes = false;
+
   if (m_options.cse)
     {
       log_msg ("\nrunning CSE\n");
       std::auto_ptr<rtl_opt_pass> p (make_pass_cse (m_ctxt));
       p->execute (fun);
+      recreate_reginc_notes = true;
     }
   if (m_options.cse2)
     {
       log_msg ("\nrunning CSE2\n");
       std::auto_ptr<rtl_opt_pass> p (make_pass_cse2 (m_ctxt));
       p->execute (fun);
+      recreate_reginc_notes = true;
     }
   if (m_options.gcse)
     {
       log_msg ("\nrunning GCSE\n");
       std::auto_ptr<rtl_opt_pass> p (make_pass_cse_after_global_opts (m_ctxt));
       p->execute (fun);
+      recreate_reginc_notes = true;
     }
 
   flag_rerun_cse_after_global_opts = f0;
   flag_rerun_cse_after_loop = f1;
   optimize = f2;
+
+  if (recreate_reginc_notes)
+    {
+      log_msg ("recreating reg inc notes after CSE\n");
+      basic_block bb;
+      FOR_EACH_BB_FN (bb, fun)
+	{
+	  rtx_insn* i;
+
+	  log_msg ("BB #%d:\n", bb->index);
+	  log_msg ("finding mem accesses\n");
+
+	  FOR_BB_INSNS (bb, i)
+	    {
+	      if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+	        continue;
+
+	      // Search for memory accesses inside the current insn
+	      // and add them to the address sequence.
+//	      mems.clear ();
+//	      find_mem_accesses (PATTERN (i), std::back_inserter (mems));
+
+//	      if (mems.empty ())
+//		continue;
+
+	      remove_incdec_notes (i);
+	      sh_check_add_incdec_notes (i);
+	    }
+	}
+    }
 
   log_return (0, "\n\n");
 }
