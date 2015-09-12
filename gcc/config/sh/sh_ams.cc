@@ -806,6 +806,8 @@ void sh_ams::access
   if (ae.has_index_reg ())
     used_regs.insert (ae.index_reg ());
 
+  if (acc == as.accesses ().begin ())
+    return;
   for (access_sequence::iterator accs = stdx::prev (acc); ; --accs)
     {
       const addr_expr& ae = accs->original_address ();
