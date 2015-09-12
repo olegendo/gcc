@@ -3976,21 +3976,10 @@ sh_ams::execute (function* fun)
 	{
 	  rtx_insn* i;
 
-	  log_msg ("BB #%d:\n", bb->index);
-	  log_msg ("finding mem accesses\n");
-
 	  FOR_BB_INSNS (bb, i)
 	    {
 	      if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
 	        continue;
-
-	      // Search for memory accesses inside the current insn
-	      // and add them to the address sequence.
-//	      mems.clear ();
-//	      find_mem_accesses (PATTERN (i), std::back_inserter (mems));
-
-//	      if (mems.empty ())
-//		continue;
 
 	      remove_incdec_notes (i);
 	      sh_check_add_incdec_notes (i);
