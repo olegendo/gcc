@@ -3293,6 +3293,9 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
 {
   find_addr_regs ();
 
+  basic_block bb = start_bb ();
+  rtx_insn* insn_after_bb = NEXT_INSN (BB_END (bb));
+
   std::vector<access*> inserted_reg_mods;
   for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
@@ -3301,13 +3304,12 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
 
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
-      basic_block bb = start_bb ();
-      rtx_insn* end_insn = BB_END (bb);
+      rtx_insn* end_insn = insn_after_bb;
 
       while (end_insn)
         {
           inserted_reg_mods.clear ();
-          addr_expr expr = extract_addr_expr (reg, end_insn, BB_END (bb),
+          addr_expr expr = extract_addr_expr (reg, end_insn, insn_after_bb,
                                               Pmode, this, inserted_reg_mods);
 
           // If the final expression created by these modifications
@@ -3317,14 +3319,19 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
             std::for_each (inserted_reg_mods.begin (), inserted_reg_mods.end (),
                            std::mem_fun (&access::mark_unremovable));
 
-          end_insn = NULL;
-          for (std::vector<access*>::iterator mods = inserted_reg_mods.begin ();
-               mods != inserted_reg_mods.end (); ++mods)
+          for (std::vector<access*>::iterator mods = inserted_reg_mods.begin ();;
+               ++mods)
             {
-              access& acc = **mods;
-              if (regs_equal (acc.address_reg (), reg) && acc.insn ())
+              if (mods == inserted_reg_mods.end ())
                 {
-                  end_insn = acc.insn ();
+                  end_insn = NULL;
+                  break;
+                }
+              access& acc = **mods;
+              if (regs_equal (acc.address_reg (), reg) && acc.insn ()
+                  && end_insn != NEXT_INSN (acc.insn ()))
+                {
+                  end_insn = NEXT_INSN (acc.insn ());
                   break;
                 }
             }
