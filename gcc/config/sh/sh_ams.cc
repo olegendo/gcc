@@ -2437,6 +2437,29 @@ sh_ams::access_sequence
       if (accs->insn ())
         last_insn = accs->insn ();
 
+      if (accs->is_trailing ())
+        {
+          log_msg ("skipping trailing access\n");
+          continue;
+        }
+
+      if (sequence_started && accs->insn ()
+          && (accs->access_type () == load
+              || accs->access_type () == store
+              || accs->access_type () == reg_use))
+        {
+          rtx_insn* new_insns = get_insns ();
+          end_sequence ();
+          sequence_started = false;
+
+          log_msg ("emitting new insns = \n");
+          log_rtx (new_insns);
+          log_msg ("\nbefore insn\n");
+          log_insn (accs->insn ());
+          log_msg ("\n");
+          emit_insn_before (new_insns, accs->insn ());
+        }
+
       if (!accs->should_optimize ())
         {
           log_msg ("access didn't get optimized, skipping\n");
@@ -2446,12 +2469,6 @@ sh_ams::access_sequence
       if (accs->original_address ().is_invalid ())
         {
           log_msg ("original address not valid\n");
-          continue;
-        }
-
-      if (accs->is_trailing ())
-        {
-          log_msg ("skipping trailing access\n");
           continue;
         }
 
@@ -2564,22 +2581,6 @@ sh_ams::access_sequence
 	    }
 
           sh_check_add_incdec_notes (accs->insn ());
-        }
-
-      if (sequence_started && (accs->access_type () == load
-                               || accs->access_type () == store
-                               || accs->access_type () == reg_use))
-        {
-          rtx_insn* new_insns = get_insns ();
-          end_sequence ();
-          sequence_started = false;
-
-          log_msg ("emitting new insns = \n");
-          log_rtx (new_insns);
-          log_msg ("\nbefore insn\n");
-          log_insn (accs->insn ());
-          log_msg ("\n");
-          emit_insn_before (new_insns, accs->insn ());
         }
     }
 
