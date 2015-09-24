@@ -838,17 +838,17 @@ public:
 
       void reset_changes (access_sequence &as)
       {
-        std::for_each (inserted_accs ().begin (), inserted_accs ().end (),
+        std::for_each (inserted_accs ().rbegin (), inserted_accs ().rend (),
             std::bind1st (std::mem_fun (&access_sequence::remove_access), &as));
         inserted_accs ().clear ();
 
-        std::for_each (use_changed_accs ().begin (), use_changed_accs ().end (),
+        std::for_each (use_changed_accs ().rbegin (), use_changed_accs ().rend (),
             std::mem_fun (&access::set_unused));
         use_changed_accs ().clear ();
 
-        for (std::vector<std::pair <access* , bool> >::iterator
-               it = usable_changed_accs ().begin ();
-             it != usable_changed_accs ().end (); ++it)
+        for (std::vector<std::pair <access* , bool> >::reverse_iterator
+               it = usable_changed_accs ().rbegin ();
+             it != usable_changed_accs ().rend (); ++it)
           {
             if (it->second)
               it->first->set_usable ();
@@ -857,9 +857,9 @@ public:
           }
         usable_changed_accs ().clear ();
 
-        for (std::vector<std::pair <access*, addr_expr> >::iterator
-               it = addr_changed_accs ().begin ();
-             it != addr_changed_accs ().end (); ++it)
+        for (std::vector<std::pair <access*, addr_expr> >::reverse_iterator
+               it = addr_changed_accs ().rbegin ();
+             it != addr_changed_accs ().rend (); ++it)
           it->first->set_original_address (0, it->second);
         addr_changed_accs ().clear ();
       }
