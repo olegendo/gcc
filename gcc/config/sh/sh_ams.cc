@@ -492,6 +492,11 @@ remove_incdec_note (rtx_insn* i, rtx reg)
 } // anonymous namespace
 
 // borrowed from C++11
+// could also put this into namespace std.  but std libs like libc++ (clang)
+// provide std::next/prev also if used in C++98 mode.  so we'd need something
+// like
+//    #if __cplusplus < 201103L && !defined (_LIBCPP_ITERATOR)
+// but that's a bit fragile, so let's not do it.
 
 namespace stdx
 {
@@ -658,7 +663,7 @@ sh_ams::addr_expr::to_rtx (void) const
   // Surround with POST/PRE_INC/DEC if it is an auto_mod type.
   // FIXME: Also handle PRE_MODIFY and POST_MODIFY.  For that we might need
   // to have the mod being an addr_expr instead of the constant displacement.
-  // Moreover, we can't really distinguish of a post/pre mod with a
+  // Moreover, we can't really distinguish a post/pre mod with a
   // displacement != access size from a post/pre inc/dec.
   if (type () == pre_mod)
     r = disp () > 0 ? gen_rtx_PRE_INC (Pmode, r) : gen_rtx_PRE_DEC (Pmode, r);
@@ -3549,10 +3554,10 @@ sh_ams::access_sequence
       log_msg ("\nvalidating alternatives for insn\n");
       log_insn (a->insn ());
 
-      #define log_invalidate_cont(msg) do { \
+      #define log_invalidate_cont(msg) do { if (dump_file != NULL) { \
 	log_msg ("alternative  "); \
 	log_addr_expr (alt->address ()); \
-	log_msg ("  invalid: %s\n", msg); \
+	log_msg ("  invalid: %s\n", msg); } \
 	alt->set_invalid (); \
 	goto Lcontinue; } while (0)
 

@@ -272,6 +272,9 @@ public:
 
   // an element in the access sequence.  can be a real memory access insn
   // or address register modification or address register use insn.
+  // FIXME: extend this to handle
+  //         - memory operands (e.g. SH's GBR mem logic insns)
+  //         - some kind of multiple use (e.g. SH's atomic insns)
   enum access_type_t { load, store, reg_mod, reg_use };
 
   class access
