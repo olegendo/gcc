@@ -1877,7 +1877,7 @@ std::list<sh_ams::access_sequence>::iterator
 sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
                                std::list<access_sequence>& sequences)
 {
-  typedef std::map<rtx, split_sequence_info> new_seq_map;
+  typedef std::map<rtx, access_sequence*> new_seq_map;
 
   new_seq_map new_seqs;
   access_sequence& as = *as_it;
@@ -1899,13 +1899,12 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
         {
           access_sequence& new_as =
             *sequences.insert (as_it, access_sequence ());
-          new_seqs.insert (std::make_pair (key, split_sequence_info (&new_as)));
+          new_seqs.insert (std::make_pair (key, &new_as));
         }
     }
 
   // Add each memory and reg_use access from the original sequence to the
-  // appropriate new sequence.  Also add the reg_mod accesses to all sequences
-  // where they are used to calculate addresses.
+  // appropriate new sequence.  Also add the reg_mod accesses to all sequences.
   sh_ams::access_sequence::iterator last_mem_acc = as.accesses ().end ();
   for (sh_ams::access_sequence::reverse_iterator accs = as.accesses ().rbegin ();
        accs != as.accesses ().rend (); ++accs)
@@ -1923,13 +1922,11 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 
           rtx key = accs->address ().is_invalid () ? NULL
                                                    : accs->address ().base_reg ();
-          split_sequence_info& new_seq = new_seqs.find(key)->second;
-
-          split_access_sequence_2 (new_seq, *accs);
-          new_seq.as ()->accesses ().push_front (*accs);
+          access_sequence& as = *new_seqs.find(key)->second;
+          as.accesses ().push_front (*accs);
           if (accs->mod_insn ())
             {
-              new_seq.as ()->mod_insns ().push_back (accs->mod_insn ());
+              as.mod_insns ().push_back (accs->mod_insn ());
               accs->mod_insn ()->use ();
             }
         }
@@ -1952,24 +1949,16 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 }
 
 // Internal function of split_access_sequence.  Adds the reg_mod access ACC to
-// those sequences in NEW_SEQS that use it in their address calculations.
+// all the sequences in NEW_SEQS.
 void
-sh_ams::split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
+sh_ams::split_access_sequence_1 (std::map<rtx, sh_ams::access_sequence*>& new_seqs,
                                  sh_ams::access& acc, bool add_to_front)
 {
-  typedef std::map<rtx, split_sequence_info> new_seq_map;
+  typedef std::map<rtx, access_sequence*> new_seq_map;
   for (new_seq_map::iterator seqs = new_seqs.begin ();
        seqs != new_seqs.end (); ++seqs)
     {
-      split_sequence_info& seq_info = seqs->second;
-      access_sequence& as = *seq_info.as ();
-
-      // Add the reg_mod access only if it's used to calculate
-      // one of the addresses in this new sequence.
-      if (!seq_info.uses_addr_reg (acc.address_reg ()))
-        continue;
-
-      split_access_sequence_2 (seq_info, acc);
+      access_sequence& as = *seqs->second;
       if (add_to_front)
         as.accesses ().push_front (acc);
       else
@@ -1980,34 +1969,6 @@ sh_ams::split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
           acc.mod_insn ()->use ();
         }
       as.start_addresses ().add (&as.accesses ().front ());
-    }
-}
-
-// Internal function of split_access_sequence.  Adds all the address registers
-// referenced by ACC to ADDR_REGS.
-void
-sh_ams::split_access_sequence_2 (split_sequence_info& seq_info,
-                                 sh_ams::access& acc)
-{
-  if (acc.address_reg ())
-    seq_info.add_reg (acc.address_reg ());
-  if (!acc.original_address ().is_invalid ())
-    {
-      if (acc.original_address ().has_base_reg ())
-        seq_info.add_reg (acc.original_address ().base_reg ());
-      if (acc.original_address ().has_index_reg ())
-        seq_info.add_reg (acc.original_address ().index_reg ());
-    }
-  else if (acc.addr_rtx ())
-    {
-      // If the address is stored as an RTX, search it for regs.
-      subrtx_var_iterator::array_type array;
-      FOR_EACH_SUBRTX_VAR (it, array, acc.addr_rtx (), NONCONST)
-        {
-          rtx x = *it;
-          if (REG_P (x))
-            seq_info.add_reg (x);
-        }
     }
 }
 
