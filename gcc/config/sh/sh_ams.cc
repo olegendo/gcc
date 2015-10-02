@@ -1503,13 +1503,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
                 {
                   // Set all reg_mod accesses that were added while expanding this
                   // register to "unremovable".
-                  while (!inserted_reg_mods.empty ())
+                  for (std::vector<access*>::reverse_iterator
+                         it  = inserted_reg_mods.rbegin ();
+                       it != inserted_reg_mods.rend (); ++it)
                     {
-                      access* a = inserted_reg_mods.back ();
+                      access* a = *it;
                       if (a == inserted_mods_start)
                         break;
                       a->mark_unremovable ();
-                      inserted_reg_mods.pop_back ();
                     }
                 }
 
