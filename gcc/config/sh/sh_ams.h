@@ -1151,17 +1151,17 @@ private:
   find_reg_value_1 (rtx reg, rtx pat);
 
   static addr_expr
-  extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
+  extract_addr_expr (rtx x, rtx_insn* search_start_i, rtx_insn* last_access_i,
 		     machine_mode mem_mach_mode, access_sequence* as,
 		     std::vector<access*>& inserted_reg_mods);
 
   static addr_expr
-  extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn* root_insn,
+  extract_addr_expr (rtx x, rtx_insn* search_start_i, rtx_insn* last_access_i,
 		     machine_mode mem_mach_mode, access_sequence* as)
   {
     std::vector<access*> inserted_reg_mods;
-    return extract_addr_expr (x, insn, root_insn, mem_mach_mode, as,
-			      inserted_reg_mods);
+    return extract_addr_expr (x, search_start_i, last_access_i,
+                              mem_mach_mode, as, inserted_reg_mods);
   }
 
   static addr_expr
