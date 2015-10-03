@@ -579,6 +579,7 @@ sh_ams::options::options (void)
   cse = false;
   cse2 = false;
   gcse = false;
+  allow_mem_addr_change_new_insns = true;
   base_lookahead_count = 1;
 }
 
@@ -637,6 +638,10 @@ sh_ams::options::options (const std::string& str)
 
   for (kvi i = kv.find ("gcse"); i != kv.end (); i = kv.end ())
     parse_int (i->second).copy_if_valid_to (gcse);
+
+  for (kvi i = kv.find ("allow_mem_addr_change_new_insns");
+       i != kv.end (); i = kv.end ())
+    parse_int (i->second).copy_if_valid_to (allow_mem_addr_change_new_insns);
 
 //  error ("unknown AMS option");
 }
@@ -946,10 +951,35 @@ sh_ams::access::set_effective_address (const addr_expr& new_addr_expr)
 }
 
 bool
-sh_ams::access::set_insn_mem_rtx (rtx new_addr)
+sh_ams::access::set_insn_mem_rtx (rtx new_addr, bool allow_new_insns)
 {
-  return validate_change (m_insn, m_mem_ref,
-			  replace_equiv_address (*m_mem_ref, new_addr), false);
+  // In some cases we might actually end up with 'new_addr' being not
+  // really a valid address.  validate_change will then use the
+  // target's 'legitimize_address' function to make a valid address out of
+  // it.  While doing so the target might emit new insns which we must
+  // capture and re-emit before the actual insn.
+  // If this happens it means that something with the alternatives or
+  // mem insn matching is not working as intended.
+
+  start_sequence ();
+  bool r = validate_change (m_insn, m_mem_ref,
+			    replace_equiv_address (*m_mem_ref, new_addr),
+			    false);
+
+  rtx_insn* new_insns = get_insns ();
+  end_sequence ();
+
+  if (r && !allow_new_insns && new_insns != NULL)
+    {
+      log_msg ("validate_change produced new insns: \n");
+      log_rtx (new_insns);
+      abort ();
+    }
+
+  if (r && new_insns != NULL)
+    emit_insn_before (new_insns, m_insn);
+
+  return r;
 }
 
 bool
@@ -2423,7 +2453,8 @@ start_addr_list::remove (access* start_addr)
 // Write the sequence into the insn stream.
 void
 sh_ams::access_sequence
-::update_insn_stream (std::list<shared_insn>& shared_insn_list)
+::update_insn_stream (std::list<shared_insn>& shared_insn_list,
+		      bool allow_mem_addr_change_new_insns)
 {
   log_msg ("update_insn_stream\n");
 
@@ -2578,7 +2609,8 @@ sh_ams::access_sequence
 	  // insns (which we don't handle right now at all).
 	  remove_incdec_notes (accs->insn ());
 
-	  if (!accs->set_insn_mem_rtx (new_addr))
+	  if (!accs->set_insn_mem_rtx (new_addr,
+				       allow_mem_addr_change_new_insns))
 	    {
 	      log_msg ("failed to replace mem rtx\n");
 	      log_rtx (accs->addr_rtx_in_insn ());
@@ -3938,7 +3970,8 @@ sh_ams::execute (function* fun)
         {
           log_access_sequence (as, false);
           log_msg ("\n");
-          as.update_insn_stream (shared_insn_list);
+          as.update_insn_stream (shared_insn_list,
+				 m_options.allow_mem_addr_change_new_insns);
           log_msg ("\n\n");
         }
     }

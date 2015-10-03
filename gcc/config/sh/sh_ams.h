@@ -525,7 +525,7 @@ public:
     void set_cost (int new_cost) { m_cost = new_cost; }
     void adjust_cost (int d) { m_cost += d; }
 
-    bool set_insn_mem_rtx (rtx new_addr);
+    bool set_insn_mem_rtx (rtx new_addr, bool allow_new_insns);
     bool try_set_insn_mem_rtx (rtx new_addr);
 
     bool set_insn_use_rtx (rtx new_expr);
@@ -597,7 +597,8 @@ public:
 
     void gen_address_mod (delegate& dlg, int base_lookahead);
 
-    void update_insn_stream (std::list<shared_insn>& shared_insn_list);
+    void update_insn_stream (std::list<shared_insn>& shared_insn_list,
+			     bool allow_mem_addr_change_new_insns);
     bool modify_insns (void) const { return m_modify_insns; }
     void set_modify_insns (bool mod) { m_modify_insns = mod; }
 
@@ -984,6 +985,12 @@ public:
 
     // Run global CSE after AMS.
     bool gcse;
+
+    // Allow new insns to be emitted when doing a validate_change to replace
+    // memory addresses in insns.  If new insns are emitted it usually means
+    // AMS is missing something.  It should usually not happen.  Enabled by
+    // default.
+    bool allow_mem_addr_change_new_insns;
 
     // Use this as a base look ahead count value for the algorithm that selects
     // alternatives.  Default is 1.
