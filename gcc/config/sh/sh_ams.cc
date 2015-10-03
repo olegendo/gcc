@@ -326,7 +326,12 @@ log_access_sequence (const sh_ams::access_sequence& as,
   if (dump_file == NULL)
     return;
 
-  log_msg ("access sequence:\n\n");
+  log_msg ("=====\naccess sequence %p: %s\n\n", (const void*)&as,
+	   as.accesses ().empty () ? "is empty" : "");
+
+  if (as.accesses ().empty ())
+    return;
+
   for (sh_ams::access_sequence::const_iterator it = as.accesses ().begin ();
        it != as.accesses ().end (); ++it)
     {
@@ -885,8 +890,7 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
   addr_expr original_expr = extract_addr_expr ((XEXP (*mem, 0)), m_mode);
 
   std::vector<access*> inserted_reg_mods;
-  addr_expr expr = extract_addr_expr ((XEXP (*mem, 0)),
-                                      prev_nonnote_insn_bb (insn), insn,
+  addr_expr expr = extract_addr_expr ((XEXP (*mem, 0)), insn, insn,
 				      m_mode, this, inserted_reg_mods);
   bool should_optimize = true;
 
@@ -1234,10 +1238,10 @@ std::pair<rtx, bool> sh_ams
   return std::make_pair (NULL_RTX, false);
 }
 
-// Find the value that REG was last set to, starting the search from INSN.
-// Return that value along with the modifying insn and the register in the
-// modifying pattern's SET_SRC (which is always the same register as REG,
-// but might have a different machine mode).
+// Find the value that REG was last set to. Return that value, along
+// with the modifying insn and the register in the modifying pattern's
+// SET_SRC (which is always the same register as REG, but might have a
+// different machine mode).
 // If the register was modified because of an auto-inc/dec memory
 // access, also return the mode of that access.
 // FIXME: make use of other info such as REG_EQUAL notes.
@@ -1248,7 +1252,8 @@ find_reg_value (rtx reg, rtx_insn* insn)
 
   // Go back through the insn list until we find the last instruction
   // that modified the register.
-  for (rtx_insn* i = insn; i != NULL_RTX; i = prev_nonnote_insn_bb (i))
+  for (rtx_insn* i = prev_nonnote_insn_bb (insn); i != NULL_RTX;
+       i = prev_nonnote_insn_bb (i))
     {
       if (BARRIER_P (i))
 	break;
@@ -1301,15 +1306,16 @@ sh_ams::check_make_non_mod_addr (rtx base_reg, rtx index_reg,
 }
 
 // Try to create an ADDR_EXPR struct of the form
-// base_reg + index_reg * scale + disp from the access rtx X.
+// base_reg + index_reg * scale + disp from the access expression X.
 // If AS is not NULL, trace the original value of the registers in X
 // as far back as possible, and add all the address reg modifying insns
-// to AS as reg_mod accesses.  In this case, SEARCH_START_I is the insn
-// from which the value-tracing starts and LAST_ACCESS_I should be the
-// insn where the sequence's last access occurs.
+// to AS as reg_mod accesses.
+// INSN is the insn in which the access happens.  ROOT_INSN is the INSN
+// argument that was passed to the function at the top level of recursion
+// (used as the start insn when calling add_reg_mod).  These are not used
+// if the registers in X aren't expanded.
 sh_ams::addr_expr
-sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
-                           rtx_insn *last_access_i,
+sh_ams::extract_addr_expr (rtx x, rtx_insn* insn, rtx_insn *root_insn,
 			   machine_mode mem_mach_mode,
 			   access_sequence* as,
                            std::vector<access*>& inserted_reg_mods)
@@ -1331,17 +1337,17 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = extract_addr_expr (XEXP (x, 0), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
-      op1 = extract_addr_expr (XEXP (x, 1), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
+      op0 = extract_addr_expr (XEXP (x, 0), insn, root_insn, mem_mach_mode, as,
+			       inserted_reg_mods);
+      op1 = extract_addr_expr (XEXP (x, 1), insn, root_insn, mem_mach_mode, as,
+			       inserted_reg_mods);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
-      op1 = extract_addr_expr (XEXP (x, 0), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
+      op1 = extract_addr_expr (XEXP (x, 0), insn, root_insn, mem_mach_mode, as,
+			       inserted_reg_mods);
       if (op1.is_invalid ())
         return op1;
     }
@@ -1353,12 +1359,11 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
     {
       addr_type_t mod_type;
 
-      // If we're expanding the effective address of a reg inside a post-mod
-      // access, the post-mod displacement should not be applied if we're
-      // looking for the address at the time the memory access happens.
-      const bool use_post_disp =
-        !expand_regs || !last_access_i
-        || search_start_i != PREV_INSN (last_access_i);
+      // For post-mod accesses, the displacement is offset only when
+      // tracing back the value of a register, or when extracting the
+      // original address.  Otherwise, we're interested in the effective
+      // address during the memory access, which isn't displaced at that point.
+      const bool use_post_disp = !expand_regs || insn != root_insn;
 
       switch (code)
         {
@@ -1381,8 +1386,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
         case POST_MODIFY:
           {
 	    addr_expr a = extract_addr_expr (XEXP (x, use_post_disp ? 1 : 0),
-					     search_start_i, last_access_i,
-                                             mem_mach_mode,
+					     insn, root_insn, mem_mach_mode,
 					     as, inserted_reg_mods);
             if (a.is_invalid ())
               return make_invalid_addr ();
@@ -1390,8 +1394,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
 	  }
         case PRE_MODIFY:
 	  {
-            addr_expr a = extract_addr_expr (XEXP (x, 1),
-                                             search_start_i, last_access_i,
+            addr_expr a = extract_addr_expr (XEXP (x, 1), insn, root_insn,
 					     mem_mach_mode, as,
 					     inserted_reg_mods);
             if (a.is_invalid ())
@@ -1403,8 +1406,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
           return make_invalid_addr ();
         }
 
-      op1 = extract_addr_expr (XEXP (x, 0), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
+      op1 = extract_addr_expr (XEXP (x, 0), insn, root_insn, mem_mach_mode, as,
+			       inserted_reg_mods);
       if (op1.is_invalid ())
         return op1;
 
@@ -1433,7 +1436,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
         {
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
-          find_reg_value_result r = find_reg_value (x, search_start_i);
+          find_reg_value_result r = find_reg_value (x, insn);
 
           // Stop expanding the reg if we reach a hardreg -> pseudo reg
           // copy, or if the reg can't be expanded any further.
@@ -1445,8 +1448,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
               // the reg to itself. This makes it easier for the address
               // modification generator to find all possible starting
               // addresses.
-              if (last_access_i)
-                as->add_reg_mod (last_access_i,
+              if (insn && root_insn)
+                as->add_reg_mod (root_insn,
                                  make_reg_addr (x), make_reg_addr (x),
                                  NULL, x);
               return make_reg_addr (x);
@@ -1460,7 +1463,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
           // modified because of an auto-inc/dec memory access, pass
           // down the machine mode of that access.
           addr_expr reg_addr_expr = extract_addr_expr
-            (r.value, prev_nonnote_insn_bb (r.mod_insn), last_access_i,
+            (r.value, r.mod_insn, root_insn,
              find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
                ? r.auto_mod_mode
                : mem_mach_mode,
@@ -1476,7 +1479,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
           // during address mod generation.
           // For auto-mod mem accesses, insert a reg_mod that sets X to itself.
           access* new_reg_mod = NULL;
-          if (last_access_i)
+          if (insn && root_insn)
             {
 
               // If the original or effective address is something AMS can't
@@ -1484,14 +1487,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
               // an addr_expr.
               if (reg_addr_expr.is_invalid ()
                   || original_reg_addr_expr.is_invalid ())
-                new_reg_mod = &as->add_reg_mod (last_access_i, r.value,
+                new_reg_mod = &as->add_reg_mod (root_insn, r.value,
                                                 r.mod_insn, r.reg, 0,
                                                 true);
 
               // Otherwise, store it as a normal addr_expr.
               else
                 {
-                  new_reg_mod = &as->add_reg_mod (last_access_i,
+                  new_reg_mod = &as->add_reg_mod (root_insn,
                                                   original_reg_addr_expr,
                                                   reg_addr_expr,
                                                   r.mod_insn, r.reg,
@@ -1510,22 +1513,20 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
                 {
                   // Set all reg_mod accesses that were added while expanding this
                   // register to "unremovable".
-                  for (std::vector<access*>::reverse_iterator
-                         it  = inserted_reg_mods.rbegin ();
-                       it != inserted_reg_mods.rend (); ++it)
+                  while (!inserted_reg_mods.empty ())
                     {
-                      access* a = *it;
+                      access* a = inserted_reg_mods.back ();
                       if (a == inserted_mods_start)
                         break;
                       a->mark_unremovable ();
+                      inserted_reg_mods.pop_back ();
                     }
                 }
 
               // Add an (rx = rx) reg_mod access to help the
               // address modification generator.
-              if (last_access_i)
-                as->add_reg_mod (last_access_i,
-                                 make_reg_addr (x), make_reg_addr (x),
+              if (insn && root_insn)
+                as->add_reg_mod (root_insn, make_reg_addr (x), make_reg_addr (x),
                                  NULL, x);
 
               return make_reg_addr (x);
@@ -1886,7 +1887,7 @@ std::list<sh_ams::access_sequence>::iterator
 sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
                                std::list<access_sequence>& sequences)
 {
-  typedef std::map<rtx, access_sequence*> new_seq_map;
+  typedef std::map<rtx, split_sequence_info> new_seq_map;
 
   new_seq_map new_seqs;
   access_sequence& as = *as_it;
@@ -1908,12 +1909,13 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
         {
           access_sequence& new_as =
             *sequences.insert (as_it, access_sequence ());
-          new_seqs.insert (std::make_pair (key, &new_as));
+          new_seqs.insert (std::make_pair (key, split_sequence_info (&new_as)));
         }
     }
 
   // Add each memory and reg_use access from the original sequence to the
-  // appropriate new sequence.  Also add the reg_mod accesses to all sequences.
+  // appropriate new sequence.  Also add the reg_mod accesses to all sequences
+  // where they are used to calculate addresses.
   sh_ams::access_sequence::iterator last_mem_acc = as.accesses ().end ();
   for (sh_ams::access_sequence::reverse_iterator accs = as.accesses ().rbegin ();
        accs != as.accesses ().rend (); ++accs)
@@ -1931,11 +1933,13 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 
           rtx key = accs->address ().is_invalid () ? NULL
                                                    : accs->address ().base_reg ();
-          access_sequence& as = *new_seqs.find(key)->second;
-          as.accesses ().push_front (*accs);
+          split_sequence_info& new_seq = new_seqs.find(key)->second;
+
+          split_access_sequence_2 (new_seq, *accs);
+          new_seq.as ()->accesses ().push_front (*accs);
           if (accs->mod_insn ())
             {
-              as.mod_insns ().push_back (accs->mod_insn ());
+              new_seq.as ()->mod_insns ().push_back (accs->mod_insn ());
               accs->mod_insn ()->use ();
             }
         }
@@ -1958,16 +1962,24 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 }
 
 // Internal function of split_access_sequence.  Adds the reg_mod access ACC to
-// all the sequences in NEW_SEQS.
+// those sequences in NEW_SEQS that use it in their address calculations.
 void
-sh_ams::split_access_sequence_1 (std::map<rtx, sh_ams::access_sequence*>& new_seqs,
+sh_ams::split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
                                  sh_ams::access& acc, bool add_to_front)
 {
-  typedef std::map<rtx, access_sequence*> new_seq_map;
+  typedef std::map<rtx, split_sequence_info> new_seq_map;
   for (new_seq_map::iterator seqs = new_seqs.begin ();
        seqs != new_seqs.end (); ++seqs)
     {
-      access_sequence& as = *seqs->second;
+      split_sequence_info& seq_info = seqs->second;
+      access_sequence& as = *seq_info.as ();
+
+      // Add the reg_mod access only if it's used to calculate
+      // one of the addresses in this new sequence.
+      if (!seq_info.uses_addr_reg (acc.address_reg ()))
+        continue;
+
+      split_access_sequence_2 (seq_info, acc);
       if (add_to_front)
         as.accesses ().push_front (acc);
       else
@@ -1978,6 +1990,34 @@ sh_ams::split_access_sequence_1 (std::map<rtx, sh_ams::access_sequence*>& new_se
           acc.mod_insn ()->use ();
         }
       as.start_addresses ().add (&as.accesses ().front ());
+    }
+}
+
+// Internal function of split_access_sequence.  Adds all the address registers
+// referenced by ACC to ADDR_REGS.
+void
+sh_ams::split_access_sequence_2 (split_sequence_info& seq_info,
+                                 sh_ams::access& acc)
+{
+  if (acc.address_reg ())
+    seq_info.add_reg (acc.address_reg ());
+  if (!acc.original_address ().is_invalid ())
+    {
+      if (acc.original_address ().has_base_reg ())
+        seq_info.add_reg (acc.original_address ().base_reg ());
+      if (acc.original_address ().has_index_reg ())
+        seq_info.add_reg (acc.original_address ().index_reg ());
+    }
+  else if (acc.addr_rtx ())
+    {
+      // If the address is stored as an RTX, search it for regs.
+      subrtx_var_iterator::array_type array;
+      FOR_EACH_SUBRTX_VAR (it, array, acc.addr_rtx (), NONCONST)
+        {
+          rtx x = *it;
+          if (REG_P (x))
+            seq_info.add_reg (x);
+        }
     }
 }
 
@@ -3264,6 +3304,9 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
 {
   find_addr_regs ();
 
+  basic_block bb = start_bb ();
+  rtx_insn* insn_after_bb = NEXT_INSN (BB_END (bb));
+
   std::vector<access*> inserted_reg_mods;
   for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
@@ -3272,13 +3315,12 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
 
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
-      basic_block bb = start_bb ();
-      rtx_insn* end_insn = BB_END (bb);
+      rtx_insn* end_insn = insn_after_bb;
 
       while (end_insn)
         {
           inserted_reg_mods.clear ();
-          addr_expr expr = extract_addr_expr (reg, end_insn, BB_END (bb),
+          addr_expr expr = extract_addr_expr (reg, end_insn, insn_after_bb,
                                               Pmode, this, inserted_reg_mods);
 
           // If the final expression created by these modifications
@@ -3288,14 +3330,19 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
             std::for_each (inserted_reg_mods.begin (), inserted_reg_mods.end (),
                            std::mem_fun (&access::mark_unremovable));
 
-          end_insn = NULL;
-          for (std::vector<access*>::iterator mods = inserted_reg_mods.begin ();
-               mods != inserted_reg_mods.end (); ++mods)
+          for (std::vector<access*>::iterator mods = inserted_reg_mods.begin ();;
+               ++mods)
             {
-              access& acc = **mods;
-              if (regs_equal (acc.address_reg (), reg) && acc.insn ())
+              if (mods == inserted_reg_mods.end ())
                 {
-                  end_insn = prev_nonnote_insn_bb (acc.insn ());
+                  end_insn = NULL;
+                  break;
+                }
+              access& acc = **mods;
+              if (regs_equal (acc.address_reg (), reg) && acc.insn ()
+                  && end_insn != NEXT_INSN (acc.insn ()))
+                {
+                  end_insn = NEXT_INSN (acc.insn ());
                   break;
                 }
             }
@@ -3368,8 +3415,7 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
           rtx_insn* use_insn = it->second;
           addr_expr use_expr = extract_addr_expr (*use_ref);
           addr_expr effective_addr
-            = extract_addr_expr (*use_ref, prev_nonnote_insn_bb (use_insn),
-                                 NULL, Pmode, this);
+            = extract_addr_expr (*use_ref, use_insn, NULL, Pmode, this);
 
           if (!effective_addr.is_invalid ())
             {
@@ -3736,74 +3782,77 @@ sh_ams::execute (function* fun)
     }
 
   log_msg ("\nprocessing extracted sequences\n");
-  for (std::list<access_sequence>::iterator as_it = sequences.begin ();
-       as_it != sequences.end ();)
+  for (std::list<access_sequence>::iterator as = sequences.begin ();
+       as != sequences.end ();)
     {
-      access_sequence& as = *as_it;
-      if (as.accesses ().empty ())
-        {
-          log_msg ("access sequence empty\n\n");
-          ++as_it;
-          continue;
-        }
-
-      log_access_sequence (as, false);
+      log_access_sequence (*as, false);
       log_msg ("\n\n");
 
-      log_msg ("add_missing_reg_mods\n");
-      as.add_missing_reg_mods ();
+      if (as->accesses ().empty ())
+	{
+	  ++as;
+	  continue;
+	}
 
-      log_access_sequence (as, false);
+      log_msg ("add_missing_reg_mods\n");
+      as->add_missing_reg_mods ();
+
+      log_access_sequence (*as, false);
       log_msg ("\n\n");
 
       log_msg ("find_reg_uses\n");
-      as.find_reg_uses (m_delegate);
+      as->find_reg_uses (m_delegate);
 
-      log_access_sequence (as, false);
+      log_access_sequence (*as, false);
       log_msg ("\n\n");
 
       log_msg ("find_reg_end_values\n");
-      as.find_reg_end_values ();
+      as->find_reg_end_values ();
 
-      log_access_sequence (as, false);
+      log_access_sequence (*as, false);
       log_msg ("\n\n");
 
       // Fill the sequence's MOD_INSNS with the insns of the accesses
       // that can be removed.
-      for (access_sequence::iterator it = as.accesses ().begin ();
-           it != as.accesses ().end (); ++it)
+      for (access_sequence::iterator it = as->accesses ().begin ();
+           it != as->accesses ().end (); ++it)
         {
           if (it->removable ()
               // Auto-mod mem access insns shouldn't be removed.
               && !find_reg_note (it->insn (), REG_INC, NULL_RTX))
-            it->set_mod_insn (as.create_mod_insn (it->insn (), shared_insn_list));
+            it->set_mod_insn (as->create_mod_insn (it->insn (), shared_insn_list));
         }
 
       log_msg ("split_access_sequence\n");
       if (m_options.split_sequences)
-        as_it = split_access_sequence (as_it, sequences);
+        as = split_access_sequence (as, sequences);
       else
-        ++as_it;
+        ++as;
     }
 
   log_msg ("\nprocessing split sequences\n");
-  for (std::list<access_sequence>::iterator as_it = sequences.begin ();
-       as_it != sequences.end (); ++as_it)
+  for (std::list<access_sequence>::iterator as = sequences.begin ();
+       as != sequences.end (); ++as)
     {
-      access_sequence& as = *as_it;
-      if (as.accesses ().empty ())
+      log_access_sequence (*as, false);
+      log_msg ("\n\n");
+
+      if (as->accesses ().empty ())
+	continue;
+
+      // FIXME: maybe have some counters in the access sequence to cache
+      // these numbers.
+      typedef access_type_matches<load, store> mem_match;
+      if (as->begin<mem_match> () == as->end<mem_match> ())
         {
-          log_msg ("access sequence empty\n\n");
+          log_msg ("access sequence doesn't have any real memory accesses\n\n");
           continue;
         }
 
-      log_access_sequence (as, false);
-      log_msg ("\n\n");
-
       log_msg ("doing adjacency analysis\n");
-      as.calculate_adjacency_info ();
+      as->calculate_adjacency_info ();
 
-      log_access_sequence (as, false);
+      log_access_sequence (*as, false);
       log_msg ("\n\n");
 
       log_msg ("updating access alternatives\n");
@@ -3811,13 +3860,14 @@ sh_ams::execute (function* fun)
 	typedef access_to_optimize match;
 	typedef filter_iterator<access_sequence::iterator, match> iter;
 
-	for (iter a = as.begin<match> (), a_end = as.end<match> ();
+	for (iter a = as->begin<match> (), a_end = as->end<match> ();
 	     a != a_end; ++a)
-	  as.update_access_alternatives (m_delegate, a,
-					 m_options.force_alt_validation,
-					 m_options.disable_alt_validation);
+	  as->update_access_alternatives (m_delegate, a,
+					  m_options.force_alt_validation,
+					  m_options.disable_alt_validation);
       }
-      log_access_sequence (as, true);
+
+      log_access_sequence (*as, true);
       log_msg ("\n\n");
 
       log_msg ("updating costs\n");
@@ -3825,21 +3875,21 @@ sh_ams::execute (function* fun)
 	typedef access_type_matches<load, store> match;
 	typedef filter_iterator<access_sequence::iterator, match> iter;
 
-	for (iter m = as.begin<match> (), mend = as.end<match> ();
+	for (iter m = as->begin<match> (), mend = as->end<match> ();
 	     m != mend; ++m)
 	  for (access::alternative_set::iterator
 		alt = m->alternatives ().begin ();
 	       alt != m->alternatives ().end (); ++alt)
-	    m_delegate.adjust_alternative_costs (*alt, as, m.base_iterator ());
+	    m_delegate.adjust_alternative_costs (*alt, *as, m.base_iterator ());
       }
 
-      as.update_cost (m_delegate);
-      int original_cost = as.cost ();
+      as->update_cost (m_delegate);
+      int original_cost = as->cost ();
 
-      log_access_sequence (as);
+      log_access_sequence (*as);
       log_msg ("\n\n");
 
-      if (as.cost_already_minimal ())
+      if (as->cost_already_minimal ())
         {
           log_msg ("costs are already minimal\n");
 
@@ -3850,15 +3900,15 @@ sh_ams::execute (function* fun)
         }
 
       log_msg ("gen_address_mod\n");
-      as.gen_address_mod (m_delegate, m_options.base_lookahead_count);
+      as->gen_address_mod (m_delegate, m_options.base_lookahead_count);
 
-      as.update_cost (m_delegate);
-      int new_cost = as.cost ();
+      as->update_cost (m_delegate);
+      int new_cost = as->cost ();
 
-      log_access_sequence (as, false);
+      log_access_sequence (*as, false);
       log_msg ("\n");
 
-      as.set_modify_insns (true);
+      as->set_modify_insns (true);
       if (new_cost >= original_cost)
 	{
 	  log_msg ("new_cost (%d) >= original_cost (%d)",
@@ -3867,14 +3917,14 @@ sh_ams::execute (function* fun)
 	  if (m_options.check_original_cost)
 	    {
 	      log_msg ("  not modifying\n");
-	      as.set_modify_insns (false);
+	      as->set_modify_insns (false);
 	    }
 	  else
 	    log_msg ("  modifying anyway\n");
 	}
 
-      if (as.modify_insns ())
-        as.release_mod_insns ();
+      if (as->modify_insns ())
+        as->release_mod_insns ();
 
       log_msg ("\n\n");
     }
