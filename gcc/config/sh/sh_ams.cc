@@ -2647,6 +2647,14 @@ sh_ams::access_sequence
       else
         emit_insn_before (new_insns, last_insn);
     }
+  else if (sequence_started)
+    {
+      rtx_insn* new_insns = get_insns ();
+      end_sequence ();
+
+      log_msg ("dropping new insns = \n");
+      log_rtx (new_insns);
+    }
 }
 
 // Get the total cost of using this access sequence.
