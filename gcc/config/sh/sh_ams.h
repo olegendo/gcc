@@ -142,7 +142,11 @@ public:
 
     rtx base_reg (void) const { return m_base_reg; }
     bool has_base_reg (void) const { return base_reg () != invalid_regno; }
+    bool has_true_base_reg (void) const { return base_reg () != invalid_regno
+						 && base_reg () != any_regno; }
+
     bool has_no_base_reg (void) const { return !has_base_reg (); }
+    bool has_no_true_base_reg (void) const { return !has_true_base_reg (); }
 
     disp_t disp (void) const { return m_disp; }
     disp_t disp_min (void) const { return m_disp_min; }
@@ -152,7 +156,10 @@ public:
 
     rtx index_reg (void) const { return m_index_reg; }
     bool has_index_reg (void) const { return index_reg () != invalid_regno; }
+    bool has_true_index_reg (void) const { return index_reg () != invalid_regno
+						  && index_reg () != any_regno; }
     bool has_no_index_reg (void) const { return !has_index_reg (); }
+    bool has_no_true_index_reg (void) const { return !has_true_index_reg (); }
 
     scale_t scale (void) const { return m_scale; }
     scale_t scale_min (void) const { return m_scale_min; }
