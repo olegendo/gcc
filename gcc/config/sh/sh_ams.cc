@@ -612,36 +612,22 @@ sh_ams::options::options (const std::string& str)
 
   typedef std::map<std::string, std::string>::iterator kvi;
 
-  for (kvi i = kv.find ("check_minimal_cost"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (check_minimal_cost);
+#define get_int_opt(name) \
+  for (kvi i = kv.find (#name); i != kv.end (); i = kv.end ()) \
+    parse_int (i->second).copy_if_valid_to (name)
 
-  for (kvi i = kv.find ("check_original_cost"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (check_original_cost);
+  get_int_opt (check_minimal_cost);
+  get_int_opt (check_original_cost);
+  get_int_opt (split_sequences);
+  get_int_opt (base_lookahead_count);
+  get_int_opt (force_alt_validation);
+  get_int_opt (disable_alt_validation);
+  get_int_opt (cse);
+  get_int_opt (cse2);
+  get_int_opt (gcse);
+  get_int_opt (allow_mem_addr_change_new_insns);
 
-    for (kvi i = kv.find ("split_sequences"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (split_sequences);
-
-  for (kvi i = kv.find ("base_lookahead_count"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (base_lookahead_count);
-
-  for (kvi i = kv.find ("force_alt_validation"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (force_alt_validation);
-
-  for (kvi i = kv.find ("disable_alt_validation"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (disable_alt_validation);
-
-  for (kvi i = kv.find ("cse"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (cse);
-
-  for (kvi i = kv.find ("cse2"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (cse2);
-
-  for (kvi i = kv.find ("gcse"); i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (gcse);
-
-  for (kvi i = kv.find ("allow_mem_addr_change_new_insns");
-       i != kv.end (); i = kv.end ())
-    parse_int (i->second).copy_if_valid_to (allow_mem_addr_change_new_insns);
+#undef get_int_opt
 
 //  error ("unknown AMS option");
 }
