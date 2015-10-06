@@ -47,6 +47,7 @@
 #include "rtl-iter.h"
 #include "diagnostic-core.h"
 #include "opts.h"
+#include "regs.h"
 
 // For global variable flag_rerun_cse_after_global_opts.
 #include "toplev.h"
@@ -1224,8 +1225,9 @@ sh_ams::access_sequence::start_bb (void) const
 // false.
 //
 // FIXME: see if we can re-use find_set_of_reg_bb from sh_treg_combine.cc
-std::pair<rtx, bool> sh_ams
-::find_reg_value_1 (rtx reg, rtx pat)
+// This is very similar to rtlanal.c (reg_set_p), except that we return
+// the known set rtx to avoid looking for it again.
+std::pair<rtx, bool> sh_ams::find_reg_value_1 (rtx reg, rtx pat)
 {
   switch (GET_CODE (pat))
     {
@@ -1274,8 +1276,7 @@ std::pair<rtx, bool> sh_ams
 // If the register was modified because of an auto-inc/dec memory
 // access, also return the mode of that access.
 // FIXME: make use of other info such as REG_EQUAL notes.
-sh_ams::find_reg_value_result sh_ams::
-find_reg_value (rtx reg, rtx_insn* insn)
+sh_ams::find_reg_value_result sh_ams::find_reg_value (rtx reg, rtx_insn* insn)
 {
   std::vector<std::pair<rtx*, access_type_t> > mems;
 
@@ -1286,8 +1287,11 @@ find_reg_value (rtx reg, rtx_insn* insn)
     {
       if (BARRIER_P (i))
 	break;
-      if (!NONDEBUG_INSN_P (i) || !NONJUMP_INSN_P (i))
-        continue;
+      if (!INSN_P (i) || DEBUG_INSN_P (i))
+	continue;
+
+      if (reg_set_p (reg, i) && CALL_P (i))
+	break;
 
       std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
       if (r.second)
