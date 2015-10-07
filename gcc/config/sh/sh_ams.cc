@@ -807,13 +807,12 @@ void sh_ams::access
   log_access (*acc);
   log_msg ("\n\n");
 
-  // FIXME: Sometimes "this" access is not valid.  On SH this is true for
-  // every call insn which references the call address by a mem.  In this
-  // case the regs in the addr_expr might contain "any_regno", which
-  // we better ignore at this time.
-  if (ae.has_true_base_reg ())
+  if (ae.is_invalid ())
+    return;
+
+  if (ae.has_base_reg ())
     used_regs.insert (ae.base_reg ());
-  if (ae.has_true_index_reg ())
+  if (ae.has_index_reg ())
     used_regs.insert (ae.index_reg ());
 
   if (acc == as.accesses ().begin ())
