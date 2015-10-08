@@ -1947,8 +1947,13 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
     }
 
   // Add each memory and reg_use access from the original sequence to the
-  // appropriate new sequence.  Also add the reg_mod accesses to all sequences
-  // where they are used to calculate addresses.
+  // appropriate new sequence.  Also add the reg_mod accesses to all
+  // sequences where they are used to calculate addresses.
+  //
+  // To determine which reg_mods should be added to a sequence, we go over
+  // the accesses twice: In the first pass, we record the address regs that
+  // the sequence uses.  In the second, we add the relevant accesses to the
+  // sequence.
   sh_ams::access_sequence::iterator last_mem_acc = as.accesses ().end ();
   for (unsigned pass = 0; pass < 2; ++pass)
     {
