@@ -1946,30 +1946,35 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
   // appropriate new sequence.  Also add the reg_mod accesses to all sequences
   // where they are used to calculate addresses.
   sh_ams::access_sequence::iterator last_mem_acc = as.accesses ().end ();
-  for (sh_ams::access_sequence::reverse_iterator accs = as.accesses ().rbegin ();
-       accs != as.accesses ().rend (); ++accs)
+  for (unsigned pass = 0; pass < 2; ++pass)
     {
-      // reg_mods with no original address are split
-      // like the memory and reg_use accesses.
-      if (accs->access_type () == reg_mod
-          && !(accs->original_address ().is_invalid ()
-               && !accs->address ().is_invalid ()))
-        split_access_sequence_1 (new_seqs, *accs, true);
-      else
+      bool add_to_sequence = (pass==1);
+      for (sh_ams::access_sequence::reverse_iterator accs =
+             as.accesses ().rbegin (); accs != as.accesses ().rend (); ++accs)
         {
-          if (last_mem_acc == as.accesses ().end ())
-            last_mem_acc = stdx::prev (accs.base ());
-
-          rtx key = accs->address ().is_invalid () ? NULL
-                                                   : accs->address ().base_reg ();
-          split_sequence_info& new_seq = new_seqs.find(key)->second;
-
-          split_access_sequence_2 (new_seq, *accs);
-          new_seq.as ()->accesses ().push_front (*accs);
-          if (accs->mod_insn ())
+          // reg_mods with no original address are split
+          // like the memory and reg_use accesses.
+          if (accs->access_type () == reg_mod
+              && !(accs->original_address ().is_invalid ()
+                   && !accs->address ().is_invalid ()))
+            split_access_sequence_1 (new_seqs, *accs, add_to_sequence, false);
+          else
             {
-              new_seq.as ()->mod_insns ().push_back (accs->mod_insn ());
-              accs->mod_insn ()->use ();
+              if (add_to_sequence && last_mem_acc == as.accesses ().end ())
+                last_mem_acc = stdx::prev (accs.base ());
+
+              rtx key = accs->address ().is_invalid ()
+                ? NULL : accs->address ().base_reg ();
+              split_sequence_info& new_seq = new_seqs.find(key)->second;
+
+              split_access_sequence_2 (new_seq, *accs);
+              if (add_to_sequence)
+                new_seq.as ()->accesses ().push_front (*accs);
+              if (accs->mod_insn ())
+                {
+                  new_seq.as ()->mod_insns ().push_back (accs->mod_insn ());
+                  accs->mod_insn ()->use ();
+                }
             }
         }
     }
@@ -1981,7 +1986,7 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
       if (accs->access_type () == reg_mod
           && !(accs->original_address ().is_invalid ()
                && !accs->address ().is_invalid ()))
-        split_access_sequence_1 (new_seqs, *accs, false);
+        split_access_sequence_1 (new_seqs, *accs, false, true);
     }
 
   // Remove the old sequence and return the next element after the
@@ -1994,7 +1999,8 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 // those sequences in NEW_SEQS that use it in their address calculations.
 void
 sh_ams::split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
-                                 sh_ams::access& acc, bool add_to_front)
+                                 sh_ams::access& acc,
+                                 bool add_to_front, bool add_to_back)
 {
   typedef std::map<rtx, split_sequence_info> new_seq_map;
   for (new_seq_map::iterator seqs = new_seqs.begin ();
@@ -2010,15 +2016,20 @@ sh_ams::split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
 
       split_access_sequence_2 (seq_info, acc);
       if (add_to_front)
-        as.accesses ().push_front (acc);
-      else
-        as.accesses ().push_back (acc);
+        {
+          as.accesses ().push_front (acc);
+          as.start_addresses ().add (&as.accesses ().front ());
+        }
+      else if (add_to_back)
+        {
+          as.accesses ().push_back (acc);
+          as.start_addresses ().add (&as.accesses ().back ());
+        }
       if (acc.mod_insn ())
         {
           as.mod_insns ().push_back (acc.mod_insn ());
           acc.mod_insn ()->use ();
         }
-      as.start_addresses ().add (&as.accesses ().front ());
     }
 }
 

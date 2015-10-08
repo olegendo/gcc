@@ -1045,7 +1045,8 @@ private:
 
   static void
   split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
-			   sh_ams::access &acc, bool add_to_front);
+			   sh_ams::access &acc,
+                           bool add_to_front, bool add_to_back);
 
   static void
   split_access_sequence_2 (split_sequence_info& addr_regs, sh_ams::access& acc);
