@@ -448,6 +448,20 @@ find_mem_accesses (rtx& x, OutputIterator out,
     }
 }
 
+// Find all registers that are used in the address calculation of X
+// and insert them into OUT.
+template <typename OutputIterator> void
+find_regs_used_in_rtx (rtx x, OutputIterator out)
+{
+  if (REG_P (x))
+    *out++ = x;
+  else if (UNARY_P (x) || ARITHMETIC_P (x))
+    {
+      for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
+        find_regs_used_in_rtx (XEXP (x, i), out);
+    }
+}
+
 // check if register a and b match, where both could be any_regno or
 // invalid_regno.
 //          a         |      b        |  match
@@ -809,12 +823,14 @@ void sh_ams::access
   log_msg ("\n\n");
 
   if (ae.is_invalid ())
-    return;
-
-  if (ae.has_base_reg ())
-    used_regs.insert (ae.base_reg ());
-  if (ae.has_index_reg ())
-    used_regs.insert (ae.index_reg ());
+    find_regs_used_in_rtx (addr_rtx (),
+                           std::inserter (used_regs, used_regs.begin ()));
+  else {
+    if (ae.has_base_reg ())
+      used_regs.insert (ae.base_reg ());
+    if (ae.has_index_reg ())
+      used_regs.insert (ae.index_reg ());
+  }
 
   if (acc == as.accesses ().begin ())
     return;
@@ -834,6 +850,7 @@ void sh_ams::access
           if (ae.has_index_reg ())
             used_regs.insert (ae.index_reg ());
           accs->mark_unremovable ();
+          log_msg ("access marked unremovable\n");
         }
 
       // If one of the used regs got changed by an auto-mod access,
@@ -848,6 +865,7 @@ void sh_ams::access
           used_regs.insert (ae.base_reg ());
           if (ae.has_index_reg ())
             used_regs.insert (ae.index_reg ());
+          log_msg ("auto-mod access won't be optimized\n");
         }
 
       if (accs == as.accesses ().begin ())
@@ -2084,7 +2102,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   // Mark the reg_mods used by unoptimizable accesses as "unremovable"
   for (iterator accs = accesses ().begin (); accs != accesses ().end (); ++accs)
     {
-      if (!accs->should_optimize ())
+      if (!accs->should_optimize () || accs->address ().is_invalid ())
         accs->mark_dependent_mods_unremovable (*this, accs);
     }
 
