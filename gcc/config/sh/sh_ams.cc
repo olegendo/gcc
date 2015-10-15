@@ -822,7 +822,7 @@ void sh_ams::access
   log_access (*acc);
   log_msg ("\n\n");
 
-  if (ae.is_invalid ())
+  if (ae.is_invalid () && addr_rtx ())
     find_regs_used_in_rtx (addr_rtx (),
                            std::inserter (used_regs, used_regs.begin ()));
   else {
@@ -3332,7 +3332,21 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                          hard_addr_regs.begin ();
                        it != hard_addr_regs.end (); ++it)
                     {
+                      rtx reg = it->first;
                       access* acc = it->second;
+
+                      // If the function clobbers the reg, add a
+                      // reg <- invalid_regno reg_mod access so that
+                      // AMS is aware of this.
+                      if (reg_set_p (reg, i))
+                        {
+                          acc->set_invalid_at_end ();
+                          add_reg_mod (next,
+                                       make_invalid_addr (),
+                                       make_invalid_addr (),
+                                       NULL, acc->address_reg (),
+                                       0, false, false);
+                        }
 
                       if (!acc->valid_at_end () || acc->address ().is_invalid ())
                         continue;
@@ -3344,7 +3358,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                           && ae.base_reg () == acc->address_reg ())
                         continue;
 
-                      if (find_reg_fusage (i, USE, it->first))
+                      if (find_reg_fusage (i, USE, reg))
                         add_reg_mod (next,
                                      make_invalid_addr (),
                                      acc->address (),
