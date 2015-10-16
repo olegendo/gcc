@@ -822,9 +822,14 @@ void sh_ams::access
   log_access (*acc);
   log_msg ("\n\n");
 
-  if (ae.is_invalid () && addr_rtx ())
-    find_regs_used_in_rtx (addr_rtx (),
-                           std::inserter (used_regs, used_regs.begin ()));
+  if (ae.is_invalid ())
+    {
+      if (addr_rtx ())
+        find_regs_used_in_rtx (addr_rtx (),
+                               std::inserter (used_regs, used_regs.begin ()));
+      else
+        return;
+    }
   else {
     if (ae.has_base_reg ())
       used_regs.insert (ae.base_reg ());
@@ -1095,6 +1100,7 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
           // sequence, don't add it a second time.
           if (as_it->access_type () == reg_mod
               && as_it->insn () == mod_insn
+              && !as_it->original_address ().is_invalid ()
               && regs_equal (as_it->address_reg (), reg)
               && as_it->original_address ().base_reg ()
                   == original_addr_expr.base_reg ())
@@ -2142,7 +2148,8 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 
       // Remove any unused reg <- constant copy that might have been
       // added while trying different accesses.
-      if (accs->original_address ().has_no_base_reg ()
+      if (!accs->original_address ().is_invalid ()
+	  && accs->original_address ().has_no_base_reg ()
 	  && accs->original_address ().has_no_index_reg ())
 	{
 	  if (!reg_used_in_sequence (accs->address_reg (),
@@ -3288,6 +3295,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
           // Don't add it if there's already an entry and this reg_mod
           // only sets the reg to itself.
           if (prev_values.first == prev_values.second
+              || accs->original_address ().is_invalid ()
               || accs->original_address ().has_index_reg ()
               || accs->original_address ().has_disp ()
               || accs->original_address ().base_reg () != accs->address_reg ()
