@@ -3342,6 +3342,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                   && GET_CODE (i) == CALL_INSN)
                 {
                   std::map<rtx, access*>::iterator addr_reg;
+                  rtx prev_reg = NULL;
                   for (addr_reg_map::iterator it =
                          hard_addr_regs.begin ();
                        it != hard_addr_regs.end (); ++it)
@@ -3352,7 +3353,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                       // If the function clobbers the reg, add a
                       // reg <- invalid_regno reg_mod access so that
                       // AMS is aware of this.
-                      if (reg_set_p (reg, i))
+                      if (!regs_equal (reg, prev_reg) && reg_set_p (reg, i))
                         {
                           acc->set_invalid_at_end ();
                           add_reg_mod (next,
@@ -3361,6 +3362,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                                        NULL, acc->address_reg (),
                                        0, false, false);
                         }
+                      prev_reg = reg;
 
                       if (!acc->valid_at_end () || acc->address ().is_invalid ())
                         continue;
@@ -3410,10 +3412,14 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
   find_addr_regs ();
 
   std::vector<access*> inserted_reg_mods;
+  rtx prev_reg = NULL;
   for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
       rtx reg = it->first;
+      if (regs_equal (reg, prev_reg))
+        continue;
+      prev_reg = reg;
 
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
@@ -3543,11 +3549,17 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
     return;
 
   // Add trailing address reg uses to the end of the sequence.
+  rtx prev_reg = NULL;
   for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
+      rtx reg = it->first;
+      if (regs_equal (reg, prev_reg))
+        continue;
+      prev_reg = reg;
+
       used_regs.clear ();
-      collect_addr_reg_uses (*this, it->first, last_insn, NULL,
+      collect_addr_reg_uses (*this, reg, last_insn, NULL,
                              std::back_inserter (used_regs),
                              false, false, true);
 
