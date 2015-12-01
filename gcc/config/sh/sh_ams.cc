@@ -2348,6 +2348,12 @@ sh_ams::access_sequence::gen_mod_for_alt (access::alternative& alternative,
 					  mod_tracker& mod_tracker,
 					  delegate& dlg)
 {
+  machine_mode acc_mode = Pmode;
+  if (acc->access_type () == reg_mod)
+    acc_mode = GET_MODE (acc->address_reg ());
+  else if (acc->access_type () == reg_use)
+    acc_mode = GET_MODE (acc->original_address ().base_reg ());
+
   // Insert the modifications needed to arrive at the address
   // in the base reg.
   mod_addr_result base_insert_result =
@@ -2355,9 +2361,7 @@ sh_ams::access_sequence::gen_mod_for_alt (access::alternative& alternative,
                      alternative.address ().disp_min (),
                      alternative.address ().disp_max (),
                      alternative.address ().type (),
-                     acc->access_type () == reg_mod ?
-                       GET_MODE (acc->address_reg ()) : Pmode,
-                     acc, mod_tracker, dlg);
+                     acc_mode, acc, mod_tracker, dlg);
 
   const addr_expr& ae = acc->address ();
   addr_expr new_addr_expr;
@@ -2375,9 +2379,7 @@ sh_ams::access_sequence::gen_mod_for_alt (access::alternative& alternative,
         try_modify_addr (start_index, end_index,
                          0, 0,
                          alternative.address ().type (),
-                         acc->access_type () == reg_mod ?
-                           GET_MODE (acc->address_reg ()) : Pmode,
-                         acc, mod_tracker, dlg);
+                         acc_mode, acc, mod_tracker, dlg);
       new_addr_expr = non_mod_addr (base_insert_result.addr_reg,
                                     index_insert_result.addr_reg, 1, 0);
     }
@@ -2891,8 +2893,11 @@ sh_ams::access_sequence
   int min_cost = infinite_costs;
   access* min_start_addr = NULL;
   mod_tracker tracker;
-  machine_mode acc_mode = acc->access_type () == reg_mod ?
-    GET_MODE (acc->address_reg ()) : Pmode;
+  machine_mode acc_mode = Pmode;
+  if (acc->access_type () == reg_mod)
+    acc_mode = GET_MODE (acc->address_reg ());
+  else if (acc->access_type () == reg_use)
+    acc_mode = GET_MODE (acc->original_address ().base_reg ());
 
   std::list<access*> start_addrs =
     start_addresses ().get_relevant_addresses (end_addr);
