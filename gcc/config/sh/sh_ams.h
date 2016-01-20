@@ -95,7 +95,6 @@ public:
 
   class access;
   class access_sequence;
-  class shared_insn;
   struct delegate;
 
   // Comparison struct for sets and maps containing reg rtx-es.
@@ -412,7 +411,7 @@ public:
 	    addr_expr original_addr_expr, addr_expr addr_expr,
 	    bool should_optimize, int cost = infinite_costs);
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
-	    rtx addr_rtx, rtx mod_reg, int cost, bool removable);
+	    rtx addr_rtx, rtx mod_reg, int cost);
     access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
             rtx* reg_ref, addr_expr original_addr_expr,
 	    addr_expr addr_expr, int cost);
@@ -450,11 +449,6 @@ public:
     // the insn where this access occurs.
     rtx_insn* insn (void) const { return m_insn; }
 
-    // for address modifying accesses, shows how many other accesses
-    // share the same insn as this access
-    shared_insn* mod_insn (void) const { return m_mod_insn; }
-    void set_mod_insn (shared_insn* mod_insn) {m_mod_insn = mod_insn; }
-
     // returns the rtx inside the insn that this access refers to.
     // for mem accesses it will be the address expression inside the mem.
     // for reg mods it will be the set source rtx.
@@ -464,15 +458,6 @@ public:
     // Returns the address rtx if the address expression can't be described
     // with an addr_expr, or null if the address is unknown.
     rtx addr_rtx (void) const { return m_addr_rtx; }
-
-    // For reg_mod accesses, returns true if the access can be removed during
-    // gen_address_mod.  Set to true for most of the reg_mod accesses
-    // found in the original insn list.
-    bool removable (void) const { return m_removable; }
-
-    void mark_unremovable (void);
-    void mark_dependent_mods_unremovable (access_sequence& as,
-                                          std::list<access>::iterator acc);
 
     // If false, AMS skips this access when optimizing.
     bool should_optimize (void) const { return m_should_optimize; }
@@ -551,10 +536,8 @@ public:
     addr_space_t m_addr_space;
     int m_cost;
     rtx_insn* m_insn;
-    shared_insn* m_mod_insn;
     std::vector<rtx_insn*> m_trailing_insns;
     rtx* m_mem_ref; // reference to the mem rtx inside the insn.
-    bool m_removable;
     bool m_should_optimize;
     rtx m_addr_rtx;
     rtx m_addr_reg;
@@ -605,8 +588,7 @@ public:
 
     void gen_address_mod (delegate& dlg, int base_lookahead);
 
-    void update_insn_stream (std::list<shared_insn>& shared_insn_list,
-			     bool allow_mem_addr_change_new_insns);
+    void update_insn_stream (bool allow_mem_addr_change_new_insns);
     bool modify_insns (void) const { return m_modify_insns; }
     void set_modify_insns (bool mod) { m_modify_insns = mod; }
 
@@ -636,22 +618,22 @@ public:
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
                  const addr_expr& addr_expr, rtx addr_rtx,
                  rtx_insn* mod_insn, rtx reg,
-                 int cost = infinite_costs, bool removable = false);
+                 int cost = infinite_costs);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
                  const addr_expr& addr_expr, rtx_insn* mod_insn,
-                 rtx reg, int cost = infinite_costs, bool removable = false);
+                 rtx reg, int cost = infinite_costs);
 
     access&
     add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn,
-                 rtx reg, int cost = infinite_costs, bool removable = false);
+                 rtx reg, int cost = infinite_costs);
 
     access&
     add_reg_mod (access_sequence::iterator insert_before,
                  const addr_expr& original_addr_expr,
                  const addr_expr& addr_expr, rtx_insn* mod_insn,
-                 rtx reg, int cost = infinite_costs, bool removable = false,
+                 rtx reg, int cost = infinite_costs,
 		 bool use_as_start_addr = true);
 
     access&
@@ -676,19 +658,7 @@ public:
     std::list<access>& accesses (void) { return m_accs; }
     const std::list<access>& accesses (void) const { return m_accs; }
 
-    // The address modifying insns of this access sequence,
-    // which might be shared by other accesses.
-    // Used to delete the original insns in update_insn_stream.
-    // Multiple access sequences might share the same insns, so this
-    // is stored externally.
-    std::vector<shared_insn*>& mod_insns (void) { return m_mod_insns; }
-
-    void release_mod_insns (void);
-
-    shared_insn* create_mod_insn (rtx_insn* insn,
-                                  std::list<shared_insn>& shared_insn_list);
-
-    typedef std::multimap<rtx, access*, cmp_by_regno> addr_reg_map;
+    typedef std::multimap<rtx, access_sequence::iterator, cmp_by_regno> addr_reg_map;
 
     // A map containing the address regs of the sequence and the last
     // reg_mod access that modified them.
@@ -700,16 +670,17 @@ public:
     {
     public:
 
-      std::list<access*>
+      typedef std::list<access_sequence::iterator>::iterator iterator;
+      std::list<sh_ams::access_sequence::iterator>
       get_relevant_addresses (const addr_expr& end_addr);
 
-      void add (access* start_addr);
-      void remove (access* start_addr);
+      void add (access_sequence::iterator start_addr);
+      void remove (access_sequence::iterator start_addr);
 
     private:
 
       // List of addresses that only have a constant displacement.
-      std::list<access*> m_const_addresses;
+      std::list<access_sequence::iterator> m_const_addresses;
 
       // A map for storing addresses that have a base and/or index reg.
       // The key of each stored address is its base or index reg (the
@@ -773,11 +744,13 @@ public:
             std::bind1st (std::mem_fun (&access_sequence::remove_access), &as));
         inserted_accs ().clear ();
 
-        std::for_each (use_changed_accs ().rbegin (), use_changed_accs ().rend (),
-            std::mem_fun (&access::set_unused));
+        for (std::vector<access_sequence::iterator>::iterator
+               it = use_changed_accs ().begin ();
+             it != use_changed_accs ().end (); ++it)
+          (*it)->set_unused ();
         use_changed_accs ().clear ();
 
-        for (std::vector<std::pair <access* , bool> >::reverse_iterator
+        for (std::vector<std::pair <access_sequence::iterator, bool> >::reverse_iterator
                it = usable_changed_accs ().rbegin ();
              it != usable_changed_accs ().rend (); ++it)
           {
@@ -788,7 +761,7 @@ public:
           }
         usable_changed_accs ().clear ();
 
-        for (std::vector<std::pair <access*, addr_expr> >::reverse_iterator
+        for (std::vector<std::pair <access_sequence::iterator, addr_expr> >::reverse_iterator
                it = addr_changed_accs ().rbegin ();
              it != addr_changed_accs ().rend (); ++it)
           it->first->set_original_address (0, it->second);
@@ -800,24 +773,24 @@ public:
       inserted_accs (void) { return m_inserted_accs; }
 
       // List of accesses whose M_USED field was changed.
-      std::vector<access*>&
+      std::vector<access_sequence::iterator>&
       use_changed_accs (void) { return m_use_changed_accs; }
 
       // List of accesses whose M_USABLE field was changed,
       // along with their previous values.
-      std::vector<std::pair<access*, bool> >&
+      std::vector<std::pair<access_sequence::iterator, bool> >&
       usable_changed_accs (void) { return m_usable_changed_accs; }
 
       // List of accesses whose M_ORIGINAL_ADDR_EXPR changed, along
       // with their previous values.
-      std::vector<std::pair <access* , addr_expr> >&
+      std::vector<std::pair <access_sequence::iterator, addr_expr> >&
       addr_changed_accs (void) { return m_addr_changed_accs; }
 
     private:
       std::vector<access_sequence::iterator> m_inserted_accs;
-      std::vector<access*> m_use_changed_accs;
-      std::vector<std::pair<access*, bool> > m_usable_changed_accs;
-      std::vector<std::pair <access* , addr_expr> > m_addr_changed_accs;
+      std::vector<access_sequence::iterator> m_use_changed_accs;
+      std::vector<std::pair<access_sequence::iterator, bool> > m_usable_changed_accs;
+      std::vector<std::pair <access_sequence::iterator, addr_expr> > m_addr_changed_accs;
     };
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
@@ -830,8 +803,8 @@ public:
                      bool record_in_sequence);
 
     void gen_mod_for_alt (access::alternative& alternative,
-			  access* start_base,
-			  access* start_index,
+			  access_sequence::iterator start_base,
+			  access_sequence::iterator start_index,
 			  const addr_expr& end_base,
 			  const addr_expr& end_index,
 			  access_sequence::iterator acc,
@@ -841,12 +814,12 @@ public:
     struct min_mod_cost_result
     {
       int cost;
-      access* min_start_addr;
+      access_sequence::iterator min_start_addr;
 
       min_mod_cost_result (void)
-      : cost (infinite_costs), min_start_addr (NULL) { }
+      : cost (infinite_costs) { }
 
-      min_mod_cost_result (int c, access* a)
+      min_mod_cost_result (int c, access_sequence::iterator a)
       : cost (c), min_start_addr (a) { }
     };
 
@@ -876,36 +849,17 @@ public:
     };
 
     mod_addr_result
-    try_modify_addr (access* start_addr, const addr_expr& end_addr,
+    try_modify_addr (access_sequence::iterator start_addr, const addr_expr& end_addr,
 		     disp_t disp_min, disp_t disp_max, addr_type_t addr_type,
 		     machine_mode mode,
-		     access_sequence::iterator &acc,
+		     access_sequence::iterator acc,
 		     mod_tracker &mod_tracker,
 		     delegate& dlg);
 
     std::list<access> m_accs;
     addr_reg_map m_addr_regs;
     start_addr_list m_start_addr_list;
-    std::vector<shared_insn*> m_mod_insns;
     bool m_modify_insns;
-  };
-
-  // A structure used to store an insn which might be
-  // shared between multiple access sequences.
-  class shared_insn
-  {
-  public:
-    shared_insn (rtx_insn* i) : m_use_count (0), m_insn (i) {}
-
-    void use (void) { ++m_use_count; }
-    void release (void) { --m_use_count; }
-    bool is_used (void) { return (m_use_count > 0); }
-
-    rtx_insn* insn (void) { return m_insn; };
-
-  private:
-    int m_use_count;
-    rtx_insn* m_insn;
   };
 
   // a delegate for the ams pass.  usually implemented by the target.
