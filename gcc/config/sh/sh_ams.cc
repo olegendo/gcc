@@ -484,9 +484,10 @@ registers_match (rtx a, rtx b)
   return REGNO (a) == REGNO (b);
 }
 
-void
+bool
 remove_incdec_notes (rtx_insn* i)
 {
+  bool found = false;
   for (bool retry = true; retry; )
     {
       retry = false;
@@ -494,10 +495,12 @@ remove_incdec_notes (rtx_insn* i)
 	if (REG_NOTE_KIND (note) == REG_INC)
 	  {
 	    remove_note (i, note);
+            found = true;
 	    retry = true;
 	    break;
 	  }
     }
+  return found;
 }
 
 void
@@ -1335,7 +1338,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
       // looking for the address at the time the memory access happens.
       const bool use_post_disp =
         !expand_regs || !last_access_i
-        || search_start_i != PREV_INSN (last_access_i);
+        || search_start_i != prev_nonnote_insn_bb (last_access_i);
 
       switch (code)
         {
@@ -2530,13 +2533,25 @@ sh_ams::access_sequence
 
 	  // If the original access used an auto-mod addressing mode,
 	  // remove the original REG_INC note.
+          // Also add a reg_mod after the mem access that replicates the
+          // address reg modification in case it's used somewhere else later.
 	  // FIXME: Maybe remove only the notes for the particular regs
 	  // instead of removing them all?  Might be interesting for multi-mem
 	  // insns (which we don't handle right now at all).
-	  remove_incdec_notes (accs->insn ());
+          if (remove_incdec_notes (accs->insn ()))
+            {
+              rtx mem = accs->addr_rtx_in_insn ();
+              addr_expr auto_mod_expr = extract_addr_expr ((XEXP (mem, 0)),
+                                                           GET_MODE (mem));
+              auto_mod_expr = non_mod_addr (auto_mod_expr.base_reg (),
+                                            invalid_regno,
+                                            1, auto_mod_expr.disp ());
+              add_reg_mod (stdx::next (accs),
+                           auto_mod_expr, auto_mod_expr, NULL,
+                           auto_mod_expr.base_reg (), 0);
+            }
 
-	  if (!accs->set_insn_mem_rtx (new_addr,
-				       allow_mem_addr_change_new_insns))
+	  if (!accs->set_insn_mem_rtx (new_addr, allow_mem_addr_change_new_insns))
 	    {
 	      log_msg ("failed to replace mem rtx\n");
 	      log_rtx (accs->addr_rtx_in_insn ());
