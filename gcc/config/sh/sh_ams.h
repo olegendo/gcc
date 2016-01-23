@@ -449,6 +449,13 @@ public:
     // the insn where this access occurs.
     rtx_insn* insn (void) const { return m_insn; }
 
+    // for reg_mod accesses, the insn before or after which the access' insn
+    // should be emitted during the insn update.
+    rtx_insn* emit_before_insn (void) const { return m_emit_before_insn; }
+    void set_emit_before_insn (rtx_insn* i) { m_emit_before_insn = i; }
+    rtx_insn* emit_after_insn (void) const { return m_emit_after_insn; }
+    void set_emit_after_insn (rtx_insn* i) { m_emit_after_insn = i; }
+
     // returns the rtx inside the insn that this access refers to.
     // for mem accesses it will be the address expression inside the mem.
     // for reg mods it will be the set source rtx.
@@ -534,6 +541,8 @@ public:
     addr_space_t m_addr_space;
     int m_cost;
     rtx_insn* m_insn;
+    rtx_insn* m_emit_before_insn;
+    rtx_insn* m_emit_after_insn;
     std::vector<rtx_insn*> m_trailing_insns;
     rtx* m_mem_ref; // reference to the mem rtx inside the insn.
     bool m_should_optimize;
@@ -650,8 +659,8 @@ public:
     access_sequence::iterator
     remove_access (access_sequence::iterator acc);
 
-    // returns the basic block of the first insn in the access sequence.
     basic_block start_bb (void) const;
+    rtx_insn* start_insn (void) const;
 
     std::list<access>& accesses (void) { return m_accs; }
     const std::list<access>& accesses (void) const { return m_accs; }
@@ -774,6 +783,8 @@ public:
     };
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
+
+    void gen_reg_mod_insns (access& acc);
 
     int gen_min_mod (filter_iterator<iterator, access_to_optimize> acc,
                      delegate& dlg, int lookahead_num,

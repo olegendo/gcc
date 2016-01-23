@@ -265,6 +265,13 @@ log_access (const sh_ams::access& a, bool log_alternatives = true)
   else
     log_msg ("\n  cost: %d", a.cost ());
 
+  if (a.emit_before_insn ())
+    log_msg ("\n  emit before insn %d [bb %d]", INSN_UID (a.emit_before_insn ()),
+             BLOCK_FOR_INSN (a.emit_before_insn ())->index);
+  if (a.emit_after_insn ())
+    log_msg ("\n  emit after insn %d [bb %d]", INSN_UID (a.emit_after_insn ()),
+             BLOCK_FOR_INSN (a.emit_after_insn ())->index);
+
   if (!a.should_optimize ())
     log_msg ("\n  (won't be optimized)");
   if (a.is_trailing ())
@@ -738,6 +745,8 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_addr_space = MEM_ADDR_SPACE (*mem);
   m_cost = cost;
   m_insn = insn;
+  m_emit_before_insn = NULL;
+  m_emit_after_insn = NULL;
   m_mem_ref = mem;
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
@@ -759,6 +768,8 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_access_type = reg_mod;
   m_cost = cost;
   m_insn = insn;
+  m_emit_before_insn = NULL;
+  m_emit_after_insn = NULL;
   m_mem_ref = NULL;
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
@@ -781,6 +792,8 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_access_type = reg_use;
   m_cost = cost;
   m_insn = insn;
+  m_emit_before_insn = NULL;
+  m_emit_after_insn = NULL;
   m_trailing_insns = trailing_insns;
   m_mem_ref = reg_ref;
   m_original_addr_expr = original_addr_expr;
@@ -1150,13 +1163,26 @@ struct sh_ams::access_to_optimize
   }
 };
 
+// The basic block of the first insn in the access sequence.
 basic_block
 sh_ams::access_sequence::start_bb (void) const
 {
   for (const_iterator a = accesses ().begin (); a != accesses ().end (); ++a)
     {
-      if (a->insn ())
+      if (a->insn () && BLOCK_FOR_INSN (a->insn ()))
         return BLOCK_FOR_INSN (a->insn ());
+    }
+  gcc_unreachable ();
+}
+
+// The first insn in the access sequence.
+rtx_insn*
+sh_ams::access_sequence::start_insn (void) const
+{
+  for (const_iterator a = accesses ().begin (); a != accesses ().end (); ++a)
+    {
+      if (a->insn ())
+        return a->insn ();
     }
   gcc_unreachable ();
 }
@@ -1415,19 +1441,21 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
           // and convert it to an addr_expr.
           find_reg_value_result r = find_reg_value (x, search_start_i);
 
-          // Stop expanding the reg if we reach a hardreg -> pseudo reg
-          // copy, or if the reg can't be expanded any further.
-          if (r.value != NULL_RTX && REG_P (r.value)
-              && (regs_equal (r.value, x)
-                  || HARD_REGISTER_P (r.value)))
+          // Stop expanding the reg if the reg can't be expanded any further.
+          if (r.value != NULL_RTX && REG_P (r.value) && regs_equal (r.value, x))
             {
               // Add to the sequence's start a reg_mod access that sets
               // the reg to itself. This will be used by the address
               // modification generator as a starting address.
               if (last_access_i)
-                as->add_reg_mod (last_access_i,
-                                 make_reg_addr (x), make_reg_addr (x),
-                                 NULL, x);
+                {
+                  access* new_reg_mod
+                    = &as->add_reg_mod (last_access_i,
+                                        make_reg_addr (x), make_reg_addr (x),
+                                        NULL, x);
+                  inserted_reg_mods.push_back (new_reg_mod);
+                }
+
               return make_reg_addr (x);
             }
 
@@ -1478,16 +1506,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
           // reg instead.
           if (reg_addr_expr.is_invalid ()
               || original_reg_addr_expr.is_invalid ())
-            {
-              // Add an (rx = rx) reg_mod access to be used as
-              // a starting address by gen_addr_mod.
-              if (last_access_i)
-                as->add_reg_mod (last_access_i,
-                                 make_reg_addr (x), make_reg_addr (x),
-                                 NULL, x);
-
-              return make_reg_addr (x);
-            }
+            return make_reg_addr (x);
 
           return reg_addr_expr;
         }
@@ -2015,8 +2034,28 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
           if (!ae.is_invalid () && ae.has_base_reg ()
               && ae.has_no_index_reg () && ae.has_no_disp ()
               && regs_equal (ae.base_reg (), accs->address_reg ()))
-            add_reg_mod (accs, ae, ae, NULL,
-                         gen_reg_rtx (GET_MODE (accs->address_reg ())), 0);
+            {
+              access& reg_clone_acc
+                = add_reg_mod (accs, ae, ae, NULL,
+                               gen_reg_rtx (GET_MODE (accs->address_reg ())), 0);
+
+              // The cloning should happen before any other
+              // address reg modification.
+              reg_clone_acc.set_emit_before_insn (start_insn ());
+            }
+          // Also clone the addr regs that get set to an unknown value.
+          else if (ae.is_invalid () || accs->original_address ().is_invalid ())
+            {
+              access& reg_clone_acc
+                = add_reg_mod (accs, make_reg_addr (accs->address_reg ()),
+                               make_reg_addr (accs->address_reg ()), NULL,
+                               gen_reg_rtx (GET_MODE (accs->address_reg ())), 0);
+
+              // In this case, the cloning should happen after the reg is set.
+              if (!accs->emit_after_insn ())
+                reg_clone_acc.set_emit_after_insn (accs->insn ());
+            }
+
           accs = remove_access (accs);
         }
     }
@@ -2359,7 +2398,52 @@ sh_ams::access_sequence
     {
       if (accs->insn ())
         last_insn = accs->insn ();
+    }
 
+  if (!last_insn)
+    {
+      log_msg ("Skipping insn gen as the sequence doesn't have any insns\n");
+      return;
+    }
+
+  // First, add the insns of the accesses that must go strictly
+  // before/after another insn.
+  for (access_sequence::iterator accs = accesses ().begin ();
+       accs != accesses ().end (); ++accs)
+    {
+      if (accs->access_type () == reg_mod && !accs->is_trailing ()
+          && (accs->emit_before_insn () || accs->emit_after_insn ()))
+        {
+          start_sequence ();
+          gen_reg_mod_insns (*accs);
+          rtx_insn* new_insns = get_insns ();
+          end_sequence ();
+
+          if (accs->emit_before_insn ())
+            {
+              log_msg ("emitting new insns = \n");
+              log_rtx (new_insns);
+              log_msg ("\before insn\n");
+              log_insn (accs->emit_before_insn ());
+              log_msg ("\n");
+              emit_insn_before (new_insns, accs->emit_before_insn ());
+            }
+          else
+            {
+              log_msg ("emitting new insns = \n");
+              log_rtx (new_insns);
+              log_msg ("\nafter insn\n");
+              log_insn (accs->emit_after_insn ());
+              log_msg ("\n");
+              emit_insn_after (new_insns, accs->emit_after_insn ());
+            }
+        }
+    }
+
+  // Add the insns of the remaining accesses.
+  for (access_sequence::iterator accs = accesses ().begin ();
+       accs != accesses ().end (); ++accs)
+    {
       if (accs->is_trailing ())
         {
           log_msg ("skipping trailing access\n");
@@ -2397,22 +2481,11 @@ sh_ams::access_sequence
 
       if (accs->access_type () == reg_mod)
         {
-          // Skip accesses that don't modify anything
-          // and those that already have an insn.
-          if (accs->original_address ().base_reg () == accs->address_reg ()
-              && accs->original_address ().has_no_index_reg ()
-              && accs->original_address ().has_no_disp ())
-	    {
-	      log_msg ("skipping reg mod expr\n");
-	      log_addr_expr (accs->original_address ());
-	      log_msg ("\n");
-	      continue;
-	    }
           if (accs->insn ())
-	    {
-	      log_msg ("access already has an insn\n");
-	      continue;
-	    }
+            {
+              log_msg ("access already has an insn\n");
+              continue;
+            }
 
           if (!sequence_started)
             {
@@ -2420,52 +2493,7 @@ sh_ams::access_sequence
               sequence_started = true;
             }
 
-          // Insert an address modifying insn according to the reg-mod access.
-
-          rtx new_val;
-
-          if (accs->original_address ().has_no_base_reg ()
-              && accs->original_address ().has_no_index_reg ())
-	    {
-	      new_val = GEN_INT (accs->original_address ().disp ());
-	      log_msg ("reg mod new val (1) = ");
-	      log_rtx (new_val);
-	      log_msg ("\n");
-	    }
-          else
-            {
-              if (accs->original_address ().has_index_reg ())
-                {
-                  bool subtract = accs->original_address ().has_base_reg ()
-                                  && accs->original_address ().scale () == -1;
-                  rtx index = subtract ? accs->original_address ().index_reg ()
-                    : expand_mult (accs->original_address ().index_reg (),
-                                   accs->original_address ().scale ());
-
-                  if (accs->original_address ().has_no_base_reg ())
-                    new_val = index;
-                  else if (subtract)
-                    new_val = expand_minus (accs->original_address ().base_reg (),
-                                            index);
-                  else
-                    new_val = expand_plus (accs->original_address ().base_reg (),
-                                           index);
-                  log_msg ("reg mod new val (2) = ");
-                  log_rtx (new_val);
-                  log_msg ("\n");
-                }
-              else
-                {
-                  new_val = accs->original_address ().base_reg ();
-                  log_msg ("reg mod new val (3) = ");
-                  log_rtx (new_val);
-                  log_msg ("\n");
-                }
-
-              new_val = expand_plus (new_val, accs->original_address ().disp ());
-            }
-
-          accs->set_insn (emit_move_insn (accs->address_reg (), new_val));
+          gen_reg_mod_insns (*accs);
         }
       else if (accs->access_type () == reg_use)
         {
@@ -2520,7 +2548,7 @@ sh_ams::access_sequence
     }
 
   // Emit remaining address modifying insns after the last insn in the access.
-  if (sequence_started && last_insn)
+  if (sequence_started)
     {
       bool emit_after = (GET_CODE (last_insn) == INSN);
 
@@ -2540,14 +2568,58 @@ sh_ams::access_sequence
       else
         emit_insn_before (new_insns, last_insn);
     }
-  else if (sequence_started)
-    {
-      rtx_insn* new_insns = get_insns ();
-      end_sequence ();
+}
 
-      log_msg ("dropping new insns = \n");
-      log_rtx (new_insns);
+// Generate the address modifying insns of a reg_mod access.
+// Used by update_insn_stream.
+void
+sh_ams::access_sequence
+::gen_reg_mod_insns (access& acc)
+{
+  rtx new_val;
+
+  if (acc.original_address ().has_no_base_reg ()
+      && acc.original_address ().has_no_index_reg ())
+    {
+      new_val = GEN_INT (acc.original_address ().disp ());
+      log_msg ("reg mod new val (1) = ");
+      log_rtx (new_val);
+      log_msg ("\n");
     }
+  else
+    {
+      if (acc.original_address ().has_index_reg ())
+        {
+          bool subtract = acc.original_address ().has_base_reg ()
+            && acc.original_address ().scale () == -1;
+          rtx index = subtract ? acc.original_address ().index_reg ()
+            : expand_mult (acc.original_address ().index_reg (),
+                           acc.original_address ().scale ());
+
+          if (acc.original_address ().has_no_base_reg ())
+            new_val = index;
+          else if (subtract)
+            new_val = expand_minus (acc.original_address ().base_reg (),
+                                    index);
+          else
+            new_val = expand_plus (acc.original_address ().base_reg (),
+                                   index);
+          log_msg ("reg mod new val (2) = ");
+          log_rtx (new_val);
+          log_msg ("\n");
+        }
+      else
+        {
+          new_val = acc.original_address ().base_reg ();
+          log_msg ("reg mod new val (3) = ");
+          log_rtx (new_val);
+          log_msg ("\n");
+        }
+
+      new_val = expand_plus (new_val, acc.original_address ().disp ());
+    }
+
+  acc.set_insn (emit_move_insn (acc.address_reg (), new_val));
 }
 
 // Get the total cost of using this access sequence.
@@ -3168,7 +3240,7 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                           add_reg_mod (next,
                                        make_reg_addr (acc->address_reg ()),
                                        make_invalid_addr (),
-                                       NULL, acc->address_reg (),
+                                       i, acc->address_reg (),
                                        0, false);
                         }
                       prev_reg = reg;
@@ -3425,9 +3497,10 @@ sh_ams::access_sequence::find_reg_end_values (void)
               && acc->address ().base_reg () == acc->address_reg ()))
         continue;
 
-      add_reg_mod (accesses ().end (), make_invalid_addr (), acc->address (),
-                   NULL, acc->address_reg (),
-                   0, false);
+      access& new_reg_mod
+        = add_reg_mod (accesses ().end (), make_invalid_addr (), acc->address (),
+                       NULL, acc->address_reg (), 0, false);
+      new_reg_mod.set_emit_after_insn (acc->insn ());
     }
 }
 
