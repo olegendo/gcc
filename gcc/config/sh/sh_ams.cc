@@ -1030,11 +1030,17 @@ sh_ams::access_sequence::add_reg_mod (rtx_insn* insn,
           // sequence, don't add it a second time.
           if (as_it->access_type () == reg_mod
               && as_it->insn () == mod_insn
-              && !as_it->original_address ().is_invalid ()
-              && regs_equal (as_it->address_reg (), reg)
-              && as_it->original_address ().base_reg ()
-                  == original_addr_expr.base_reg ())
-            return *as_it;
+              && regs_equal (as_it->address_reg (), reg))
+            {
+              if (as_it->original_address ().is_invalid ())
+                {
+                  if (as_it->addr_rtx () == addr_rtx)
+                    return *as_it;
+                }
+              else if (as_it->original_address ().base_reg ()
+                        == original_addr_expr.base_reg ())
+                return *as_it;
+            }
 
         }
       if (as_it == accesses ().rend () || INSN_UID (i) == INSN_UID (mod_insn))
