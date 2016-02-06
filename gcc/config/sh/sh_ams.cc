@@ -2142,6 +2142,11 @@ gen_min_mod (filter_iterator<iterator, access_to_optimize> acc, delegate& dlg,
           || (alt_ae.has_index_reg () && alt_ae.scale () != 1))
         continue;
 
+      // Skip alternatives with concrete hardregs for now.
+      if ((alt_ae.has_base_reg () && alt_ae.base_reg () != any_regno)
+          || (alt_ae.has_index_reg () && alt_ae.index_reg () != any_regno))
+        continue;
+
       if (alt_ae.has_no_index_reg ())
         {
           // If the alternative only has one address register, it must
