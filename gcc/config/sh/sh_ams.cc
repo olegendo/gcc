@@ -1260,12 +1260,12 @@ sh_ams::find_reg_value_result sh_ams::find_reg_value (rtx reg, rtx_insn* insn)
   for (i = insn; i != NULL_RTX; i = prev_nonnote_insn_bb (i))
     {
       if (BARRIER_P (i))
-	break;
+	return find_reg_value_result (reg, NULL, i);
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
 
       if (reg_set_p (reg, i) && CALL_P (i))
-	break;
+	return find_reg_value_result (reg, NULL, i);
 
       std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
       if (r.second)
@@ -3237,18 +3237,9 @@ sh_ams::access_sequence::find_addr_regs (bool handle_call_used_regs)
                       rtx reg = it->first;
                       access_sequence::iterator acc = it->second;
 
-                      // If the function clobbers the reg, add a
-                      // reg <- invalid_regno reg_mod access so that
-                      // AMS is aware of this.
                       if (!regs_equal (reg, prev_reg) && reg_set_p (reg, i))
-                        {
-                          acc->set_invalid_at_end ();
-                          add_reg_mod (next,
-                                       make_reg_addr (acc->address_reg ()),
-                                       make_invalid_addr (),
-                                       i, acc->address_reg (),
-                                       0, false);
-                        }
+                        acc->set_invalid_at_end ();
+
                       prev_reg = reg;
 
                       if (!acc->valid_at_end () || acc->address ().is_invalid ())
