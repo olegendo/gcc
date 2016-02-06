@@ -2411,11 +2411,7 @@ sh_ams::access_sequence
         last_insn = accs->insn ();
     }
 
-  if (!last_insn)
-    {
-      log_msg ("Skipping insn gen as the sequence doesn't have any insns\n");
-      return;
-    }
+  gcc_assert (last_insn);
 
   // First, add the insns of the accesses that must go strictly
   // before/after another insn.
@@ -3839,7 +3835,17 @@ sh_ams::execute (function* fun)
       log_msg ("\n\n");
 
       if (as->accesses ().empty ())
-	continue;
+        {
+          log_msg ("skipping empty sequence\n");
+          continue;
+        }
+
+      typedef access_type_matches<load, store> mem_match;
+      if (as->begin<mem_match> () == as->end<mem_match> ())
+        {
+          log_msg ("skipping sequence as it contains no memory accesses\n");
+          continue;
+        }
 
       log_msg ("doing adjacency analysis\n");
       as->calculate_adjacency_info ();
