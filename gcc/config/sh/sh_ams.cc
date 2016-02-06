@@ -2413,10 +2413,12 @@ sh_ams::access_sequence
 
   gcc_assert (last_insn);
 
+  rtx_insn* bb_last_insn = BB_END (BLOCK_FOR_INSN (last_insn));
+
   // First, add the insns of the accesses that must go strictly
   // before/after another insn.
   for (access_sequence::iterator accs = accesses ().begin ();
-       accs != accesses ().end (); ++accs)
+       accs != accesses ().end ();)
     {
       if (accs->access_type () == reg_mod && !accs->is_trailing ()
           && (accs->emit_before_insn () || accs->emit_after_insn ()))
@@ -2430,12 +2432,12 @@ sh_ams::access_sequence
             {
               log_msg ("emitting new insns = \n");
               log_rtx (new_insns);
-              log_msg ("\before insn\n");
+              log_msg ("\nbefore insn\n");
               log_insn (accs->emit_before_insn ());
               log_msg ("\n");
               emit_insn_before (new_insns, accs->emit_before_insn ());
             }
-          else
+          else if (accs->emit_after_insn () != bb_last_insn)
             {
               log_msg ("emitting new insns = \n");
               log_rtx (new_insns);
@@ -2444,7 +2446,13 @@ sh_ams::access_sequence
               log_msg ("\n");
               emit_insn_after (new_insns, accs->emit_after_insn ());
             }
+          else
+            {
+              accs = remove_access (accs);
+              continue;
+            }
         }
+       ++accs;
     }
 
   // Add the insns of the remaining accesses.
