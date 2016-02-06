@@ -3011,11 +3011,14 @@ sh_ams::access_sequence
           mod_tracker.use_changed_accs ().push_back (start_addr);
         }
 
+      access_sequence::iterator base_reg_acc
+        = find_start_addr_for_reg (c_end_addr.index_reg ());
+
       new_reg = gen_reg_rtx (mode);
       access& new_addr = add_reg_mod (
                  acc,
                  non_mod_addr (start_addr->address_reg (),
-                               c_end_addr.index_reg (),
+                               base_reg_acc->address_reg (),
                                -1, 0),
                  c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
@@ -3028,6 +3031,15 @@ sh_ams::access_sequence
                                               start_addr->address_reg (),
                                               c_end_addr.index_reg ()),
                                 *this, acc);
+
+      if (!base_reg_acc->is_used ())
+        {
+          base_reg_acc->set_used ();
+          mod_tracker.use_changed_accs ().push_back (base_reg_acc);
+        }
+      else
+        cost += dlg.addr_reg_clone_cost (base_reg_acc->address_reg (), *this, acc);
+
       new_addr.set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = stdx::prev (acc);
@@ -3047,10 +3059,13 @@ sh_ams::access_sequence
           mod_tracker.use_changed_accs ().push_back (start_addr);
         }
 
+      access_sequence::iterator base_reg_acc
+        = find_start_addr_for_reg (c_start_addr.base_reg ());
+
       new_reg = gen_reg_rtx (mode);
       access& new_addr = add_reg_mod (
                  acc,
-                 non_mod_addr (c_start_addr.base_reg (),
+                 non_mod_addr (base_reg_acc->address_reg (),
                                start_addr->address_reg (), 1, 0),
                  c_start_addr, NULL, new_reg, 0);
       final_addr_regno = new_reg;
@@ -3063,6 +3078,14 @@ sh_ams::access_sequence
                                               start_addr->address_reg (),
                                               c_end_addr.base_reg ()),
                                 *this, acc);
+      if (!base_reg_acc->is_used ())
+        {
+          base_reg_acc->set_used ();
+          mod_tracker.use_changed_accs ().push_back (base_reg_acc);
+        }
+      else
+        cost += dlg.addr_reg_clone_cost (base_reg_acc->address_reg (), *this, acc);
+
       new_addr.set_cost (cost - prev_cost);
       prev_cost = cost;
       start_addr = stdx::prev (acc);
@@ -3158,7 +3181,32 @@ sh_ams::access_sequence
   return mod_addr_result (cost, final_addr_regno, c_start_addr.disp ());
 }
 
+// Find a starting address whose effective address is the single base reg REG.
+// If there are multiple such addresses, try to return one that wasn't used
+// before (so that there's no cloning cost when using it).
+sh_ams::access_sequence::iterator
+sh_ams::access_sequence::find_start_addr_for_reg (rtx reg)
+{
+  std::list<access_sequence::iterator> start_addrs =
+    start_addresses ().get_relevant_addresses (make_reg_addr (reg));
+  sh_ams::access_sequence::iterator found_acc = accesses ().end ();
 
+  for (start_addr_list::iterator it = start_addrs.begin ();
+       it != start_addrs.end (); ++it)
+    {
+      const addr_expr &ae = (*it)->address ();
+      if (!ae.is_invalid () && ae.has_no_index_reg ()
+          && regs_equal (ae.base_reg (), reg))
+        {
+          found_acc = *it;
+          if (!found_acc->is_used ())
+            break;
+        }
+    }
+
+  gcc_assert (found_acc != accesses ().end ());
+  return found_acc;
+}
 
 // Find all the address regs in the access sequence (i.e. the regs whose value
 // was changed by a reg_mod access) and place them into M_ADDR_REGS. Pair them

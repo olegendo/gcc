@@ -844,6 +844,8 @@ public:
 		     mod_tracker &mod_tracker,
 		     delegate& dlg);
 
+    access_sequence::iterator find_start_addr_for_reg (rtx reg);
+
     std::list<access> m_accs;
     addr_reg_map m_addr_regs;
     start_addr_list m_start_addr_list;
