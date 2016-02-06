@@ -3304,39 +3304,10 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
       // Trace back the address reg's value, inserting any missing
       // modification of this reg to the sequence.
       basic_block bb = start_bb ();
-      rtx_insn* end_insn = BB_END (bb);
 
-      while (end_insn)
-        {
-          inserted_reg_mods.clear ();
-          extract_addr_expr (reg, end_insn, BB_END (bb),
-                             Pmode, this, inserted_reg_mods);
-
-          if (inserted_reg_mods.empty ())
-            {
-              // If no modifications were found, continue the search from
-              // the insn where the register's value tracing ends.
-              rtx_insn* search_end_insn = find_reg_value (reg, end_insn).mod_insn;
-              end_insn = search_end_insn ? prev_nonnote_insn_bb (search_end_insn)
-                                         : NULL;
-            }
-          else
-            {
-              // Otherwise, continue the search from the insn of the
-              // inserted reg_mod.
-              end_insn = NULL;
-              for (std::vector<access*>::iterator mods = inserted_reg_mods.begin ();
-                   mods != inserted_reg_mods.end (); ++mods)
-                {
-                  access& acc = **mods;
-                  if (regs_equal (acc.address_reg (), reg) && acc.insn ())
-                    {
-                      end_insn = prev_nonnote_insn_bb (acc.insn ());
-                      break;
-                    }
-                }
-            }
-        }
+      inserted_reg_mods.clear ();
+      extract_addr_expr (reg, BB_END (bb), BB_END (bb),
+                         Pmode, this, inserted_reg_mods);
     }
 }
 
