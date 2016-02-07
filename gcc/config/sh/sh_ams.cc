@@ -751,7 +751,6 @@ sh_ams::access::access (rtx_insn* insn, rtx* mem, access_type_t access_type,
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
   m_addr_rtx = NULL;
-  m_valid_addr_expr = make_invalid_addr ();
   m_should_optimize = should_optimize;
   m_addr_reg = NULL;
   m_used = false;
@@ -774,7 +773,6 @@ sh_ams::access::access (rtx_insn* insn, addr_expr original_addr_expr,
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
   m_addr_rtx = addr_rtx;
-  m_valid_addr_expr = make_invalid_addr ();
   m_should_optimize = true;
   m_addr_reg = mod_reg;
   m_used = false;
@@ -799,7 +797,6 @@ sh_ams::access::access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
   m_original_addr_expr = original_addr_expr;
   m_addr_expr = addr_expr;
   m_addr_rtx = NULL;
-  m_valid_addr_expr = make_invalid_addr ();
   m_should_optimize = true;
   m_addr_reg = NULL;
   m_used = false;
@@ -864,20 +861,6 @@ sh_ams::access_sequence::add_mem_access (rtx_insn* insn, rtx* mem,
   accesses ().push_back (access (insn, mem, access_type,
                                  original_expr, expr, should_optimize));
   return accesses ().back ();
-}
-
-// Return a valid address even when the real effective address
-// is unknown/complicated.
-const sh_ams::addr_expr&
-sh_ams::access::valid_address (void)
-{
-  if (m_addr_expr.is_invalid () && m_addr_reg)
-    {
-      if (m_valid_addr_expr.is_invalid ())
-        m_valid_addr_expr = make_reg_addr (m_addr_reg);
-      return m_valid_addr_expr;
-    }
-  return m_addr_expr;
 }
 
 void
@@ -2342,20 +2325,20 @@ sh_ams::access_sequence::start_addr_list
 void
 sh_ams::access_sequence::start_addr_list::add (access_sequence::iterator start_addr)
 {
-  if (start_addr->valid_address ().is_invalid ())
+  if (start_addr->address ().is_invalid ())
     return;
 
   // If the address has a base or index reg, add it to M_REG_ADDRESSES.
-  if (start_addr->valid_address ().has_base_reg ())
-    m_reg_addresses.insert (std::make_pair (start_addr->valid_address ().base_reg (),
+  if (start_addr->address ().has_base_reg ())
+    m_reg_addresses.insert (std::make_pair (start_addr->address ().base_reg (),
                                             start_addr));
-  if (start_addr->valid_address ().has_index_reg ())
-    m_reg_addresses.insert (std::make_pair (start_addr->valid_address ().index_reg (),
+  if (start_addr->address ().has_index_reg ())
+    m_reg_addresses.insert (std::make_pair (start_addr->address ().index_reg (),
                                             start_addr));
 
   // Otherwise, add it to the constant list.
-  if (start_addr->valid_address ().has_no_base_reg ()
-      && start_addr->valid_address ().has_no_index_reg ())
+  if (start_addr->address ().has_no_base_reg ()
+      && start_addr->address ().has_no_index_reg ())
     m_const_addresses.push_back (start_addr);
 }
 
@@ -2364,10 +2347,10 @@ void sh_ams::access_sequence::
 start_addr_list::remove (access_sequence::iterator start_addr)
 {
   std::pair <addr_reg_map::iterator, addr_reg_map::iterator> matching_range;
-  if (start_addr->valid_address ().has_base_reg ())
+  if (start_addr->address ().has_base_reg ())
     {
       matching_range
-        = m_reg_addresses.equal_range (start_addr->valid_address ().base_reg ());
+        = m_reg_addresses.equal_range (start_addr->address ().base_reg ());
       for (addr_reg_map::iterator it = matching_range.first;
            it != matching_range.second; ++it)
         {
@@ -2378,10 +2361,10 @@ start_addr_list::remove (access_sequence::iterator start_addr)
             }
         }
     }
-  if (start_addr->valid_address ().has_index_reg ())
+  if (start_addr->address ().has_index_reg ())
     {
       matching_range
-        = m_reg_addresses.equal_range (start_addr->valid_address ().index_reg ());
+        = m_reg_addresses.equal_range (start_addr->address ().index_reg ());
       for (addr_reg_map::iterator it = matching_range.first;
            it != matching_range.second; ++it)
         {
@@ -2393,8 +2376,8 @@ start_addr_list::remove (access_sequence::iterator start_addr)
         }
     }
 
-  if (start_addr->valid_address ().has_no_base_reg ()
-      && start_addr->valid_address ().has_no_index_reg ())
+  if (start_addr->address ().has_no_base_reg ()
+      && start_addr->address ().has_no_index_reg ())
     m_const_addresses.remove (start_addr);
 }
 
@@ -2948,7 +2931,7 @@ sh_ams::access_sequence
 
   // Canonicalize the start and end addresses by converting
   // addresses of the form base+disp into index*1+disp.
-  addr_expr c_start_addr = start_addr->valid_address ();
+  addr_expr c_start_addr = start_addr->address ();
   addr_expr c_end_addr = end_addr;
   if (c_start_addr.has_no_index_reg ())
     c_start_addr = non_mod_addr (invalid_regno, c_start_addr.base_reg (), 1,

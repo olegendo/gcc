@@ -439,8 +439,6 @@ public:
     // ignore it.
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
 
-    const addr_expr& valid_address (void);
-
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
     addr_space_t addr_space (void) const { return m_addr_space; }
@@ -535,7 +533,6 @@ public:
   private:
     addr_expr m_original_addr_expr;
     addr_expr m_addr_expr;
-    addr_expr m_valid_addr_expr;
     access_type_t m_access_type;
     machine_mode m_machine_mode;
     addr_space_t m_addr_space;
