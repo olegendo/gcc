@@ -784,7 +784,11 @@ public:
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
 
-    void gen_reg_mod_insns (access& acc);
+    void visit_insns_until_next_acc (access_sequence::iterator acc,
+                                     std::set<rtx_insn*>& visited_insns,
+                                     rtx_insn* last_insn);
+
+    void gen_reg_mod_insn (access& acc);
 
     int gen_min_mod (filter_iterator<iterator, access_to_optimize> acc,
                      delegate& dlg, int lookahead_num,
