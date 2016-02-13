@@ -411,7 +411,7 @@ public:
 	    addr_expr original_addr_expr, addr_expr addr_expr,
 	    bool should_optimize, int cost = infinite_costs);
     access (rtx_insn* insn, addr_expr original_addr_expr, addr_expr addr_expr,
-	    rtx addr_rtx, rtx mod_reg, int cost);
+	    rtx addr_rtx, rtx alias_mod_reg, rtx real_mod_reg, int cost);
     access (rtx_insn* insn, std::vector<rtx_insn*> trailing_insns,
             rtx* reg_ref, addr_expr original_addr_expr,
 	    addr_expr addr_expr, int cost);
@@ -470,6 +470,10 @@ public:
 
     // For reg_mod accesses, returns the register rtx that is being modified.
     rtx address_reg (void) const { return m_addr_reg; }
+
+    // For reg_mod accesses that use an alias, returns the real address reg
+    // that appears in the insn stream.
+    rtx real_address_reg  (void) const { return m_real_addr_reg; }
 
     // For reg_mod accesses, tells whether the register is used in another
     // access or not.  If so, register cloning costs must be taken into
@@ -533,6 +537,7 @@ public:
   private:
     addr_expr m_original_addr_expr;
     addr_expr m_addr_expr;
+    addr_expr m_real_addr_expr;
     access_type_t m_access_type;
     machine_mode m_machine_mode;
     addr_space_t m_addr_space;
@@ -545,6 +550,7 @@ public:
     bool m_should_optimize;
     rtx m_addr_rtx;
     rtx m_addr_reg;
+    rtx m_real_addr_reg;
     bool m_used;
     bool m_visited;
     bool m_valid_at_end;
@@ -621,24 +627,31 @@ public:
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
                  const addr_expr& addr_expr, rtx addr_rtx,
-                 rtx_insn* mod_insn, rtx reg,
+                 rtx_insn* mod_insn, rtx reg, rtx real_reg,
                  int cost = infinite_costs);
 
     access&
     add_reg_mod (rtx_insn* insn, const addr_expr& original_addr_expr,
                  const addr_expr& addr_expr, rtx_insn* mod_insn,
-                 rtx reg, int cost = infinite_costs);
+                 rtx reg, rtx real_reg, int cost = infinite_costs);
 
     access&
     add_reg_mod (rtx_insn* insn, rtx addr_rtx, rtx_insn* mod_insn,
-                 rtx reg, int cost = infinite_costs);
+                 rtx reg, rtx real_reg, int cost = infinite_costs);
+
+    access&
+    add_reg_mod (access_sequence::iterator insert_before,
+                 const addr_expr& original_addr_expr,
+                 const addr_expr& addr_expr, rtx_insn* mod_insn,
+                 rtx reg, rtx real_reg, int cost = infinite_costs,
+		 bool use_as_start_addr = true);
 
     access&
     add_reg_mod (access_sequence::iterator insert_before,
                  const addr_expr& original_addr_expr,
                  const addr_expr& addr_expr, rtx_insn* mod_insn,
                  rtx reg, int cost = infinite_costs,
-		 bool use_as_start_addr = true);
+                 bool use_as_start_addr = true);
 
     access&
     add_reg_use (access_sequence::iterator insert_before,
@@ -696,6 +709,46 @@ public:
     // that they can be searched through efficiently when looking for possible
     // starting addresses to use for arriving at a given end address.
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
+
+    // A structure used to store the reg aliases.  A register gets an alias when
+    // it's set to an unknown value so that the reg that holds the new value
+    // can be distinguished from the reg that holds the old value when tracing
+    // back address expressions.
+    class reg_alias_list
+    {
+    public:
+
+      // Get the alias for REG, if any.
+      rtx get_alias (const rtx reg) const {
+        alias_map::const_iterator alias_reg = m_aliases.find (reg);
+        return (alias_reg == m_aliases.end ()) ? reg : alias_reg->second;
+      }
+
+      rtx substitute_regs_with_aliases (rtx x);
+      void add_alias_at_insn (rtx reg, rtx alias_reg, rtx_insn* insn);
+      void remove_aliases_between_insns (rtx_insn* start_insn,
+                                         rtx_insn* end_insn);
+      void add_aliases_between_insns (rtx_insn* start_insn,
+                                      rtx_insn* end_insn);
+
+    private:
+
+      struct alias_state_change
+      {
+        rtx reg, alias, prev_alias;
+        alias_state_change (rtx r, rtx a, rtx p)
+        : reg (r), alias (a), prev_alias (p) {}
+      };
+
+      typedef std::map<rtx, rtx, cmp_by_regno> alias_map;
+      typedef std::multimap<rtx_insn*, alias_state_change> state_change_map;
+
+      state_change_map m_state_changes;
+      alias_map m_aliases;
+    };
+
+    // The reg aliases in this sequence.
+    reg_alias_list& reg_aliases (void)  { return m_reg_alias_list; }
 
     // iterator decorator for iterating over different types of elements
     // in the access sequence.
@@ -850,6 +903,7 @@ public:
     std::list<access> m_accs;
     addr_reg_map m_addr_regs;
     start_addr_list m_start_addr_list;
+    reg_alias_list m_reg_alias_list;
     bool m_modify_insns;
   };
 
@@ -1042,19 +1096,18 @@ private:
 
   struct find_reg_value_result
   {
-    rtx reg;
     rtx value;
     rtx_insn* mod_insn;
     machine_mode auto_mod_mode;
 
     find_reg_value_result (void)
-    : reg (NULL), value (NULL), mod_insn (NULL), auto_mod_mode (Pmode) { }
+    : value (NULL), mod_insn (NULL), auto_mod_mode (Pmode) { }
 
-    find_reg_value_result (rtx r, rtx v, rtx_insn* i)
-    : reg (r), value (v), mod_insn (i), auto_mod_mode (Pmode) { }
+    find_reg_value_result (rtx v, rtx_insn* i)
+    : value (v), mod_insn (i), auto_mod_mode (Pmode) { }
 
-    find_reg_value_result (rtx r, rtx v, rtx_insn* i, machine_mode m)
-    : reg (r), value (v), mod_insn (i), auto_mod_mode (m) { }
+    find_reg_value_result (rtx v, rtx_insn* i, machine_mode m)
+    : value (v), mod_insn (i), auto_mod_mode (m) { }
   };
 
   static find_reg_value_result find_reg_value (rtx reg, rtx_insn* insn);
