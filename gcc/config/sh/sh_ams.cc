@@ -1320,12 +1320,16 @@ sh_ams::check_make_non_mod_addr (rtx base_reg, rtx index_reg,
 // from which the value-tracing starts and LAST_ACCESS_I should be the
 // insn where the sequence's last access occurs.
 // INSERTED_REG_MODS keeps track of the added reg_mod accesses.
+// APPLY_POST_DISP is true if the post-mod displacement of a register
+// should be applied (i.e. if we're interested in the reg's value after
+// and not during the access).
 sh_ams::addr_expr
 sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
                            rtx_insn *last_access_i,
 			   machine_mode mem_mach_mode,
 			   access_sequence* as,
-                           std::vector<access*>& inserted_reg_mods)
+                           std::vector<access*>& inserted_reg_mods,
+                           bool apply_post_disp)
 {
   const bool expand_regs = as != NULL;
 
@@ -1345,16 +1349,19 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
       op0 = extract_addr_expr (XEXP (x, 0), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
+                               mem_mach_mode, as, inserted_reg_mods,
+                               apply_post_disp);
       op1 = extract_addr_expr (XEXP (x, 1), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
+                               mem_mach_mode, as, inserted_reg_mods,
+                               apply_post_disp);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
       op1 = extract_addr_expr (XEXP (x, 0), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
+                               mem_mach_mode, as, inserted_reg_mods,
+                               apply_post_disp);
       if (op1.is_invalid ())
         return op1;
     }
@@ -1366,21 +1373,14 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
     {
       addr_type_t mod_type;
 
-      // If we're expanding the effective address of a reg inside a post-mod
-      // access, the post-mod displacement should not be applied if we're
-      // looking for the address at the time the memory access happens.
-      const bool use_post_disp =
-        !expand_regs || !last_access_i
-        || search_start_i != prev_nonnote_insn_bb (last_access_i);
-
       switch (code)
         {
         case POST_DEC:
-          disp = use_post_disp ? -GET_MODE_SIZE (mem_mach_mode) : 0;
+          disp = apply_post_disp ? -GET_MODE_SIZE (mem_mach_mode) : 0;
           mod_type = post_mod;
           break;
         case POST_INC:
-          disp = use_post_disp ? GET_MODE_SIZE (mem_mach_mode) : 0;
+          disp = apply_post_disp ? GET_MODE_SIZE (mem_mach_mode) : 0;
           mod_type = post_mod;
           break;
         case PRE_DEC:
@@ -1393,10 +1393,11 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
           break;
         case POST_MODIFY:
           {
-	    addr_expr a = extract_addr_expr (XEXP (x, use_post_disp ? 1 : 0),
+	    addr_expr a = extract_addr_expr (XEXP (x, apply_post_disp ? 1 : 0),
 					     search_start_i, last_access_i,
                                              mem_mach_mode,
-					     as, inserted_reg_mods);
+					     as, inserted_reg_mods,
+                                             apply_post_disp);
             if (a.is_invalid ())
               return make_invalid_addr ();
 	    return expand_regs ? a : post_mod_addr (a.base_reg (), a.disp ());
@@ -1406,7 +1407,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
             addr_expr a = extract_addr_expr (XEXP (x, 1),
                                              search_start_i, last_access_i,
 					     mem_mach_mode, as,
-					     inserted_reg_mods);
+					     inserted_reg_mods,
+                                             apply_post_disp);
             if (a.is_invalid ())
               return make_invalid_addr ();
 	    return expand_regs ? a : pre_mod_addr (a.base_reg (), a.disp ());
@@ -1417,7 +1419,8 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
         }
 
       op1 = extract_addr_expr (XEXP (x, 0), search_start_i, last_access_i,
-                               mem_mach_mode, as, inserted_reg_mods);
+                               mem_mach_mode, as, inserted_reg_mods,
+                               apply_post_disp);
       if (op1.is_invalid ())
         return op1;
 
@@ -1480,7 +1483,7 @@ sh_ams::extract_addr_expr (rtx x, rtx_insn* search_start_i,
              find_reg_note (r.mod_insn, REG_INC, NULL_RTX)
                ? r.auto_mod_mode
                : mem_mach_mode,
-             as, inserted_reg_mods);
+             as, inserted_reg_mods, true);
 
           // If the registers in r.value have aliases, use those instead.
           r.value = as->reg_aliases ().substitute_regs_with_aliases (r.value);
@@ -3509,7 +3512,7 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
 
   std::vector<access*> inserted_reg_mods;
   rtx prev_reg = NULL;
-  rtx_insn* last_insn = NEXT_INSN (stdx::prev (accesses ().end ())->insn ());
+  rtx_insn* last_insn = BB_END (start_bb ());
   for (addr_reg_map::iterator it = addr_regs ().begin ();
        it != addr_regs ().end (); ++it)
     {
@@ -3523,7 +3526,7 @@ sh_ams::access_sequence::add_missing_reg_mods (void)
 
       inserted_reg_mods.clear ();
       extract_addr_expr (reg, last_insn, last_insn,
-                         Pmode, this, inserted_reg_mods);
+                         Pmode, this, inserted_reg_mods, true);
     }
 }
 

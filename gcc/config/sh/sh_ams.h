@@ -1116,7 +1116,8 @@ private:
   static addr_expr
   extract_addr_expr (rtx x, rtx_insn* search_start_i, rtx_insn* last_access_i,
 		     machine_mode mem_mach_mode, access_sequence* as,
-		     std::vector<access*>& inserted_reg_mods);
+		     std::vector<access*>& inserted_reg_mods,
+                     bool apply_post_disp = false);
 
   static addr_expr
   extract_addr_expr (rtx x, rtx_insn* search_start_i, rtx_insn* last_access_i,
@@ -1130,7 +1131,9 @@ private:
   static addr_expr
   extract_addr_expr (rtx x, machine_mode mem_mach_mode = Pmode)
   {
-    return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL);
+    std::vector<access*> inserted_reg_mods;
+    return extract_addr_expr (x, NULL, NULL, mem_mach_mode, NULL,
+                              inserted_reg_mods, true);
   }
 
   static const pass_data default_pass_data;
