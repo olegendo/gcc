@@ -3563,6 +3563,7 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
   rtx_insn* first_insn = NULL;
   rtx_insn* last_insn = NULL;
   rtx_insn* prev_use_insn = NULL;
+  rtx_insn* skip_until_insn = NULL;
 
   find_addr_regs ();
 
@@ -3595,6 +3596,14 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
 
       if (!accs->insn ())
         continue;
+
+      if (skip_until_insn)
+        {
+          if (accs->insn () == skip_until_insn)
+            skip_until_insn = NULL;
+          else
+            continue;
+        }
 
       if (accs->access_type () == reg_use)
         continue;
@@ -3638,6 +3647,10 @@ sh_ams::access_sequence::find_reg_uses (delegate& dlg)
               access_sequence::iterator acc = stdx::prev (next_acc);
               acc->set_cost (dlg
                              .addr_reg_mod_cost (NULL, *use_ref, *this, acc));
+
+              // Skip reg_mods that were added while extracting the effective
+              // address.
+              skip_until_insn = use_insn;
             }
         }
     }
