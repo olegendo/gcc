@@ -1363,6 +1363,9 @@ sh_ams::access::set_validate_alternatives (bool val)
 inline bool
 sh_ams::adjacent_inc (const access& first, const access& second)
 {
+  if (first.address ().is_invalid () || second.address ().is_invalid ())
+    return false;
+
   // FIXME: This one checks for adjacent loads/stores only for now.
   // This will miss cases where reg uses are interleaved with loads/stores.
   std::pair<disp_t, bool> distance = second.address () - first.address ();
@@ -1379,6 +1382,9 @@ sh_ams::not_adjacent_inc (const access& first, const access& second)
 inline bool
 sh_ams::adjacent_dec (const access& first, const access& second)
 {
+  if (first.address ().is_invalid () || second.address ().is_invalid ())
+    return false;
+
   // FIXME: This one checks for adjacent loads/stores only for now.
   // This will miss cases where reg uses are interleaved with loads/stores.
   std::pair<disp_t, bool> distance = first.address () - second.address ();
