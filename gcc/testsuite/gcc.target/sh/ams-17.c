@@ -3,7 +3,7 @@
 /* { dg-do compile }  */
 /* { dg-options "-O2" }  */
 
-/* { dg-final { scan-assembler-times "shll2" 2 } }  */
+/* { dg-final { scan-assembler-times "shll2" 1 } }  */
 
 unsigned int
 test_00 (unsigned int* x, unsigned int* y, int i)
