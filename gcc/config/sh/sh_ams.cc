@@ -597,6 +597,7 @@ sh_ams::options::options (void)
   check_minimal_cost = true;
   check_original_cost = true;
   split_sequences = true;
+  remove_reg_copies = true;
   force_alt_validation = false;
   disable_alt_validation = false;
   cse = false;
@@ -649,6 +650,7 @@ sh_ams::options::options (const std::string& str)
   get_int_opt (cse2);
   get_int_opt (gcse);
   get_int_opt (allow_mem_addr_change_new_insns);
+  get_int_opt (remove_reg_copies);
 
 #undef get_int_opt
 
@@ -2061,6 +2063,14 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
           continue;
         }
 
+      // Also keep reg_mods where a register gets a new alias.
+      if (accs->address_reg () != accs->real_address_reg ()
+          && accs->original_address ().is_invalid () && ae.is_invalid ())
+        {
+          ++accs;
+          continue;
+        }
+
       // Clone the starting addresses into new registers.  These will be
       // used as the starting points of the address calculations.
       if (!ae.is_invalid () && ae.has_base_reg ()
@@ -2076,27 +2086,35 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
           reg_clone_acc.set_emit_before_insn (start_insn ());
         }
 
-      // When we reach a point where a reg gets an alias, add a reg_mod
-      // that actually copies the original reg into the the alias reg.
+      accs = remove_access (accs);
+    }
+
+  // Go through the reg_mods where registers get new aliases and add reg_mods
+  // that actually copy the original regs into the the alias regs.
+  for (reg_mod_iter accs = begin<reg_mod_match> (),
+       accs_end = end<reg_mod_match> (); accs != accs_end; ++accs)
+    {
+      const addr_expr& ae = accs->address ();
       if (accs->address_reg () != accs->real_address_reg ()
           && accs->original_address ().is_invalid () && ae.is_invalid ())
         {
+          // Make sure that the copy's insn gets placed right after the insn of
+          // the current access.
+          access_sequence::iterator insert_before
+            = stdx::next ((access_sequence::iterator) accs);
+          while (insert_before != accesses ().end ()
+                 && insert_before->insn () == accs->insn ())
+            ++insert_before;
+
           access& reg_clone_acc
-            = add_reg_mod (stdx::next ((access_sequence::iterator) accs),
+            = add_reg_mod (insert_before,
                            make_reg_addr (accs->real_address_reg ()),
                            make_reg_addr (accs->real_address_reg ()), NULL,
                            accs->address_reg (), 0, false);
 
-          // The cloning insns should be emitted right after the access
-          // (before the next insn).
           reg_clone_acc.set_emit_before_insn (NEXT_INSN (accs->insn ()));
           reg_clone_acc.set_emit_after_insn (accs->insn ());
-          ++accs;
-          ++accs;
-          continue;
         }
-
-      accs = remove_access (accs);
     }
 
   typedef filter_iterator<iterator, access_to_optimize> acc_opt_iter;
@@ -2331,6 +2349,165 @@ sh_ams::access_sequence::gen_mod_for_alt (access::alternative& alternative,
   mod_tracker.addr_changed_accs ()
     .push_back (std::make_pair (acc, acc->original_address ()));
   acc->set_original_address (alternative.cost (), new_addr_expr);
+}
+
+// Try to eliminate unnecessary reg -> reg copies in the sequence.
+// If an access uses a copied reg and neither the copy nor the original
+// reg gets modified up to that point, use the original reg instead.
+// If all instances of the copy reg can be removed this way, remove the
+// copying reg_mod too.
+void
+sh_ams::access_sequence::eliminate_reg_copies (void)
+{
+  typedef std::multimap<rtx, reg_copy, cmp_by_regno> reg_copy_map;
+  reg_copy_map reg_copies;
+  std::set<rtx_insn*> visited_insns;
+  rtx_insn* prev_acc_insn = BB_HEAD (start_bb ());
+
+  for (access_sequence::iterator acc = accesses ().begin ();
+       acc != accesses ().end (); ++acc)
+    {
+      if (acc->is_trailing ())
+        break;
+
+      rtx_insn *curr_acc_insn = NULL;
+
+      // Set CURR_ACC_INSN to ACC's insn, or the insn before which ACC will
+      // get inserted in update_insn_stream.
+      if (acc->insn ())
+        curr_acc_insn = acc->insn ();
+      else if (acc->emit_after_insn ()
+               && visited_insns.find (NEXT_INSN (acc->emit_after_insn ()))
+               == visited_insns.end ())
+        curr_acc_insn = NEXT_INSN (acc->emit_after_insn ());
+      else
+        {
+          for (access_sequence::iterator next_acc = stdx::next (acc);
+               next_acc != accesses ().end (); ++next_acc)
+            {
+              if (next_acc->insn ())
+                {
+                  curr_acc_insn = next_acc->insn ();
+                  break;
+                }
+              if (next_acc->emit_after_insn ()
+                  && visited_insns.find (NEXT_INSN (next_acc->emit_after_insn ()))
+                      == visited_insns.end ())
+                {
+                  curr_acc_insn = NEXT_INSN (next_acc->emit_after_insn ());
+                  break;
+                }
+            }
+        }
+
+      // Check if any reg copy got modified in the insns between the current
+      // and previous access.
+      for (rtx_insn* i = prev_acc_insn; i != curr_acc_insn; i = NEXT_INSN (i))
+        {
+          visited_insns.insert (i);
+          for (reg_copy_map::iterator it = reg_copies.begin ();
+               it != reg_copies.end (); ++it)
+            {
+              reg_copy& copy = it->second;
+              if (copy.reg_modified)
+                continue;
+
+              if (reg_set_p (copy.src, i) || reg_set_p (copy.dest, i))
+                copy.reg_modified = true;
+            }
+        }
+      prev_acc_insn = curr_acc_insn;
+
+      if (acc->access_type () == reg_mod)
+        {
+          // Check if the current reg_mod access modifies a reg copy.
+          reg_copy_map::iterator copy_in_map
+            = reg_copies.find (acc->address_reg ());
+          if (copy_in_map != reg_copies.end ())
+            copy_in_map->second.reg_modified = true;
+        }
+
+      addr_expr& addr = acc->original_address ();
+      if (!addr.is_invalid ())
+        {
+          if (acc->access_type () == load || acc->access_type () == store)
+            {
+              // Check if the current mem access modifies a reg copy with
+              // auto-inc/dec accesses.
+              if (addr.type () == post_mod || addr.type () == pre_mod)
+                {
+                  reg_copy_map::iterator copy_in_map
+                    = reg_copies.find (addr.base_reg ());
+                  if (copy_in_map != reg_copies.end ())
+                    copy_in_map->second.reg_modified = true;
+                }
+            }
+          else if (acc->access_type () == reg_mod)
+            {
+              // If this reg_mod is a reg <- reg copy, add it to the
+              // copies list.
+              if (addr.has_no_index_reg () && addr.has_no_disp ()
+                  && addr.has_base_reg ())
+                {
+                  reg_copy new_copy (addr.base_reg (), acc->address_reg (),
+                                     acc);
+                  reg_copies.insert (std::make_pair (acc->address_reg (),
+                                                     new_copy));
+                }
+            }
+
+          // If the current access' base or index reg is a copied reg that
+          // wasn't modified (and neither was the original reg), replace it
+          // with the original reg.
+          #define replace_reg_with_copy_src(REG) if (addr.has_##REG ()) \
+            { \
+              reg_copy_map::iterator copy_in_map \
+                = reg_copies.find(addr.REG ()); \
+              if (copy_in_map != reg_copies.end ()) \
+                { \
+                  reg_copy copy = copy_in_map->second; \
+                  if (!copy.reg_modified) \
+                    { \
+                      /* The original reg might itself be a copied reg, so \
+                         go backwards in the copy sequence until the last \
+                         unmodified reg. */ \
+                      for (reg_copy_map::iterator prev_copy_in_map \
+                             = copy_in_map; ; copy = prev_copy_in_map->second) \
+                        { \
+                          prev_copy_in_map = reg_copies.find(copy.src); \
+                          if (prev_copy_in_map == reg_copies.end ()) \
+                            break; \
+                          if (prev_copy_in_map->second.reg_modified) \
+                            { \
+                              prev_copy_in_map->second.can_be_removed = false; \
+                              break; \
+                            } \
+                        } \
+                      addr.set_##REG(copy.src); \
+                    } \
+                  else \
+                    { \
+                      /* If we couldn't eliminate this copy, don't remove \
+                         the copy reg_mod from the access sequence. */ \
+                      copy_in_map->second.can_be_removed = false; \
+                    } \
+                } \
+            }
+
+          replace_reg_with_copy_src(base_reg);
+          replace_reg_with_copy_src(index_reg);
+          #undef replace_reg_with_copy_src
+        }
+    }
+
+  // Remove all copies from the sequence that aren't used anymore.
+  for (reg_copy_map::iterator it = reg_copies.begin ();
+       it != reg_copies.end (); ++it)
+    {
+      reg_copy& copy = it->second;
+      if (copy.can_be_removed)
+        remove_access (copy.acc);
+    }
 }
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
@@ -4128,6 +4305,14 @@ sh_ams::execute (function* fun)
 
       log_msg ("gen_address_mod\n");
       as->gen_address_mod (m_delegate, m_options.base_lookahead_count);
+
+      if (m_options.remove_reg_copies)
+        {
+          log_access_sequence (*as, false);
+          log_msg ("\n");
+          log_msg ("removing unnecessary reg copies\n");
+          as->eliminate_reg_copies ();
+        }
 
       as->update_cost (m_delegate);
       int new_cost = as->cost ();

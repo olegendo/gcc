@@ -438,6 +438,7 @@ public:
     // if the original address expression does not fit into our scheme, we
     // ignore it.
     const addr_expr& original_address (void) const { return m_original_addr_expr; }
+    addr_expr& original_address (void) { return m_original_addr_expr; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
@@ -597,6 +598,8 @@ public:
     access_sequence (void) : m_modify_insns (false) {}
 
     void gen_address_mod (delegate& dlg, int base_lookahead);
+
+    void eliminate_reg_copies (void);
 
     void update_insn_stream (bool allow_mem_addr_change_new_insns);
     bool modify_insns (void) const { return m_modify_insns; }
@@ -832,6 +835,19 @@ public:
       std::vector<std::pair <access_sequence::iterator, addr_expr> > m_addr_changed_accs;
     };
 
+    // Used for keeping track of register copying accesses
+    // in eliminate_reg_copies.
+    struct reg_copy
+    {
+      rtx src, dest;
+      access_sequence::iterator acc;
+      bool reg_modified;
+      bool can_be_removed;
+      reg_copy (rtx s, rtx d, access_sequence::iterator a)
+      : src (s), dest (d), acc (a),
+        reg_modified (false), can_be_removed (true) {}
+    };
+
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
 
     void visit_insns_until_next_acc (access_sequence::iterator acc,
@@ -974,6 +990,10 @@ public:
     // accesses that share the same base reg into separate sequences.
     // Default is true.
     bool split_sequences;
+
+    // Simplify the sequences after optimization by removing unecessary
+    // reg copies.  Default is true.
+    bool remove_reg_copies;
 
     // By default AMS will do alternative validation, but it can be disabled
     // by the delegate to speed up processing.  This will force the validation.
