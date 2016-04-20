@@ -161,6 +161,12 @@ log_addr_expr (const sh_ams::addr_expr& ae)
   if (dump_file == NULL)
     return;
 
+  if (ae.is_invalid ())
+    {
+      log_msg ("(invalid)");
+      return;
+    }
+
   if (ae.type () == sh_ams::pre_mod)
     {
       log_msg ("@( += %"PRId64, ae.disp ());
@@ -838,6 +844,21 @@ sh_ams::access::matches_alternative (const alternative& alt) const
     return false;
 
   return true;
+}
+
+// Check if DISP can be used as constant displacement in any of the address
+// alternatives of the access.
+bool
+sh_ams::access::displacement_fits_alternative (disp_t disp) const
+{
+  for (alternative_set::const_iterator alt = alternatives ().begin ();
+       alt != alternatives ().end (); ++alt)
+    {
+      if (alt->address ().disp_min () <= disp
+          && alt->address ().disp_max () >= disp)
+        return true;
+    }
+  return false;
 }
 
 // Add a normal access to the end of the access sequence.
@@ -1888,43 +1909,169 @@ sh_ams::collect_addr_reg_uses (access_sequence& as, rtx addr_reg,
 			   stay_in_curr_bb, stop_after_first);
 }
 
+// Get all sub-expressions that are contained inside the addr_expr.
+// For an addr_expr of the form base+index*scale+disp, the following
+// sub-expressions are returned:
+//
+// nothing -> represented with an invalid address
+// base
+// index
+// index*scale
+// base+index*scale
+// disp
+// base+disp
+// index*scale+disp
+// base+index*scale+disp
+template <typename OutputIterator> void
+sh_ams::addr_expr::get_all_subterms (OutputIterator out) const
+{
+  *out++ = make_invalid_addr ();
+  if (is_invalid ())
+    return;
+
+  if (has_disp ())
+    *out++ = make_const_addr (disp ());
+  if (has_index_reg ())
+    {
+      *out++ = make_reg_addr (index_reg ());
+      if (scale () == 1)
+        {
+          if (has_disp ())
+            *out++ = non_mod_addr (index_reg (), invalid_regno, 1, disp ());
+        }
+      else
+        {
+          *out++ = non_mod_addr (invalid_regno, index_reg (), scale (), 0);
+          if (has_disp ())
+            *out++ = non_mod_addr (invalid_regno, index_reg (), scale (), disp ());
+        }
+    }
+
+  if (has_base_reg ())
+    {
+      *out++ = make_reg_addr (base_reg ());
+      if (has_disp ())
+        *out++ = non_mod_addr (base_reg (), invalid_regno, 1, disp ());
+
+      if (has_index_reg ())
+        {
+          // If the index and base reg are interchangeable, put the one with
+          // the smallest regno first.
+          if (scale () == 1 && REGNO (index_reg ())  < REGNO (base_reg ()))
+            {
+              *out++ = non_mod_addr (index_reg (), base_reg (), 1, 0);
+              if (has_disp ())
+                *out++ = non_mod_addr (index_reg (), base_reg (), 1, disp ());
+            }
+          else
+            {
+              *out++ = non_mod_addr (base_reg (), index_reg (), scale (), 0);
+              if (has_disp ())
+                *out++ = non_mod_addr (base_reg (), index_reg (), scale (), disp ());
+            }
+        }
+    }
+}
+
 // Split the access sequence pointed to by AS_IT into multiple sequences,
-// grouping the accesses according to their base register.
+// grouping the accesses that have common terms in their effective address
+// together.
 // The new sequences are placed into SEQUENCES in place of the old one.
 // Return an iterator to the next sequence after the newly inserted sequences.
 std::list<sh_ams::access_sequence>::iterator
 sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
                                std::list<access_sequence>& sequences)
 {
-  typedef std::map<rtx, split_sequence_info> new_seq_map;
+  typedef std::map<addr_expr, split_sequence_info, cmp_addr_expr> new_seq_map;
+  typedef std::map<access*, split_sequence_info*> access_to_seq_map;
+  typedef std::map<addr_expr, shared_term, cmp_addr_expr> shared_term_map;
 
+  // Stores the newly created sequences with the accesses' shared term as
+  // the key.
   new_seq_map new_seqs;
+
+  // Shows which new sequence each access should go into.
+  access_to_seq_map access_new_seqs;
+
+  shared_term_map shared_terms;
   access_sequence& as = *as_it;
 
-  // Create a new access sequence for every unique base register of an
-  // effective address.  Also create one for unknown/complicated addresses.
-  for (sh_ams::access_sequence::iterator accs = as.accesses ().begin ();
-       accs != as.accesses ().end (); ++accs)
+  // Find all terms that appear in the effective addresses of the accesses.
+  // These will be used as potential bases for new sequences.
+  std::vector<addr_expr> terms;
+  for (access_sequence::iterator acc = as.accesses ().begin ();
+       acc != as.accesses ().end (); ++acc)
     {
-      if (accs->access_type () == reg_mod
-          && !(accs->original_address ().is_invalid ()
-               && !accs->address ().is_invalid ()))
+      if (acc->access_type () == reg_mod
+          && !(acc->original_address ().is_invalid ()
+               && !acc->address ().is_invalid ()))
         continue;
 
-      rtx key = accs->address ().is_invalid () ? NULL
-                                               : accs->address ().base_reg ();
-      new_seq_map::iterator new_seq = new_seqs.find (key);
-      if (new_seq == new_seqs.end ())
+      terms.clear ();
+      acc->address ().get_all_subterms (std::back_inserter (terms));
+      for (std::vector<addr_expr>::iterator it = terms.begin ();
+           it != terms.end (); ++it)
         {
-          access_sequence& new_as =
-            *sequences.insert (as_it, access_sequence ());
-          new_seqs.insert (std::make_pair (key, split_sequence_info (&new_as)));
+          if (!it->is_invalid () && it->has_no_base_reg ()
+              && it->has_no_index_reg ())
+            {
+              // If a displacement-only term fits into an address alternative,
+              // it's not likely to be useful as a base term, so skip those.
+              if (acc->displacement_fits_alternative (it->disp ()))
+                continue;
+              // If it doesn't fit, treat them as one base term instead of
+              // having a separate term for each constant.
+              else
+                *it = make_const_addr ((disp_t)0);
+            }
+
+          shared_term_map::iterator term = shared_terms.find (*it);
+          if (term == shared_terms.end ())
+            shared_terms.insert (std::make_pair (*it,
+                                                 shared_term (*it, &(*acc))));
+          else
+            term->second.sharing_accs ().push_back (&(*acc));
+        }
+    }
+
+  // Sort the shared terms by their score.
+  std::vector<shared_term*> sorted_terms;
+  for (shared_term_map::iterator it = shared_terms.begin ();
+       it != shared_terms.end (); ++it)
+      sorted_terms.push_back (&(it->second));
+  std::sort (sorted_terms.begin (), sorted_terms.end (), shared_term::compare);
+
+  // Create new access sequences for the shared terms with the highest scores
+  // and mark the accesses' new sequences in ACCESS_NEW_SEQS appropriately.
+  std::set<access*> inserted_accs;
+  for (std::vector<shared_term*>::iterator it
+         = sorted_terms.begin (); it != sorted_terms.end (); ++it)
+    {
+      for (std::vector<access*>::iterator acc = (*it)->sharing_accs ().begin ();
+           acc != (*it)->sharing_accs ().end (); ++acc)
+        {
+          if (inserted_accs.find (*acc) != inserted_accs.end ())
+            continue;
+
+          inserted_accs.insert (*acc);
+
+          new_seq_map::iterator value = new_seqs.find ((*it)->term ());
+          if (value == new_seqs.end ())
+            {
+              access_sequence& new_as =
+                *sequences.insert (as_it, access_sequence ());
+              value = new_seqs
+                .insert (std::make_pair ((*it)->term (),
+                                         split_sequence_info (&new_as))).first;
+            }
+          split_sequence_info& new_seq = value->second;
+          access_new_seqs[*acc] = &new_seq;
         }
     }
 
   // Add each memory and reg_use access from the original sequence to the
-  // appropriate new sequence.  Also add the reg_mod accesses to all
-  // sequences where they are used to calculate addresses.
+  // appropriate new sequence based on ACCESS_NEW_SEQS.  Also add the reg_mod
+  // accesses to all sequences where they are used to calculate addresses.
   //
   // To determine which reg_mods should be added to a sequence, we go over
   // the accesses twice: In the first pass, we record the address regs that
@@ -1948,9 +2095,8 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
               if (add_to_sequence && last_mem_acc == as.accesses ().end ())
                 last_mem_acc = stdx::prev (accs.base ());
 
-              rtx key = accs->address ().is_invalid ()
-                ? NULL : accs->address ().base_reg ();
-              split_sequence_info& new_seq = new_seqs.find(key)->second;
+              split_sequence_info& new_seq
+                = *(access_new_seqs.find (&(*accs))->second);
 
               split_access_sequence_2 (new_seq, *accs);
               if (add_to_sequence)
@@ -1977,11 +2123,12 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 // Internal function of split_access_sequence.  Adds the reg_mod access ACC to
 // those sequences in NEW_SEQS that use it in their address calculations.
 void
-sh_ams::split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
-                                 sh_ams::access& acc,
-                                 bool add_to_front, bool add_to_back)
+sh_ams::split_access_sequence_1 (
+  std::map<addr_expr, split_sequence_info, cmp_addr_expr>& new_seqs,
+  sh_ams::access& acc,
+  bool add_to_front, bool add_to_back)
 {
-  typedef std::map<rtx, split_sequence_info> new_seq_map;
+  typedef std::map<addr_expr, split_sequence_info> new_seq_map;
   for (new_seq_map::iterator seqs = new_seqs.begin ();
        seqs != new_seqs.end (); ++seqs)
     {
@@ -4225,6 +4372,18 @@ sh_ams::execute (function* fun)
 
       log_access_sequence (*as, false);
       log_msg ("\n\n");
+
+      log_msg ("updating access alternatives\n");
+      {
+	typedef access_to_optimize match;
+	typedef filter_iterator<access_sequence::iterator, match> iter;
+
+	for (iter a = as->begin<match> (), a_end = as->end<match> ();
+	     a != a_end; ++a)
+	  as->update_access_alternatives (m_delegate, a,
+					  m_options.force_alt_validation,
+					  m_options.disable_alt_validation);
+      }
 
       log_msg ("split_access_sequence\n");
       if (m_options.split_sequences)

@@ -95,6 +95,7 @@ public:
 
   class access;
   class access_sequence;
+  class addr_expr;
   struct delegate;
 
   // Comparison struct for sets and maps containing reg rtx-es.
@@ -103,6 +104,39 @@ public:
     bool operator () (const rtx a, const rtx b) const
     {
       return REGNO (a) < REGNO (b);
+    }
+  };
+
+  // Comparison struct for sets and maps containing address expressions.
+  struct cmp_addr_expr
+  {
+    bool operator () (const sh_ams::addr_expr& a,
+                      const sh_ams::addr_expr& b) const
+    {
+      if (a.is_invalid () && b.is_invalid ())
+        return false;
+      if (a.is_invalid () || b.is_invalid ())
+        return a.is_invalid ();
+
+      if (a.has_base_reg () && b.has_base_reg ())
+        {
+          if (REGNO (a.base_reg ()) != REGNO (b.base_reg ()))
+            return REGNO (a.base_reg ()) < REGNO (b.base_reg ());
+        }
+      else if (a.has_base_reg () || b.has_base_reg ())
+        return a.has_base_reg ();
+
+      if (a.has_index_reg () && b.has_index_reg ())
+        {
+          if (REGNO (a.index_reg ()) != REGNO (b.index_reg ()))
+            return REGNO (a.index_reg ()) < REGNO (b.index_reg ());
+        }
+      else if (a.has_index_reg () || b.has_index_reg ())
+        return a.has_index_reg ();
+
+      if (a.disp () == b.disp () && a.has_index_reg () && b.has_index_reg ())
+        return a.scale () < b.scale ();
+      return a.disp () < b.disp ();
     }
   };
 
@@ -164,6 +198,9 @@ public:
     scale_t scale (void) const { return m_scale; }
     scale_t scale_min (void) const { return m_scale_min; }
     scale_t scale_max (void) const { return m_scale_max; }
+
+    template <typename OutputIterator> void
+    get_all_subterms (OutputIterator out) const;
 
     bool operator == (const addr_expr& other) const;
     bool operator != (const addr_expr& other) const;
@@ -518,6 +555,7 @@ public:
     const alternative_set& alternatives (void) const { return m_alternatives; }
 
     bool matches_alternative (const alternative& alt) const;
+    bool displacement_fits_alternative (disp_t disp) const;
 
     void set_original_address (int new_cost, const addr_expr& new_addr_expr);
     void set_original_address (int new_cost, rtx new_addr_rtx);
@@ -1039,6 +1077,61 @@ private:
                     const access_sequence& as,
                     access_sequence::const_iterator acc);
 
+  // Used to keep track of shared address (sub)expressions
+  // during access sequence splitting.
+  class shared_term
+  {
+  public:
+    shared_term (addr_expr& t, access* acc)
+      : m_term (t), m_sharing_accs () {
+      m_sharing_accs.push_back (acc);
+    }
+
+    // The shared term.
+    const addr_expr& term () { return m_term; }
+
+    // The accesses that share this term.
+    std::vector<access*>& sharing_accs () { return m_sharing_accs; }
+
+    // A score that's used to determine which shared expressions should
+    // be used for splitting access sequences.  A higher score means that
+    // the shared term is more likely to be selected as a base for a
+    // new sequence.
+    unsigned int score (void) const
+    {
+      if (m_term.is_invalid ())
+        return 0;
+
+      unsigned int score = 10;
+
+      // Displacement-only terms with large displacements are
+      // represented with a constant 0 address.
+      if (m_term.has_no_base_reg () && m_term.has_no_index_reg ()
+          && m_term.has_no_disp ())
+        score += 2;
+
+      if (m_term.has_base_reg ())
+        score += 2;
+      if (m_term.has_index_reg ())
+        {
+          score += 2;
+          if (m_term.scale () != 1)
+            ++score;
+        }
+      if (m_term.has_disp ())
+        ++score;
+
+      return score*m_sharing_accs.size ();
+    }
+
+    static bool compare (shared_term* a, shared_term* b)
+    { return a->score () > b->score (); }
+
+  private:
+    addr_expr m_term;
+    std::vector<access*> m_sharing_accs;
+  };
+
   // Used to store information about newly created sequences during
   // sequence splitting.
   class split_sequence_info
@@ -1071,9 +1164,10 @@ private:
                          std::list<access_sequence>& sequences);
 
   static void
-  split_access_sequence_1 (std::map<rtx, split_sequence_info >& new_seqs,
-			   sh_ams::access &acc,
-                           bool add_to_front, bool add_to_back);
+  split_access_sequence_1 (
+    std::map<addr_expr, split_sequence_info, cmp_addr_expr>& new_seqs,
+    sh_ams::access &acc,
+    bool add_to_front, bool add_to_back);
 
   static void
   split_access_sequence_2 (split_sequence_info& addr_regs, sh_ams::access& acc);
