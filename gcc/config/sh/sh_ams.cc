@@ -1982,13 +1982,11 @@ std::list<sh_ams::access_sequence>::iterator
 sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
                                std::list<access_sequence>& sequences)
 {
-  typedef std::map<addr_expr, split_sequence_info, cmp_addr_expr> new_seq_map;
   typedef std::map<access*, split_sequence_info*> access_to_seq_map;
   typedef std::map<addr_expr, shared_term, cmp_addr_expr> shared_term_map;
 
-  // Stores the newly created sequences with the accesses' shared term as
-  // the key.
-  new_seq_map new_seqs;
+  // Stores the newly created sequences.
+  std::list<split_sequence_info> new_seqs;
 
   // Shows which new sequence each access should go into.
   access_to_seq_map access_new_seqs;
@@ -2047,27 +2045,29 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
   for (std::vector<shared_term*>::iterator it
          = sorted_terms.begin (); it != sorted_terms.end (); ++it)
     {
-      for (std::vector<access*>::iterator acc = (*it)->sharing_accs ().begin ();
-           acc != (*it)->sharing_accs ().end (); ++acc)
+      shared_term& term = **it;
+      for (std::vector<access*>::iterator acc = term.sharing_accs ().begin ();
+           acc != term.sharing_accs ().end (); ++acc)
         {
           if (inserted_accs.find (*acc) != inserted_accs.end ())
             continue;
 
           inserted_accs.insert (*acc);
 
-          new_seq_map::iterator value = new_seqs.find ((*it)->term ());
-          if (value == new_seqs.end ())
+          if (!term.new_sequence ())
             {
-              access_sequence& new_as =
-                *sequences.insert (as_it, access_sequence ());
-              value = new_seqs
-                .insert (std::make_pair ((*it)->term (),
-                                         split_sequence_info (&new_as))).first;
+              access_sequence& new_as = *sequences.insert (as_it,
+                                                           access_sequence ());
+              new_seqs.push_back (split_sequence_info (&new_as));
+              term.set_new_sequence (&new_seqs.back ());
             }
-          split_sequence_info& new_seq = value->second;
-          access_new_seqs[*acc] = &new_seq;
+
+          access_new_seqs[*acc] = term.new_sequence ();
         }
     }
+
+  shared_terms.clear ();
+  sorted_terms.clear ();
 
   // Add each memory and reg_use access from the original sequence to the
   // appropriate new sequence based on ACCESS_NEW_SEQS.  Also add the reg_mod
@@ -2100,7 +2100,7 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 
               split_access_sequence_2 (new_seq, *accs);
               if (add_to_sequence)
-                new_seq.as ()->accesses ().push_front (*accs);
+                new_seq.sequence ()->accesses ().push_front (*accs);
             }
         }
     }
@@ -2123,24 +2123,21 @@ sh_ams::split_access_sequence (std::list<access_sequence>::iterator as_it,
 // Internal function of split_access_sequence.  Adds the reg_mod access ACC to
 // those sequences in NEW_SEQS that use it in their address calculations.
 void
-sh_ams::split_access_sequence_1 (
-  std::map<addr_expr, split_sequence_info, cmp_addr_expr>& new_seqs,
-  sh_ams::access& acc,
-  bool add_to_front, bool add_to_back)
+sh_ams::split_access_sequence_1 (std::list<split_sequence_info>& new_seqs,
+                                 sh_ams::access& acc,
+                                 bool add_to_front, bool add_to_back)
 {
-  typedef std::map<addr_expr, split_sequence_info> new_seq_map;
-  for (new_seq_map::iterator seqs = new_seqs.begin ();
-       seqs != new_seqs.end (); ++seqs)
+  for (std::list<split_sequence_info>::iterator seq_info = new_seqs.begin ();
+       seq_info != new_seqs.end (); ++seq_info)
     {
-      split_sequence_info& seq_info = seqs->second;
-      access_sequence& as = *seq_info.as ();
+      access_sequence& as = *seq_info->sequence ();
 
       // Add the reg_mod access only if it's used to calculate
       // one of the addresses in this new sequence.
-      if (!seq_info.uses_addr_reg (acc.address_reg ()))
+      if (!seq_info->uses_addr_reg (acc.address_reg ()))
         continue;
 
-      split_access_sequence_2 (seq_info, acc);
+      split_access_sequence_2 (*seq_info, acc);
       if (add_to_front)
         {
           as.accesses ().push_front (acc);

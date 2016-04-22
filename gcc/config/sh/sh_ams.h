@@ -1077,13 +1077,41 @@ private:
                     const access_sequence& as,
                     access_sequence::const_iterator acc);
 
+  // Used to store information about newly created sequences during
+  // sequence splitting.
+  class split_sequence_info
+  {
+  public:
+    split_sequence_info (access_sequence* as)
+      : m_test (rand()%100), m_sequence (as), m_addr_regs () {}
+
+    // The sequence itself.
+    access_sequence* sequence (void) const { return m_sequence; }
+
+    // Return true if REG is present in m_addr_regs.
+    bool uses_addr_reg (rtx reg) const
+    {
+      return m_addr_regs.find (reg) != m_addr_regs.end ();
+    }
+
+    // Add REG to the address reg lists.
+    void add_reg (rtx reg) { m_addr_regs.insert (reg); }
+
+  private:
+    unsigned m_test;
+    access_sequence *m_sequence;
+
+    // A set of the address registers used in the sequence.
+    std::set<rtx, cmp_by_regno> m_addr_regs;
+  };
+
   // Used to keep track of shared address (sub)expressions
   // during access sequence splitting.
   class shared_term
   {
   public:
     shared_term (addr_expr& t, access* acc)
-      : m_term (t), m_sharing_accs () {
+      : m_term (t), m_sharing_accs (), m_new_sequence (NULL) {
       m_sharing_accs.push_back (acc);
     }
 
@@ -1092,6 +1120,13 @@ private:
 
     // The accesses that share this term.
     std::vector<access*>& sharing_accs () { return m_sharing_accs; }
+
+    // The term's newly created access sequence.
+    split_sequence_info* new_sequence (void) const { return m_new_sequence; }
+    void set_new_sequence (split_sequence_info *s) {  m_new_sequence = s; }
+
+    static bool compare (shared_term* a, shared_term* b)
+    { return a->score () > b->score (); }
 
     // A score that's used to determine which shared expressions should
     // be used for splitting access sequences.  A higher score means that
@@ -1124,39 +1159,10 @@ private:
       return score*m_sharing_accs.size ();
     }
 
-    static bool compare (shared_term* a, shared_term* b)
-    { return a->score () > b->score (); }
-
   private:
     addr_expr m_term;
     std::vector<access*> m_sharing_accs;
-  };
-
-  // Used to store information about newly created sequences during
-  // sequence splitting.
-  class split_sequence_info
-  {
-  public:
-    split_sequence_info (access_sequence* as)
-      : m_as (as), m_addr_regs () {}
-
-    // The sequence itself.
-    access_sequence* as (void) const { return m_as; }
-
-    // Return true if REG is present in m_addr_regs.
-    bool uses_addr_reg (rtx reg) const
-    {
-      return m_addr_regs.find (reg) != m_addr_regs.end ();
-    }
-
-    // Add REG to the address reg lists.
-    void add_reg (rtx reg) { m_addr_regs.insert (reg); }
-
-  private:
-    access_sequence *m_as;
-
-    // A set of the address registers used in the sequence.
-    std::set<rtx, cmp_by_regno> m_addr_regs;
+    split_sequence_info* m_new_sequence;
   };
 
   static std::list<access_sequence>::iterator
@@ -1164,10 +1170,9 @@ private:
                          std::list<access_sequence>& sequences);
 
   static void
-  split_access_sequence_1 (
-    std::map<addr_expr, split_sequence_info, cmp_addr_expr>& new_seqs,
-    sh_ams::access &acc,
-    bool add_to_front, bool add_to_back);
+  split_access_sequence_1 (std::list<split_sequence_info>& new_seqs,
+                           sh_ams::access &acc,
+                           bool add_to_front, bool add_to_back);
 
   static void
   split_access_sequence_2 (split_sequence_info& addr_regs, sh_ams::access& acc);
