@@ -13,5 +13,5 @@ int*
 fun_0 (int* a, int* b)
 {
   b[0] = a[0] ^ a[1] ^ a[2];
-  return &a[3];  
+  return &a[3];
 }
