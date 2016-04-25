@@ -4134,6 +4134,7 @@ sh_ams::access_sequence
 {
   bool val_alts = a->validate_alternatives ();
 
+  a->alternatives ().clear ();
   if (a->access_type () != load && a->access_type () != store)
     {
       // If the access isn't a true memory access, the
