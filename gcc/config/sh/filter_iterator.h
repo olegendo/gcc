@@ -66,6 +66,23 @@ public:
     return r;
   }
 
+  filter_iterator& operator -- (void)
+  {
+    Iter i = m_i;
+    --i;
+    for (; !predicate () (*i); --i);
+
+    m_i = i;
+    return *this;
+  }
+
+  filter_iterator operator -- (int)
+  {
+    filter_iterator r = *this;
+    operator-- ();
+    return r;
+  }
+
   bool operator == (const filter_iterator& rhs) const { return m_i == rhs.m_i; }
   bool operator != (const filter_iterator& rhs) const { return m_i != rhs.m_i; }
 

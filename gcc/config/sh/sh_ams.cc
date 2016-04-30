@@ -4103,10 +4103,14 @@ sh_ams::access_sequence::calculate_adjacency_info (void)
         ++inc_end;
 
       const int inc_len = std::distance (m, inc_end);
+      const access* first_acc = &(*m);
+      iter last_acc = inc_end;
+      --last_acc;
 
       for (int i = 0; i < inc_len; ++i)
 	{
-	  m->set_inc_chain (access::adjacent_chain (i, inc_len));
+	  m->set_inc_chain (access::adjacent_chain (i, inc_len,
+                                                    first_acc, &(*last_acc)));
 	  ++m;
 	}
     }
@@ -4118,10 +4122,14 @@ sh_ams::access_sequence::calculate_adjacency_info (void)
         ++dec_end;
 
       const int dec_len = std::distance (m, dec_end);
+      const access* first_acc = &(*m);
+      iter last_acc = dec_end;
+      --last_acc;
 
       for (int i = 0; i < dec_len; ++i)
 	{
-	  m->set_dec_chain (access::adjacent_chain (i, dec_len));
+	  m->set_dec_chain (access::adjacent_chain (i, dec_len,
+                                                    first_acc, &(*last_acc)));
 	  ++m;
 	}
     }

@@ -13786,16 +13786,24 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
   // FIXME: also mac.w and mac.l insns (post-inc loads only).
   *alts++ = alternative (1 + gbr_extra_cost, sh_ams::make_reg_addr ());
 
-  // for QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
-  // are part of adjacent chains of 3 or more insns.  this will make AMS
+  // For QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
+  // are part of adjacent chains of 3 or more insns.  This will make AMS
   // prefer them over displacement alternatives.
-  const int inc_cost = acc_size < 4
-		       && acc->inc_chain ().length () >= 3
-		       && !acc->inc_chain ().last () ? -2 : 0;
+  // Also prefer post-inc/pre-dec accesses when the last element of the
+  // adjacency chain is a reg_use.
+  const int inc_cost = (acc_size < 4
+		        && acc->inc_chain ().length () >= 3
+                        && !acc->inc_chain ().is_last ())
+                       || (acc->inc_chain ().last ()
+                           && acc->inc_chain ().last ()->access_type ()
+                              == sh_ams::reg_use) ? -2 : 0;
 
-  const int dec_cost = acc_size < 4
-		       && acc->dec_chain ().length () >= 3
-		       && acc->dec_chain ().first () ? -2 : 0;
+  const int dec_cost = (acc_size < 4
+		        && acc->dec_chain ().length () >= 3
+                        && !acc->dec_chain ().is_last ())
+                       || (acc->dec_chain ().last ()
+                           && acc->dec_chain ().last ()->access_type ()
+                              == sh_ams::reg_use) ? -2 : 0;
 
   // If there is no FPU GP regs will be used for storing FP modes, so we
   // allow normal QIHISImode alternatives also for FP modes.

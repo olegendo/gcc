@@ -430,18 +430,25 @@ public:
     class adjacent_chain
     {
     public:
-      adjacent_chain (void) : m_pos (0), m_len (1) { }
-      adjacent_chain (int p, int l) : m_pos (p), m_len (l) { }
+      adjacent_chain (void)
+        : m_pos (0), m_len (1), m_first_acc (NULL), m_last_acc (NULL) { }
+      adjacent_chain (int p, int l, const access* fa, const access* la)
+        : m_pos (p), m_len (l), m_first_acc (fa), m_last_acc (la) { }
 
       int pos (void) const { return m_pos; }
       int length (void) const { return m_len; }
 
-      bool first (void) const { return m_pos == 0; }
-      bool last (void) const { return m_pos == m_len - 1; }
+      bool is_first (void) const { return m_pos == 0; }
+      bool is_last (void) const { return m_pos == m_len - 1; }
+
+      const access* first (void) const { return m_first_acc; }
+      const access* last (void) const { return m_last_acc; }
 
     private:
       int m_pos;
       int m_len;
+      const access* m_first_acc;
+      const access* m_last_acc;
     };
 
     access (rtx_insn* insn, rtx* mem, access_type_t access_type,
