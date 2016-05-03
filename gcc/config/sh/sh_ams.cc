@@ -603,7 +603,7 @@ sh_ams::options::options (void)
   check_minimal_cost = true;
   check_original_cost = true;
   split_sequences = true;
-  remove_reg_copies = true;
+  remove_reg_copies = false;
   force_alt_validation = false;
   disable_alt_validation = false;
   cse = false;
