@@ -2609,6 +2609,7 @@ sh_ams::access_sequence::eliminate_reg_copies (void)
                 = reg_copies.find(addr.REG ()); \
               if (copy_in_map != reg_copies.end ()) \
                 { \
+                  ++copy_in_map->second.use_count; \
                   reg_copy copy = copy_in_map->second; \
                   if (!copy.reg_modified) \
                     { \
@@ -2649,7 +2650,9 @@ sh_ams::access_sequence::eliminate_reg_copies (void)
        it != reg_copies.end (); ++it)
     {
       reg_copy& copy = it->second;
-      if (copy.can_be_removed)
+
+      // Only remove those reg copies that were used previously.
+      if (copy.can_be_removed && copy.use_count > 0)
         remove_access (copy.acc);
     }
 }

@@ -888,9 +888,10 @@ public:
       access_sequence::iterator acc;
       bool reg_modified;
       bool can_be_removed;
+      unsigned use_count;
       reg_copy (rtx s, rtx d, access_sequence::iterator a)
       : src (s), dest (d), acc (a),
-        reg_modified (false), can_be_removed (true) {}
+        reg_modified (false), can_be_removed (true), use_count (0) {}
     };
 
     int get_clone_cost (access_sequence::iterator &acc, delegate& dlg);
