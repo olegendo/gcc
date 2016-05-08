@@ -4096,10 +4096,10 @@ sh_ams::access_sequence::find_reg_end_values (void)
 void
 sh_ams::access_sequence::calculate_adjacency_info (void)
 {
-  typedef access_type_matches<load, store, reg_use> match;
-  typedef filter_iterator<iterator, match> iter;
+  typedef filter_iterator<iterator, access_to_optimize> iter;
 
-  for (iter m = begin<match> (), mend = end<match> (); m != mend; )
+  for (iter m = begin<access_to_optimize> (), mend = end<access_to_optimize> ();
+       m != mend; )
     {
       iter inc_end = std::adjacent_find (m, mend, not_adjacent_inc);
       if (inc_end != mend)
@@ -4118,7 +4118,8 @@ sh_ams::access_sequence::calculate_adjacency_info (void)
 	}
     }
 
-  for (iter m = begin<match> (), mend = end<match> (); m != mend; )
+  for (iter m = begin<access_to_optimize> (), mend = end<access_to_optimize> ();
+       m != mend; )
     {
       iter dec_end = std::adjacent_find (m, mend, not_adjacent_dec);
       if (dec_end != mend)

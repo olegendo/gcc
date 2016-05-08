@@ -13795,8 +13795,10 @@ mem_access_alternatives (sh_ams::access::alternative_set& alt,
 		        && acc->inc_chain ().length () >= 3
                         && !acc->inc_chain ().is_last ())
                        || (acc->inc_chain ().last ()
-                           && acc->inc_chain ().last ()->access_type ()
-                              == sh_ams::reg_use) ? -2 : 0;
+                           && (acc->inc_chain ().last ()->access_type ()
+                               == sh_ams::reg_use
+                               || acc->inc_chain ().last ()->access_type ()
+                                  == sh_ams::reg_mod)) ? -2 : 0;
 
   const int dec_cost = (acc_size < 4
 		        && acc->dec_chain ().length () >= 3
