@@ -236,6 +236,39 @@ public:
     void set_disp (disp_t val);
     void set_scale (scale_t val);
 
+    // Comparison struct for sets and maps containing address expressions.
+    struct compare
+    {
+      bool operator () (const sh_ams2::addr_expr& a,
+                        const sh_ams2::addr_expr& b) const
+      {
+        if (a.is_invalid () && b.is_invalid ())
+          return false;
+        if (a.is_invalid () || b.is_invalid ())
+          return a.is_invalid ();
+
+        if (a.has_base_reg () && b.has_base_reg ())
+          {
+            if (REGNO (a.base_reg ()) != REGNO (b.base_reg ()))
+              return REGNO (a.base_reg ()) < REGNO (b.base_reg ());
+          }
+        else if (a.has_base_reg () || b.has_base_reg ())
+          return a.has_base_reg ();
+
+        if (a.has_index_reg () && b.has_index_reg ())
+          {
+            if (REGNO (a.index_reg ()) != REGNO (b.index_reg ()))
+              return REGNO (a.index_reg ()) < REGNO (b.index_reg ());
+          }
+        else if (a.has_index_reg () || b.has_index_reg ())
+          return a.has_index_reg ();
+
+        if (a.disp () == b.disp () && a.has_index_reg () && b.has_index_reg ())
+          return a.scale () < b.scale ();
+        return a.disp () < b.disp ();
+      }
+    };
+
   protected:
     addr_type_t m_type;
 
@@ -373,18 +406,25 @@ public:
   class adjacent_chain_info
   {
   public:
-    adjacent_chain_info (void) : m_pos (0), m_len (1) { }
-    adjacent_chain_info (int p, int l) : m_pos (p), m_len (l) { }
+    adjacent_chain_info (void)
+      : m_pos (0), m_len (1), m_first_acc (NULL), m_last_acc (NULL) { }
+    adjacent_chain_info (int p, int l, const access* fa, const access* la)
+      : m_pos (p), m_len (l), m_first_acc (fa), m_last_acc (la) { }
 
     int pos (void) const { return m_pos; }
     int length (void) const { return m_len; }
 
-    bool first (void) const { return m_pos == 0; }
-    bool last (void) const { return m_pos == m_len - 1; }
+    bool is_first (void) const { return m_pos == 0; }
+    bool is_last (void) const { return m_pos == m_len - 1; }
+
+    const access* first (void) const { return m_first_acc; }
+    const access* last (void) const { return m_last_acc; }
 
   private:
     int m_pos;
     int m_len;
+    const access* m_first_acc;
+    const access* m_last_acc;
   };
 
   // The type of an (access) sequence element.
@@ -394,8 +434,8 @@ public:
     type_mem_store,
     type_mem_operand,
     type_reg_mod,
-    type_reg_use,
-    type_reg_barrier
+    type_reg_barrier,
+    type_reg_use
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -420,14 +460,15 @@ public:
 
     // The cost of this element in the sequence.
     int cost (void) const { return m_cost; }
+    void set_cost (int new_cost) { m_cost = new_cost; }
+    void adjust_cost (int d) { m_cost += d; }
 
     // The insn rtx of this element.  Maybe null if it has been inserted
     // by AMS into the sequence and is not present in the original insn list.
     rtx_insn* insn (void) const { return m_insn; }
 
-    // If the access is part of an increasing/decreasing chain of adjacent
-    // accesses, return the length of that chain and its position in the
-    // chain.
+    // An increasing/decreasing chain of adjacent accesses that this access
+    // is part of.
     virtual const adjacent_chain_info&
     inc_chain (void) const { return g_no_incdec_chain; }
 
@@ -498,7 +539,13 @@ NOTE:
 
     // FIXME: find shorter name.
     bool alternative_validation_enabled (void) const { return m_validate_alts; }
-    void enable_alternative_validatation (bool val = true) { m_validate_alts = val; }
+    void set_alternative_validation (bool val) { m_validate_alts = val; }
+
+    bool matches_alternative (const alternative& alt) const;
+
+    // Check if DISP can be used as constant displacement in any of the address
+    // alternatives of the access.
+    bool displacement_fits_alternative (disp_t disp) const;
 
     // Try replacing the current address in the mem(s) of the insn with
     // the specified one.  Returns true if the replacement seems OK or
@@ -518,14 +565,17 @@ NOTE:
     // The effective address expression.
     // Might be invalid if AMS was not able to understand it.
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
+    void set_effective_addr (const addr_expr& new_addr);
 
     // The address expression rtx as it is currently being used in the mem
     // rtx in the insn.
     rtx current_addr_rtx (void) const { return m_current_addr_rtx; }
+    void set_current_addr_rtx (rtx new_addr_rtx);
 
     // The address expression that is currently being used.
     // Might be invalid if AMS was not able to understand it.
     const addr_expr& current_addr (void) const { return m_current_addr; }
+    void set_current_addr (const addr_expr& new_addr);
 
   protected:
     mem_access (element_type t) : sequence_element (t) { }
@@ -564,8 +614,8 @@ NOTE:
   public:
     mem_store (void) : mem_access (type_mem_store) { };
 
-    virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
-    virtual bool replace_addr_rtx (const addr_expr& new_addr);
+    virtual bool try_replace_addr (const addr_expr& new_addr);
+    virtual bool replace_addr (const addr_expr& new_addr);
 
   private:
     // Reference into the rtx_insn where the mem rtx resides.
@@ -582,8 +632,8 @@ NOTE:
   public:
     mem_operand (void) : mem_access (type_mem_operand) { };
 
-    virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
-    virtual bool replace_addr_rtx (const addr_expr& new_addr);
+    virtual bool try_replace_addr (const addr_expr& new_addr);
+    virtual bool replace_addr (const addr_expr& new_addr);
 
   private:
     // References into the rtx_insn where the mem rtx'es reside.
@@ -647,26 +697,6 @@ NOTE:
   // two mem stores at different addresses, the two address regs are
   // combined in some calculation insn.  In this case there will be two
   // reg-use elements pointing at the same insn.
-
-  // FIXME: this will probably not work.  it's impossible to know if
-  // a reg-use insn can be changed/removed because it might be referenced
-  // by multiple reg-use elements and they don't know about each other.
-/*
--> to fix this, all insns in the insn list should be referenced by a
-   ref counted ptr in the sequence_element.  this will allow checking
-   the use count (counts the number of uses of this insn by AMS).
-   could also keep track of all users of an insn.  anyway the insn pointers
-   will have to be stored in an AMS-global container.
-
--> if a reg use is changed, its effective value is never changed by AMS.
-   the substituted rtx will evaluate to the same as the original.  otherwise
-   something is broken.  hence, it is irrelevant if that reg use is shared
-   with another insn or not.  however, if multiple overlapping access sequences
-   are processed one after another, it might be necessary to do a rescan
-   so that other sequences get updated.
-   the only thing for which the ref counts could be useful is for removing
-   reg mod insns.
-*/
   // The (intermediate) result of a reg-mod could also be used either
   // by some interleaved access sequence unrelated code or after the
   // access sequence.  In this case the reg-mods can't be removed.  To know
@@ -680,6 +710,8 @@ NOTE:
   {
   public:
     reg_use (void) : sequence_element (type_reg_use) { };
+
+    reg_use (rtx reg, const addr_expr& effective_addr);
 
     // construct a reg-use from an existing element.  this is usually used
     // when replacing an non-optimizable element into a reg-use.
@@ -700,6 +732,9 @@ NOTE:
     // The reg that is being used.
     rtx reg (void) const { return *m_reg_ref; }
 
+    // The effective address expression the reg is expected to have.
+    const addr_expr& effective_addr (void) const { return m_effective_addr; }
+
   private:
     // if a mem access is not to be optimized, it is converted into a
     // reg-use.  in this case maybe it's useful to keep the original element
@@ -710,15 +745,165 @@ NOTE:
     // The reg rtx inside the insn.
     rtx* m_reg_ref;
 
+    addr_expr m_effective_addr;
+
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
   };
 
 
-  struct sequence { };
-  struct sequence_iterator { };
-  struct sequence_const_iterator { };
+  class start_addr_list;
+  typedef std::multimap<rtx, sequence_iterator, cmp_by_regno> addr_reg_map;
 
+  // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  // The access sequence that contains the memory accesses of some part of
+  // the code (usually a basic block), along with other relevant information
+  // (reg uses, reg mods, etc.).
+  class sequence
+  {
+  public:
+    // Update the original insn stream with the changes in this sequence.
+    void update_insn_stream (bool allow_mem_addr_change_new_insns);
+
+    // The total cost of the accesses in the sequence.
+    int cost (void) const;
+
+    // Re-calculate the cost.
+    void update_cost (delegate& dlg);
+
+    // Check whether the cost of the sequence is already minimal and
+    // can't be improved further.
+    bool cost_already_minimal (void) const;
+
+    // Check whether REG is used in any of the sequence's accesses.
+    bool reg_used_in_sequence (rtx reg);
+
+    // Update the alternatives of the sequence's accesses.
+    void update_access_alternatives (delegate& d, bool force_validation,
+				     bool disable_validation);
+
+    // Insert a new element into the sequence.  Return an iterator pointing
+    // to the newly inserted element.
+    sequence_iterator::iterator insert_element (sequence_iterator insert_before,
+                                                sequence_element& el);
+
+    // Remove an element from the sequence.  Return an iterator pointing
+    // to the next element.
+    sequence_iterator::iterator remove_element (sequence_iterator el);
+
+    // The first insn and basic block in the sequence.
+    rtx_insn* start_insn (void) const;
+    basic_block start_bb (void) const;
+
+    // A map containing the all the address regs used in the sequence
+    // and the reg_mods that modify them.
+    addr_reg_map& addr_regs (void) { return m_addr_regs; }
+
+    // A structure for retrieving the starting addresses that could be
+    // used to arrive at a given destination address.
+    start_addr_list& start_addresses (void)  { return m_start_addr_list; }
+
+    std::list<sequence_element>& elements (void) { return m_els; }
+    const std::list<access>& elements (void) const { return m_els; }
+
+    // iterator decorator for iterating over different types of elements
+    // in the access sequence.
+    template <typename Match>
+    filter_iterator<iterator, Match> begin (void)
+    {
+      typedef filter_iterator<iterator, Match> iter;
+      return iter (m_els.begin (), m_els.end ());
+    }
+
+    template <typename Match>
+    filter_iterator<iterator, Match> end (void)
+    {
+      typedef filter_iterator<iterator, Match> iter;
+      return iter (m_els.end (), m_els.end ());
+    }
+
+    template <typename Match>
+    filter_iterator<const_iterator, Match> begin (void) const
+    {
+      typedef filter_iterator<const_iterator, Match> iter;
+      return iter (m_els.begin (), m_els.end ());
+    }
+
+    template <typename Match>
+    filter_iterator<const_iterator, Match> end (void) const
+    {
+      typedef filter_iterator<const_iterator, Match> iter;
+      return iter (m_els.end (), m_els.end ());
+    }
+
+  private:
+    std::list<sequence_element> m_els;
+    addr_reg_map m_addr_regs;
+    start_addr_list m_start_addr_list;
+
+  };
+
+  // A structure for keeping track of modifications to an access sequence.
+  // Used in address mod generation for backtracking.
+  class mod_tracker
+  {
+  public:
+    mod_tracker (void)
+      {
+        m_inserted_accs.reserve (8);
+        m_use_changed_accs.reserve (4);
+        m_addr_changed_accs.reserve (4);
+      }
+
+    void reset_changes (sequence &as);
+
+    // List of elements that were inserted into the sequence.
+    std::vector<sequence_iterator>&
+      inserted_els (void) { return m_inserted_els; }
+
+    // List of elements that got visited.
+    std::vector<sequence_iterator>&
+      visited_els (void) { return m_visited_els; }
+
+    // List of mem accesses whose address changed, along/ with their previous
+    // values.
+    std::vector<std::pair <sequence_iterator, addr_expr> >&
+      addr_changed_accs (void) { return m_addr_changed_accs; }
+
+  private:
+    std::vector<sequence_iterator> m_inserted_els;
+    std::vector<sequence_iterator> m_visited_els;
+    std::vector<std::pair <sequence_iterator, addr_expr> > m_addr_changed_accs;
+  };
+
+  typedef std::list<sequence_element>::iterator sequence_iterator;
+  typedef std::list<sequence_element>::const_iterator sequence_const_iterator;
+  typedef std::list<sequence_element>::reverse_iterator sequence_reverse_iterator;
+  typedef std::list<sequence_element>::const_reverse_iterator sequence_const_reverse_iterator;
+
+  // A structure used to store the address regs that can be used as a starting
+  // point to arrive at another address during address mod generation.
+  class start_addr_list
+  {
+  public:
+
+    typedef std::list<sequence_iterator>::iterator iterator;
+    std::list<sequence_iterator>
+      get_relevant_addresses (const addr_expr& end_addr);
+
+    void add (sequence_iterator start_addr);
+    void remove (sequence_iterator start_addr);
+
+  private:
+
+    // List of addresses that only have a constant displacement.
+    std::list<sequence_iterator> m_const_addresses;
+
+    // A map for storing addresses that have a base and/or index reg.
+    // The key of each stored address is its base or index reg (the
+    // address is stored twice if it has both).
+    addr_reg_map m_reg_addresses;
+  };
 
   // a delegate for the ams pass.  usually implemented by the target.
   struct delegate
