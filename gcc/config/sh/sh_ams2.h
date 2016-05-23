@@ -187,10 +187,15 @@ public:
   {
   public:
     addr_expr (void) : m_cached_to_rtx (NULL) { }
+    addr_expr (rtx addr_rtx);
 
     addr_type_t type (void) const { return m_type; }
 
-    rtx base_reg (void) const { return m_base_reg; }
+    rtx base_reg (void) const
+    {
+      gcc_assert (!is_invalid ());
+      return m_base_reg;
+    }
     bool has_base_reg (void) const { return base_reg () != invalid_regno; }
     bool has_no_base_reg (void) const { return !has_base_reg (); }
 
@@ -200,7 +205,11 @@ public:
     bool has_disp (void) const { return disp () != 0; }
     bool has_no_disp (void) const { return !has_disp (); }
 
-    rtx index_reg (void) const { return m_index_reg; }
+    rtx index_reg (void) const
+    {
+      gcc_assert (!is_invalid ());
+      return m_index_reg;
+    }
     bool has_index_reg (void) const { return index_reg () != invalid_regno; }
     bool has_no_index_reg (void) const { return !has_index_reg (); }
 
@@ -229,6 +238,22 @@ public:
     // Notice that if it contains the any_regno placeholder, the resulting
     // rtx might not be completely valid.
     rtx to_rtx (void) const;
+
+    // Get all sub-expressions that are contained inside the addr_expr.
+    // For an addr_expr of the form base+index*scale+disp, the following
+    // sub-expressions are returned:
+    //
+    // nothing -> represented with an invalid address
+    // base
+    // index
+    // index*scale
+    // base+index*scale
+    // disp
+    // base+disp
+    // index*scale+disp
+    // base+index*scale+disp
+    template <typename OutputIterator> void
+    get_subterms (OutputIterator out) const;
 
     // Mutating functions.
     void set_base_reg (rtx val);
@@ -499,6 +524,19 @@ NOTE:
     std::list<ref_counting_ptr<sequence_element> >&
     dependencies (void) { return m_dependencies; }
 
+    // Return true if the effective address of FIRST and SECOND only differs in
+    // the constant displacement and the difference is the access size of FIRST.
+    static bool adjacent_inc (const sequence_element& first,
+                              const sequence_element& second);
+    static bool not_adjacent_inc (const sequence_element& first,
+                                  const sequence_element& second);
+
+    // Same as adjacent_inc, except that the displacement of SECOND should
+    // be the smaller one.
+    static bool adjacent_dec (const sequence_element& first,
+                              const sequence_element& second);
+    static bool not_adjacent_dec (const sequence_element& first,
+                                  const sequence_element& second);
 
   protected:
     sequence_element (element_type t) : m_type (t), m_cost (0) { }
@@ -751,6 +789,17 @@ NOTE:
     adjacent_chain_info m_dec_chain;
   };
 
+  template <element_type T1, element_type T2 = T1, element_type T3 = T1>
+  struct element_type_matches
+  {
+    bool operator () (const sequence_element& e) const
+    {
+      return e.access_type () == T1 || e.access_type () == T2
+	     || e.access_type () == T3;
+    }
+  };
+
+  struct element_to_optimize;
 
   class start_addr_list;
   typedef std::multimap<rtx, sequence_iterator, cmp_by_regno> addr_reg_map;
@@ -762,8 +811,36 @@ NOTE:
   class sequence
   {
   public:
+
+    // Split the access sequence pointed to by SEQ into multiple sequences,
+    // grouping the accesses that have common terms in their effective address
+    // together.  Return an iterator to the sequence that comes after the newly
+    // inserted sequences.
+    static std::list<sequence>::iterator
+    split_sequence (std::list<sequence>::iterator seq,
+                    std::list<sequence>& sequences);
+
+    // Trace back the effective address of REG, starting from EL.
+    // Insert a reg mod into the sequence for every address modifying
+    // insn that was used to arrive at REG's address.
+    addr_expr trace_effective_addr (rtx reg, sequence_iterator& el);
+
+    // Add a reg mod for every insn that modifies an address register.
+    void find_addr_reg_mods (void);
+
+    // Add a reg use for every use of an address register that's not a
+    // memory access
+    void find_addr_reg_uses (void);
+
+    // Generate the address modifications needed to arrive at the
+    // addresses in the sequence.
+    void gen_address_mod (delegate& dlg, int base_lookahead);
+
     // Update the original insn stream with the changes in this sequence.
     void update_insn_stream (bool allow_mem_addr_change_new_insns);
+
+    // Fill the m_inc/dec_chain fields of the sequence elements.
+    void calculate_adjacency_info (void);
 
     // The total cost of the accesses in the sequence.
     int cost (void) const;
@@ -782,14 +859,17 @@ NOTE:
     void update_access_alternatives (delegate& d, bool force_validation,
 				     bool disable_validation);
 
+    // Update the content of M_ADDR_REGS.
+    void update_addr_reg_list (void);
+
     // Insert a new element into the sequence.  Return an iterator pointing
     // to the newly inserted element.
-    sequence_iterator::iterator insert_element (sequence_iterator insert_before,
+    sequence_iterator insert_element (sequence_iterator insert_before,
                                                 sequence_element& el);
 
     // Remove an element from the sequence.  Return an iterator pointing
     // to the next element.
-    sequence_iterator::iterator remove_element (sequence_iterator el);
+    sequence_iterator remove_element (sequence_iterator el);
 
     // The first insn and basic block in the sequence.
     rtx_insn* start_insn (void) const;
@@ -845,36 +925,11 @@ NOTE:
 
   // A structure for keeping track of modifications to an access sequence.
   // Used in address mod generation for backtracking.
-  class mod_tracker
-  {
-  public:
-    mod_tracker (void)
-      {
-        m_inserted_accs.reserve (8);
-        m_use_changed_accs.reserve (4);
-        m_addr_changed_accs.reserve (4);
-      }
+  class mod_tracker;
 
-    void reset_changes (sequence &as);
-
-    // List of elements that were inserted into the sequence.
-    std::vector<sequence_iterator>&
-      inserted_els (void) { return m_inserted_els; }
-
-    // List of elements that got visited.
-    std::vector<sequence_iterator>&
-      visited_els (void) { return m_visited_els; }
-
-    // List of mem accesses whose address changed, along/ with their previous
-    // values.
-    std::vector<std::pair <sequence_iterator, addr_expr> >&
-      addr_changed_accs (void) { return m_addr_changed_accs; }
-
-  private:
-    std::vector<sequence_iterator> m_inserted_els;
-    std::vector<sequence_iterator> m_visited_els;
-    std::vector<std::pair <sequence_iterator, addr_expr> > m_addr_changed_accs;
-  };
+  // Used to store information about newly created sequences during
+  // sequence splitting.
+  class split_sequence_info;
 
   typedef std::list<sequence_element>::iterator sequence_iterator;
   typedef std::list<sequence_element>::const_iterator sequence_const_iterator;
