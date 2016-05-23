@@ -73,6 +73,9 @@
 #include "static_vector.h"
 #include "ref_counted.h"
 
+// Needed for the old AMS's delegate struct.
+#include "sh_ams.h"
+
 class sh_ams2 : public rtl_opt_pass
 {
 public:
@@ -216,6 +219,10 @@ public:
     scale_t scale (void) const { return m_scale; }
     scale_t scale_min (void) const { return m_scale_min; }
     scale_t scale_max (void) const { return m_scale_max; }
+
+    // Get all sub-expressions that are contained inside the addr_expr.
+    template <typename OutputIterator> void
+    get_all_subterms (OutputIterator out) const;
 
     bool operator == (const addr_expr& other) const;
     bool operator != (const addr_expr& other) const;
@@ -379,7 +386,9 @@ public:
   make_invalid_addr (void);
 
 
-  struct delegate;
+  // Reuse the old AMS's delegate to avoid duplicating functions
+  // in the delegate implementations.
+  typedef sh_ams::delegate delegate;
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // An alternative for an address mode.  These are usually provided
@@ -390,7 +399,7 @@ public:
     alternative (void) : m_valid (false) { }
 
     alternative (int cost, const addr_expr& ae)
-    : m_valid (true), m_addr_expr (ae), m_cost (cost) { }
+    : m_valid (true), m_cost (cost), m_addr_expr (ae) { }
 
     const addr_expr& address (void) const { return m_addr_expr; }
 
@@ -424,6 +433,7 @@ public:
   // Support a limited number of alternatives only.
   typedef static_vector<alternative, 16> alternative_set;
 
+  class sequence_element;
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // A sequence element's adjacency information.
@@ -432,9 +442,10 @@ public:
   {
   public:
     adjacent_chain_info (void)
-      : m_pos (0), m_len (1), m_first_acc (NULL), m_last_acc (NULL) { }
-    adjacent_chain_info (int p, int l, const access* fa, const access* la)
-      : m_pos (p), m_len (l), m_first_acc (fa), m_last_acc (la) { }
+      : m_pos (0), m_len (1), m_first_el (NULL), m_last_el (NULL) { }
+    adjacent_chain_info (int p, int l, const sequence_element* fe,
+                         const sequence_element* le)
+      : m_pos (p), m_len (l), m_first_el (fe), m_last_el (le) { }
 
     int pos (void) const { return m_pos; }
     int length (void) const { return m_len; }
@@ -442,14 +453,14 @@ public:
     bool is_first (void) const { return m_pos == 0; }
     bool is_last (void) const { return m_pos == m_len - 1; }
 
-    const access* first (void) const { return m_first_acc; }
-    const access* last (void) const { return m_last_acc; }
+    const sequence_element* first (void) const { return m_first_el; }
+    const sequence_element* last (void) const { return m_last_el; }
 
   private:
     int m_pos;
     int m_len;
-    const access* m_first_acc;
-    const access* m_last_acc;
+    const sequence_element* m_first_el;
+    const sequence_element* m_last_el;
   };
 
   // The type of an (access) sequence element.
@@ -464,7 +475,6 @@ public:
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-  class sequence_element;
   class mem_access;
   class mem_load;
   class mem_store;
@@ -794,15 +804,43 @@ NOTE:
   {
     bool operator () (const sequence_element& e) const
     {
-      return e.access_type () == T1 || e.access_type () == T2
-	     || e.access_type () == T3;
+      return e.type () == T1 || e.type () == T2
+	     || e.type () == T3;
     }
   };
 
   struct element_to_optimize;
 
-  class start_addr_list;
+  typedef std::list<sequence_element>::iterator sequence_iterator;
+  typedef std::list<sequence_element>::const_iterator sequence_const_iterator;
+  typedef std::list<sequence_element>::reverse_iterator sequence_reverse_iterator;
+  typedef std::list<sequence_element>::const_reverse_iterator sequence_const_reverse_iterator;
+
   typedef std::multimap<rtx, sequence_iterator, cmp_by_regno> addr_reg_map;
+
+  // A structure used to store the address regs that can be used as a starting
+  // point to arrive at another address during address mod generation.
+  class start_addr_list
+  {
+  public:
+
+    typedef std::list<sequence_iterator>::iterator iterator;
+    std::list<sequence_iterator>
+      get_relevant_addresses (const addr_expr& end_addr);
+
+    void add (sequence_iterator start_addr);
+    void remove (sequence_iterator start_addr);
+
+  private:
+
+    // List of addresses that only have a constant displacement.
+    std::list<sequence_iterator> m_const_addresses;
+
+    // A map for storing addresses that have a base and/or index reg.
+    // The key of each stored address is its base or index reg (the
+    // address is stored twice if it has both).
+    addr_reg_map m_reg_addresses;
+  };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // The access sequence that contains the memory accesses of some part of
@@ -884,35 +922,35 @@ NOTE:
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
 
     std::list<sequence_element>& elements (void) { return m_els; }
-    const std::list<access>& elements (void) const { return m_els; }
+    const std::list<sequence_element>& elements (void) const { return m_els; }
 
     // iterator decorator for iterating over different types of elements
     // in the access sequence.
     template <typename Match>
-    filter_iterator<iterator, Match> begin (void)
+    filter_iterator<sequence_iterator, Match> begin (void)
     {
-      typedef filter_iterator<iterator, Match> iter;
+      typedef filter_iterator<sequence_iterator, Match> iter;
       return iter (m_els.begin (), m_els.end ());
     }
 
     template <typename Match>
-    filter_iterator<iterator, Match> end (void)
+    filter_iterator<sequence_iterator, Match> end (void)
     {
-      typedef filter_iterator<iterator, Match> iter;
+      typedef filter_iterator<sequence_iterator, Match> iter;
       return iter (m_els.end (), m_els.end ());
     }
 
     template <typename Match>
-    filter_iterator<const_iterator, Match> begin (void) const
+    filter_iterator<sequence_const_iterator, Match> begin (void) const
     {
-      typedef filter_iterator<const_iterator, Match> iter;
+      typedef filter_iterator<sequence_const_iterator, Match> iter;
       return iter (m_els.begin (), m_els.end ());
     }
 
     template <typename Match>
-    filter_iterator<const_iterator, Match> end (void) const
+    filter_iterator<sequence_const_iterator, Match> end (void) const
     {
-      typedef filter_iterator<const_iterator, Match> iter;
+      typedef filter_iterator<sequence_const_iterator, Match> iter;
       return iter (m_els.end (), m_els.end ());
     }
 
@@ -930,80 +968,6 @@ NOTE:
   // Used to store information about newly created sequences during
   // sequence splitting.
   class split_sequence_info;
-
-  typedef std::list<sequence_element>::iterator sequence_iterator;
-  typedef std::list<sequence_element>::const_iterator sequence_const_iterator;
-  typedef std::list<sequence_element>::reverse_iterator sequence_reverse_iterator;
-  typedef std::list<sequence_element>::const_reverse_iterator sequence_const_reverse_iterator;
-
-  // A structure used to store the address regs that can be used as a starting
-  // point to arrive at another address during address mod generation.
-  class start_addr_list
-  {
-  public:
-
-    typedef std::list<sequence_iterator>::iterator iterator;
-    std::list<sequence_iterator>
-      get_relevant_addresses (const addr_expr& end_addr);
-
-    void add (sequence_iterator start_addr);
-    void remove (sequence_iterator start_addr);
-
-  private:
-
-    // List of addresses that only have a constant displacement.
-    std::list<sequence_iterator> m_const_addresses;
-
-    // A map for storing addresses that have a base and/or index reg.
-    // The key of each stored address is its base or index reg (the
-    // address is stored twice if it has both).
-    addr_reg_map m_reg_addresses;
-  };
-
-  // a delegate for the ams pass.  usually implemented by the target.
-  struct delegate
-  {
-    // provide alternatives for the specified access.
-    // use access::add_alternative.
-    virtual void
-    alternatives (alternative_set& alt, const sequence& as,
-		  sequence_const_iterator acc, bool& validate_alternatives);
-
-    // adjust the costs of the specified alternative of the specified
-    // access.  called after the alternatives of all accesses have
-    // been retrieved.
-    virtual void
-    adjust_alternative_costs (alternative& alt,
-			      const sequence& as,
-			      sequence_const_iterator acc);
-
-    // provide the number of subsequent accesses that should be taken into
-    // account when trying to minimize the costs of the specified access.
-    virtual int
-    adjust_lookahead_count (const sequence& as,
-			    sequence_const_iterator acc);
-
-    // provide the cost for setting the specified address register to
-    // an rtx expression.
-    // the cost must be somehow relative to the cost provided for access
-    // alternatives.
-    virtual int
-    addr_reg_mod_cost (const_rtx reg, const_rtx val,
-		       const sequence& as,
-		       sequence_const_iterator acc);
-
-    // provide the cost for cloning the address register, which is usually
-    // required when splitting an access sequence.  if (address) register
-    // pressure is high, return a higher cost to avoid splitting.
-    //
-    // FIXME: alternative would be 'sequence_split_cost'
-    virtual int
-    addr_reg_clone_cost (const_rtx reg, const sequence& as,
-			 sequence_const_iterator acc);
-  };
-
-  // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
 
   sh_ams2 (gcc::context* ctx, const char* name, delegate& dlg,
 	  const options& opt = options ());

@@ -378,4 +378,8 @@ Specify AMS specific options (transitional)
 
 mams2
 Target Report Var(sh_ams2_enable) Init(0)
-Enable AMS after sh_treg_combine2 (transitional)
+Enable or disable the new AMS pass (transitional).
+
+mams2-opt=
+Target Report RejectNegative Joined Var(sh_ams2_opt)
+Specify AMS specific options (transitional).
