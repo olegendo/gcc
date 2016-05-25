@@ -210,6 +210,127 @@ log_addr_expr (const sh_ams2::addr_expr& ae)
   gcc_unreachable ();
 }
 
+void
+log_sequence_element_location (const sh_ams2::sequence_element& e)
+{
+  if (e.insn () != NULL)
+    log_msg ("at insn %d [bb %d]", INSN_UID (e.insn ()),
+				   BLOCK_FOR_INSN (e.insn ())->index);
+  else
+    log_msg ("at insn: ?");
+}
+
+void
+log_sequence_element (const sh_ams2::sequence_element& e,
+                      bool log_alternatives = true)
+{
+  if (dump_file == NULL)
+    return;
+
+  if (e.type () == sh_ams2::type_mem_load)
+    log_msg ("mem_load ");
+  else if (e.type () == sh_ams2::type_mem_store)
+    log_msg ("mem_store ");
+  else if (e.type () == sh_ams2::type_mem_operand)
+    log_msg ("mem_operand ");
+  else if (e.type () == sh_ams2::type_reg_mod)
+    log_msg ("reg_mod ");
+  else if (e.type () == sh_ams2::type_reg_barrier)
+    log_msg ("reg_barrier ");
+  else if (e.type () == sh_ams2::type_reg_use)
+    log_msg ("reg_use ");
+  else
+    gcc_unreachable ();
+
+  log_sequence_element_location (e);
+
+  if (e.type () == sh_ams2::type_mem_load
+      || e.type () == sh_ams2::type_mem_store
+      || e.type () == sh_ams2::type_mem_operand)
+    {
+      const sh_ams2::mem_access& m = (const sh_ams2::mem_access&)e;
+
+      log_msg ("\n  current addr:   ");
+
+      if (m.current_addr ().is_invalid ())
+        {
+          if (m.current_addr_rtx ())
+            log_rtx (m.current_addr_rtx ());
+          else
+            log_msg ("unknown");
+        }
+      else
+        log_addr_expr (m.current_addr ());
+
+      if (!m.effective_addr ().is_invalid ())
+        {
+          log_msg ("\n  effective addr:  ");
+          log_addr_expr (m.effective_addr ());
+        }
+    }
+
+  if (e.cost () == sh_ams2::infinite_costs)
+    log_msg ("\n  cost: infinite");
+  else
+    log_msg ("\n  cost: %d", e.cost ());
+
+  if (e.inc_chain ().length () > 1)
+    log_msg ("\n  (inc chain pos: %d  length: %d)", e.inc_chain ().pos (),
+						    e.inc_chain ().length ());
+  if (e.dec_chain ().length () > 1)
+    log_msg ("\n  (dec chain pos: %d  length: %d)", e.dec_chain ().pos (),
+						    e.dec_chain ().length ());
+
+  if (log_alternatives
+      && (e.type () == sh_ams2::type_mem_load
+          || e.type () == sh_ams2::type_mem_store
+          || e.type () == sh_ams2::type_mem_operand))
+    {
+      const sh_ams2::mem_access& m = (const sh_ams2::mem_access&)e;
+
+      log_msg ("\n  %d alternatives:\n", m.alternatives ().size ());
+      int alt_count = 0;
+      for (sh_ams2::alternative_set::const_iterator
+		alt = m.alternatives ().begin ();
+           alt != m.alternatives ().end (); ++alt)
+        {
+          if (alt_count > 0)
+            log_msg ("\n");
+
+          log_msg ("    alt %d, cost %d, valid %d: ",
+		   alt_count, alt->cost (), alt->valid ());
+          log_addr_expr (alt->address ());
+          ++alt_count;
+        }
+    }
+}
+
+void
+log_sequence (const sh_ams2::sequence& seq, bool log_alternatives = true)
+{
+  if (dump_file == NULL)
+    return;
+
+  log_msg ("=====\naccess sequence %p: %s\n\n", (const void*)&seq,
+	   seq.elements ().empty () ? "is empty" : "");
+
+  if (seq.elements ().empty ())
+    return;
+
+  for (sh_ams2::sequence_const_iterator it = seq.elements ().begin ();
+       it != seq.elements ().end (); ++it)
+    {
+      log_sequence_element (**it, log_alternatives);
+      log_msg ("\n-----\n");
+    }
+
+  int c = seq.cost ();
+  if (c == sh_ams2::infinite_costs)
+    log_msg ("total cost: infinite");
+  else
+    log_msg ("total cost: %d", seq.cost ());
+}
+
 bool
 remove_incdec_notes (rtx_insn* i)
 {
@@ -524,6 +645,381 @@ sh_ams2::addr_expr::get_all_subterms (OutputIterator out) const
 
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 
+// Insert a new element into the sequence.  Return an iterator pointing
+// to the newly inserted element.
+sh_ams2::sequence_iterator
+sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el,
+                                   sh_ams2::sequence_iterator insert_before)
+{
+  return elements ().insert(insert_before, el);
+}
+
+// The total cost of the accesses in the sequence.
+int
+sh_ams2::sequence::cost (void) const
+{
+  int cost = 0;
+  for (sequence_const_iterator els = elements ().begin ();
+       els != elements ().end () && cost != infinite_costs; ++els)
+    cost += (*els)->cost ();
+  return cost;
+}
+
+// TODO: Implement these functions.  For now, they are defined as empty
+// functions to avoid undefined references.
+bool sh_ams2::
+mem_load::try_replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_load::replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_load::try_replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_load::replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+
+bool
+sh_ams2::mem_store::try_replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_store::try_replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_store::replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+
+bool sh_ams2::
+mem_operand::try_replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_operand::try_replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+bool sh_ams2::
+mem_operand::replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+
+
+// Return a non_mod_addr if it can be created with the given scale and
+// displacement.  Otherwise, return an invalid address.
+sh_ams2::addr_expr
+sh_ams2::check_make_non_mod_addr (rtx base_reg, rtx index_reg,
+                                  HOST_WIDE_INT scale, HOST_WIDE_INT disp)
+{
+  if (((base_reg || index_reg)
+       && sext_hwi (disp, GET_MODE_PRECISION (Pmode)) != disp)
+      || sext_hwi (scale, GET_MODE_PRECISION (Pmode)) != scale)
+    return make_invalid_addr ();
+
+  return non_mod_addr (base_reg, index_reg, scale, disp);
+}
+
+// Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
+// from the rtx X.
+sh_ams2::addr_expr
+sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
+{
+  addr_expr op0 = make_invalid_addr ();
+  addr_expr op1 = make_invalid_addr ();
+  HOST_WIDE_INT disp;
+  HOST_WIDE_INT scale;
+  rtx base_reg, index_reg;
+  if (x == NULL_RTX)
+    return make_invalid_addr ();
+
+  enum rtx_code code = GET_CODE (x);
+
+  // If X is an arithmetic operation, first create ADDR_EXPR structs
+  // from its operands. These will later be combined into a single ADDR_EXPR.
+  if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
+    {
+      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
+      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode);
+      if (op0.is_invalid () || op1.is_invalid ())
+        return make_invalid_addr ();
+    }
+  else if (code == NEG)
+    {
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
+      if (op1.is_invalid ())
+        return op1;
+    }
+
+  else if (GET_RTX_CLASS (code) == RTX_AUTOINC)
+    {
+      addr_type_t mod_type;
+
+      switch (code)
+        {
+        case POST_DEC:
+          disp = -GET_MODE_SIZE (mem_mach_mode);
+          mod_type = post_mod;
+          break;
+        case POST_INC:
+          disp = GET_MODE_SIZE (mem_mach_mode);
+          mod_type = post_mod;
+          break;
+        case PRE_DEC:
+          disp = -GET_MODE_SIZE (mem_mach_mode);
+          mod_type = pre_mod;
+          break;
+        case PRE_INC:
+          disp = GET_MODE_SIZE (mem_mach_mode);
+          mod_type = pre_mod;
+          break;
+        case POST_MODIFY:
+          {
+            addr_expr a = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
+            if (a.is_invalid ())
+              return make_invalid_addr ();
+            return post_mod_addr (a.base_reg (), a.disp ());
+          }
+        case PRE_MODIFY:
+          {
+            addr_expr a = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode);
+            if (a.is_invalid ())
+              return make_invalid_addr ();
+            return pre_mod_addr (a.base_reg (), a.disp ());
+          }
+
+        default:
+          return make_invalid_addr ();
+        }
+
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
+      if (op1.is_invalid ())
+        return op1;
+
+      disp += op1.disp ();
+
+      if (mod_type == post_mod)
+        return post_mod_addr (op1.base_reg (), disp);
+      else
+        return pre_mod_addr (op1.base_reg (), disp);
+    }
+
+  switch (code)
+    {
+
+    // For CONST_INT and REG, the set the base register or the displacement
+    // to the appropriate value.
+    case CONST_INT:
+      return make_const_addr (x);
+
+    case REG:
+        return make_reg_addr (x);
+
+    // Handle MINUS by inverting OP1 and proceeding to PLUS.
+    // NEG is handled similarly, but returns with OP1 after inverting it.
+    case NEG:
+    case MINUS:
+
+      // Only expressions of the form base + index * (-1) + disp
+      // or base + disp are inverted.
+      if (op1.has_index_reg () && op1.scale () != -1)
+        break;
+
+      if (op1.has_index_reg ())
+        scale = op1.scale ();
+      else
+        scale = 1;
+
+      op1 = check_make_non_mod_addr (op1.index_reg (), op1.base_reg (),
+                                     -scale, -op1.disp ());
+
+      if (code == NEG || op1.is_invalid ())
+        return op1;
+
+    case PLUS:
+      disp = op0.disp () + op1.disp ();
+      index_reg = invalid_regno;
+      scale = 0;
+
+      // If the same reg is used in both addresses, try to
+      // merge them into one reg.
+      if (op0.base_reg () == op1.base_reg ())
+        {
+	  if (op0.has_no_index_reg ())
+            {
+              op1 = check_make_non_mod_addr (invalid_regno, op1.index_reg (),
+                                             op1.scale (), op1.disp ());
+              op0 = check_make_non_mod_addr (invalid_regno, op0.base_reg (),
+                                             2, op0.disp ());
+            }
+          else if (op1.has_no_index_reg ())
+            {
+              op0 = check_make_non_mod_addr (invalid_regno, op0.index_reg (),
+                                             op0.scale (), op0.disp ());
+              op1 = check_make_non_mod_addr (invalid_regno, op1.base_reg (),
+                                             2, op1.disp ());
+              if (op1.is_invalid ())
+                break;
+            }
+        }
+      if (op0.base_reg () == op1.index_reg ())
+        {
+          op0 = check_make_non_mod_addr (invalid_regno, op0.index_reg (),
+                                         op0.scale (), op0.disp ());
+
+          op1 = check_make_non_mod_addr (op1.base_reg (), op1.index_reg (),
+                                         op1.scale () + 1, op1.disp ());
+          if (op1.is_invalid ())
+            break;
+        }
+      if (op1.base_reg () == op0.index_reg ())
+        {
+          op1 = check_make_non_mod_addr (invalid_regno, op1.index_reg (),
+                                         op1.scale (), op1.disp ());
+          op0 = check_make_non_mod_addr (op0.base_reg (), op0.index_reg (),
+                                         op0.scale () + 1, op0.disp ());
+          if (op0.is_invalid ())
+            break;
+
+        }
+      if (op0.index_reg () == op1.index_reg ())
+        {
+          op0 = check_make_non_mod_addr (op0.base_reg (), op0.index_reg (),
+                                         op0.scale () + op1.scale (), op0.disp ());
+          op1 = check_make_non_mod_addr (op1.base_reg (), invalid_regno,
+                                         0, op1.disp ());
+          if (op0.is_invalid ())
+            break;
+        }
+
+      // If only one operand has a base register, that will
+      // be the base register of the sum.
+      if (op0.has_no_base_reg ())
+        base_reg = op1.base_reg ();
+      else if (op1.has_no_base_reg ())
+        base_reg = op0.base_reg ();
+
+      // Otherwise, one of the base regs becomes the index reg
+      // (with scale = 1).
+      else if (op0.has_no_index_reg () && op1.has_no_index_reg ())
+        {
+          base_reg = op0.base_reg ();
+          index_reg = op1.base_reg ();
+          scale = 1;
+        }
+
+      // If both operands have a base reg and one of them also has
+      // an index reg, they can't be combined.
+      else
+        break;
+
+      // If only one of the operands has a base reg and only one
+      // has an index reg, combine them.
+      if (index_reg == invalid_regno)
+        {
+          if (op0.has_no_index_reg ())
+            {
+              index_reg = op1.index_reg ();
+              scale = op1.scale ();
+            }
+          else if (op1.has_no_index_reg ())
+            {
+              index_reg = op0.index_reg ();
+              scale = op0.scale ();
+            }
+          else
+            break;
+        }
+      return check_make_non_mod_addr (base_reg, index_reg, scale, disp);
+
+    // Change shift into multiply.
+    case ASHIFT:
+
+      // OP1 must be a non-negative constant.
+      if (op1.has_no_base_reg () && op1.has_no_index_reg ()
+          && op1.disp () >= 0)
+        {
+          disp_t mul = disp_t (1) << op1.disp ();
+          op1 = check_make_non_mod_addr (invalid_regno, invalid_regno, 0, mul);
+          if (op1.is_invalid ())
+            break;
+        }
+      else
+        break;
+    case MULT:
+
+      // One of the operands must be a constant term.
+      // Bring it to the right side.
+      if (op0.has_no_base_reg () && op0.has_no_index_reg ())
+        std::swap (op0, op1);
+      if (op1.has_base_reg () || op1.has_index_reg ())
+        break;
+
+      // Only one register can be scaled, so OP0 can have either a
+      // BASE_REG or an INDEX_REG.
+      if (op0.has_no_base_reg ())
+        {
+          index_reg = op0.index_reg ();
+          scale = op0.scale () * op1.disp ();
+        }
+      else if (op0.has_no_index_reg ())
+        {
+          index_reg = op0.base_reg ();
+          scale = op1.disp ();
+        }
+      else
+        break;
+      return check_make_non_mod_addr (invalid_regno, index_reg,
+                                      scale, op0.disp () * op1.disp ());
+    default:
+      break;
+    }
+  return make_invalid_addr ();
+}
+
+// Find the memory accesses in X and add them to OUT.
+// TYPE indicates the type of the next mem that we
+// find (i.e. mem_load, mem_store or mem_operand).
+template <typename OutputIterator> void
+sh_ams2::find_mem_accesses (rtx& x, OutputIterator out,
+                            sh_ams2::element_type type)
+{
+  switch (GET_CODE (x))
+    {
+    case MEM:
+      mem_access* acc;
+
+      switch (type)
+        {
+        case type_mem_load:
+          acc = new mem_load ();
+          break;
+        case type_mem_store:
+          acc = new mem_store ();
+          break;
+        case type_mem_operand:
+          acc = new mem_operand ();
+          break;
+        default:
+          gcc_unreachable ();
+        }
+      acc->set_current_addr_rtx (XEXP (x, 0));
+      acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
+      *out++ = acc;
+      break;
+
+    case PARALLEL:
+      for (int i = 0; i < XVECLEN (x, 0); i++)
+        find_mem_accesses (XVECEXP (x, 0, i), out, type);
+      break;
+
+    case SET:
+      find_mem_accesses (SET_DEST (x), out, type_mem_store);
+      find_mem_accesses (SET_SRC (x), out, type_mem_load);
+      break;
+
+    case CALL:
+      find_mem_accesses (XEXP (x, 0), out, type_mem_load);
+      break;
+
+    default:
+      if (UNARY_P (x) || ARITHMETIC_P (x))
+        {
+          for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
+            find_mem_accesses (XEXP (x, i), out, type);
+        }
+      break;
+    }
+}
+
 unsigned int
 sh_ams2::execute (function* fun)
 {
@@ -537,6 +1033,7 @@ sh_ams2::execute (function* fun)
   df_analyze ();
 
   std::list<sequence> sequences;
+  std::vector<mem_access*> mems;
 
   log_msg ("extracting access sequences\n");
   basic_block bb;
@@ -547,7 +1044,30 @@ sh_ams2::execute (function* fun)
       log_msg ("BB #%d:\n", bb->index);
       log_msg ("finding mem accesses\n");
 
-      // TODO
+      // Create a new sequence from the mem accesses in this BB.
+      sequences.push_back (sequence ());
+      sequence& seq = sequences.back ();
+
+      FOR_BB_INSNS (bb, i)
+        {
+          if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+            continue;
+
+          // Search for memory accesses inside the current insn
+          // and add them to the address sequence.
+          mems.clear ();
+          find_mem_accesses (PATTERN (i), std::back_inserter (mems));
+
+          for (std::vector<mem_access*>::iterator m = mems.begin ();
+               m != mems.end (); ++m)
+            {
+              // TODO: calculate effective address
+              (*m)->set_insn (i);
+              seq.insert_element (*m, seq.elements ().end ());
+            }
+         }
+      log_sequence (seq, false);
+      log_msg ("\n");
     }
 
   log_msg ("\nprocessing extracted sequences\n");

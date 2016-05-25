@@ -190,7 +190,6 @@ public:
   {
   public:
     addr_expr (void) : m_cached_to_rtx (NULL) { }
-    addr_expr (rtx addr_rtx);
 
     addr_type_t type (void) const { return m_type; }
 
@@ -385,7 +384,6 @@ public:
   static addr_expr
   make_invalid_addr (void);
 
-
   // Reuse the old AMS's delegate to avoid duplicating functions
   // in the delegate implementations.
   typedef sh_ams::delegate delegate;
@@ -501,6 +499,7 @@ public:
     // The insn rtx of this element.  Maybe null if it has been inserted
     // by AMS into the sequence and is not present in the original insn list.
     rtx_insn* insn (void) const { return m_insn; }
+    void set_insn (rtx_insn* i) { m_insn = i; }
 
     // An increasing/decreasing chain of adjacent accesses that this access
     // is part of.
@@ -549,7 +548,8 @@ NOTE:
                                   const sequence_element& second);
 
   protected:
-    sequence_element (element_type t) : m_type (t), m_cost (0) { }
+    sequence_element (element_type t)
+    : m_type (t), m_cost (0), m_insn (NULL) { }
 
   private:
     static const adjacent_chain_info g_no_incdec_chain;
@@ -613,20 +613,23 @@ NOTE:
     // The effective address expression.
     // Might be invalid if AMS was not able to understand it.
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
-    void set_effective_addr (const addr_expr& new_addr);
+    void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
 
     // The address expression rtx as it is currently being used in the mem
     // rtx in the insn.
     rtx current_addr_rtx (void) const { return m_current_addr_rtx; }
-    void set_current_addr_rtx (rtx new_addr_rtx);
+    void set_current_addr_rtx (rtx addr_rtx) { m_current_addr_rtx = addr_rtx; }
 
     // The address expression that is currently being used.
     // Might be invalid if AMS was not able to understand it.
     const addr_expr& current_addr (void) const { return m_current_addr; }
-    void set_current_addr (const addr_expr& new_addr);
+    void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
   protected:
-    mem_access (element_type t) : sequence_element (t) { }
+    mem_access (element_type t)
+      : sequence_element (t), m_effective_addr (make_invalid_addr ()),
+      m_current_addr (make_invalid_addr ()),
+      m_current_addr_rtx (NULL) { }
 
     // The address expressions are usually set/updated by the sub-class.
     addr_expr m_effective_addr;
@@ -647,6 +650,8 @@ NOTE:
   public:
     mem_load (void) : mem_access (type_mem_load) { };
 
+    virtual bool try_replace_addr (const addr_expr& new_addr);
+    virtual bool replace_addr (const addr_expr& new_addr);
     virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
     virtual bool replace_addr_rtx (const addr_expr& new_addr);
 
@@ -664,6 +669,8 @@ NOTE:
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
+    virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
+    virtual bool replace_addr_rtx (const addr_expr& new_addr);
 
   private:
     // Reference into the rtx_insn where the mem rtx resides.
@@ -682,6 +689,8 @@ NOTE:
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
+    virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
+    virtual bool replace_addr_rtx (const addr_expr& new_addr);
 
   private:
     // References into the rtx_insn where the mem rtx'es reside.
@@ -811,10 +820,10 @@ NOTE:
 
   struct element_to_optimize;
 
-  typedef std::list<sequence_element>::iterator sequence_iterator;
-  typedef std::list<sequence_element>::const_iterator sequence_const_iterator;
-  typedef std::list<sequence_element>::reverse_iterator sequence_reverse_iterator;
-  typedef std::list<sequence_element>::const_reverse_iterator sequence_const_reverse_iterator;
+  typedef std::list<sequence_element*>::iterator sequence_iterator;
+  typedef std::list<sequence_element*>::const_iterator sequence_const_iterator;
+  typedef std::list<sequence_element*>::reverse_iterator sequence_reverse_iterator;
+  typedef std::list<sequence_element*>::const_reverse_iterator sequence_const_reverse_iterator;
 
   typedef std::multimap<rtx, sequence_iterator, cmp_by_regno> addr_reg_map;
 
@@ -902,8 +911,8 @@ NOTE:
 
     // Insert a new element into the sequence.  Return an iterator pointing
     // to the newly inserted element.
-    sequence_iterator insert_element (sequence_iterator insert_before,
-                                                sequence_element& el);
+    sequence_iterator insert_element (sequence_element* el,
+                                      sequence_iterator insert_before);
 
     // Remove an element from the sequence.  Return an iterator pointing
     // to the next element.
@@ -921,8 +930,8 @@ NOTE:
     // used to arrive at a given destination address.
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
 
-    std::list<sequence_element>& elements (void) { return m_els; }
-    const std::list<sequence_element>& elements (void) const { return m_els; }
+    std::list<sequence_element*>& elements (void) { return m_els; }
+    const std::list<sequence_element*>& elements (void) const { return m_els; }
 
     // iterator decorator for iterating over different types of elements
     // in the access sequence.
@@ -955,7 +964,7 @@ NOTE:
     }
 
   private:
-    std::list<sequence_element> m_els;
+    std::list<sequence_element*> m_els;
     addr_reg_map m_addr_regs;
     start_addr_list m_start_addr_list;
 
@@ -976,6 +985,16 @@ NOTE:
   virtual bool gate (function* fun);
   virtual unsigned int execute (function* fun);
 
+  // Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
+  // from the rtx X.
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode = Pmode);
+
+  // Find the memory accesses in X and add them to OUT.
+  // ACCESS_TYPE indicates the type of the next mem that we
+  // find (i.e. mem_load, mem_store or mem_operand).
+  template <typename OutputIterator>
+  static void find_mem_accesses (rtx& x, OutputIterator out,
+                                 element_type type = type_mem_load);
   void set_options (const options& opt);
 
 private:
