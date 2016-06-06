@@ -244,9 +244,7 @@ log_sequence_element (const sh_ams2::sequence_element& e,
 
   log_sequence_element_location (e);
 
-  if (e.type () == sh_ams2::type_mem_load
-      || e.type () == sh_ams2::type_mem_store
-      || e.type () == sh_ams2::type_mem_operand)
+  if (e.is_mem_access ())
     {
       const sh_ams2::mem_access& m = (const sh_ams2::mem_access&)e;
 
@@ -266,6 +264,29 @@ log_sequence_element (const sh_ams2::sequence_element& e,
         {
           log_msg ("\n  effective addr:  ");
           log_addr_expr (m.effective_addr ());
+        }
+    }
+  else if (e.type () == sh_ams2::type_reg_mod)
+    {
+      const sh_ams2::reg_mod& rm = (const sh_ams2::reg_mod&)e;
+      log_msg ("  set ");
+      log_rtx (rm.reg ());
+      log_msg ("\n  current addr:   ");
+
+      if (rm.addr ().is_invalid ())
+        {
+          if (rm.value ())
+            log_rtx (rm.value ());
+          else
+            log_msg ("unknown");
+        }
+      else
+        log_addr_expr (rm.addr ());
+
+      if (!rm.effective_addr ().is_invalid ())
+        {
+          log_msg ("\n  effective addr:  ");
+          log_addr_expr (rm.effective_addr ());
         }
     }
 
@@ -651,7 +672,110 @@ sh_ams2::sequence_iterator
 sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el,
                                    sh_ams2::sequence_iterator insert_before)
 {
-  return elements ().insert(insert_before, el);
+  sequence_iterator iter = elements ().insert (insert_before, el);
+
+  // Update the insn -> element map.
+  if (el->insn ())
+      m_insn_el_map.insert (std::make_pair (el->insn (), iter));
+
+  return iter;
+}
+
+// Same as the previous function, except that the place of the element
+// is determined by its insn and no duplicates are allowed.
+// If the element is already inside the sequence, return an iterator to
+// the sequence's end.
+sh_ams2::sequence_iterator
+sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
+{
+  if (elements ().empty ())
+    return insert_element (el, elements ().end ());
+
+  // Elements without an insn go to the sequence's start.
+  if (!el->insn ())
+    {
+      // Check for duplicates.
+      for (sequence_iterator els = elements ().begin ();
+           els != elements ().end () && !(*els)->insn (); ++els)
+        {
+          if (elements_equal (el, *els))
+              return elements ().end ();
+        }
+
+      return insert_element (el, elements ().begin ());
+    }
+
+  if (!elements ().back ()->insn ())
+      return insert_element (el, elements ().end ());
+
+  // If the sequence element's insn contains other elements, insert
+  // the element after them.
+  std::pair<insn_map::iterator, insn_map::iterator>
+    els_in_insn = elements_in_insn (el->insn ());
+  if (els_in_insn.first != els_in_insn.second)
+    {
+      // Check for duplicates.
+      for (insn_map::iterator els = els_in_insn.first;
+           els != els_in_insn.second; ++els)
+        {
+          if (elements_equal (el, *els->second))
+            return elements ().end ();
+        }
+
+      for (insn_map::iterator els = els_in_insn.first;
+           els != els_in_insn.second; ++els)
+        {
+          sequence_iterator insert_after = els->second;
+          if (stdx::next(insert_after) == elements ().end ()
+              || (*stdx::next (insert_after))->insn ()
+                != (*insert_after)->insn ())
+            return insert_element (el, stdx::next (insert_after));
+        }
+    }
+
+  // Otherwise, insert it before the next insn's elements.
+  for (rtx_insn* i = NEXT_INSN (el->insn ()); ; i = NEXT_INSN (i))
+    {
+      els_in_insn = elements_in_insn (i);
+      if (els_in_insn.first == els_in_insn.second)
+        continue;
+
+      for (insn_map::iterator els = els_in_insn.first;
+           els != els_in_insn.second; ++els)
+        {
+          sequence_iterator insert_before = els->second;
+          if (insert_before == elements ().begin ()
+              || (*stdx::prev (insert_before))->insn ()
+                != (*insert_before)->insn ())
+            return insert_element (el, insert_before);
+        }
+      gcc_unreachable ();
+    }
+
+  gcc_unreachable ();
+}
+
+// Remove an element from the sequence.  Return an iterator pointing
+// to the next element.
+sh_ams2::sequence_iterator
+sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el)
+{
+  // Update the insn -> element map.
+  if ((*el)->insn ())
+    {
+      std::pair<insn_map::iterator, insn_map::iterator> range
+        = m_insn_el_map.equal_range ((*el)->insn ());
+      for (insn_map::iterator els = range.first; els != range.second; ++els)
+        {
+          if (els->second == el)
+            {
+              m_insn_el_map.erase (els);
+              break;
+            }
+        }
+    }
+
+  return elements ().erase (el);
 }
 
 // The total cost of the accesses in the sequence.
@@ -663,6 +787,107 @@ sh_ams2::sequence::cost (void) const
        els != elements ().end () && cost != infinite_costs; ++els)
     cost += (*els)->cost ();
   return cost;
+}
+
+// Find the value that REG was last set to, starting the search from
+// START_INSN.  Return that value along with the insn in which REG gets
+// modified.  If the value of REG cannot be determined, return NULL.
+// If REG didn't get modified, return the REG itself.
+std::pair<rtx, rtx_insn*>
+sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
+{
+  std::vector<mem_access*> mems;
+
+  // Go back through the insn list until we find the last instruction
+  // that modified the register.
+  rtx_insn* i;
+  for (i = start_insn; i != NULL_RTX; i = prev_nonnote_insn_bb (i))
+    {
+      if (BARRIER_P (i))
+	return std::make_pair (NULL_RTX, i);
+      if (!INSN_P (i) || DEBUG_INSN_P (i))
+	continue;
+
+      if (reg_set_p (reg, i) && CALL_P (i))
+	return std::make_pair (NULL_RTX, i);
+
+      std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
+      if (r.second)
+        {
+          rtx value = r.first ? SET_SRC (r.first) : NULL_RTX;
+          return std::make_pair (value, i);
+        }
+      else if (find_regno_note (i, REG_INC, REGNO (reg)) != NULL)
+        {
+          // Search for auto-mod memory accesses in the current
+          // insn that modify REG.
+          std::pair<insn_map::iterator, insn_map::iterator>
+            els_in_insn = elements_in_insn (i);
+          for (insn_map::iterator els = els_in_insn.first;
+               els != els_in_insn.second; ++els)
+            {
+              if (!(*els->second)->is_mem_access ())
+                continue;
+
+              mem_access* acc = (mem_access*)*els->second;
+              rtx mem_addr = acc->current_addr_rtx ();
+              rtx_code code = GET_CODE (mem_addr);
+
+              if (GET_RTX_CLASS (code) == RTX_AUTOINC
+                  && REG_P (XEXP (mem_addr, 0))
+                  && regs_equal (XEXP (mem_addr, 0), reg))
+                return std::make_pair (mem_addr, i);
+            }
+        }
+    }
+
+  return std::make_pair (reg, i);
+}
+
+// The recursive part of find_reg_value. If REG is modified in INSN,
+// return true and the SET pattern that modifies it. Otherwise, return
+// false.
+std::pair<rtx, bool>
+sh_ams2::sequence::find_reg_value_1 (rtx reg, rtx pat)
+{
+  switch (GET_CODE (pat))
+    {
+    case SET:
+      {
+        rtx dest = SET_DEST (pat);
+        if (REG_P (dest) && regs_equal (dest, reg))
+          {
+            // We're in the last insn that modified REG, so return
+            // the modifying SET rtx.
+            return std::make_pair (pat, true);
+          }
+      }
+      break;
+
+    case CLOBBER:
+      {
+        rtx dest = XEXP (pat, 0);
+        if (REG_P (dest) && regs_equal (dest, reg))
+	  {
+	    // The value of REG is unknown.
+	    return std::make_pair (NULL_RTX, true);
+	  }
+      }
+      break;
+
+    case PARALLEL:
+      for (int i = 0; i < XVECLEN (pat, 0); i++)
+        {
+          std::pair<rtx, bool> r = find_reg_value_1 (reg, XVECEXP (pat, 0, i));
+          if (r.second)
+            return r;
+        }
+      break;
+
+    default:
+      break;
+    }
+  return std::make_pair (NULL_RTX, false);
 }
 
 // TODO: Implement these functions.  For now, they are defined as empty
@@ -693,6 +918,47 @@ mem_operand::try_replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return 
 bool sh_ams2::
 mem_operand::replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
 
+// Check whether two sequence elements are duplicates.
+bool
+sh_ams2::elements_equal (const sequence_element* el1,
+                         const sequence_element* el2)
+{
+  if (el1->type () != el2->type ())
+    return false;
+
+  if (el1->is_mem_access ())
+    {
+      const mem_access* m1 = (const mem_access*)el1;
+      const mem_access* m2 = (const mem_access*)el2;
+      return m1->effective_addr () == m2->effective_addr ()
+        && m1->current_addr_rtx () == m2->current_addr_rtx ()
+        && m1->current_addr () == m2->current_addr ();
+    }
+
+  if (el1->type () == type_reg_mod)
+    {
+      const reg_mod* rm1 = (const reg_mod*)el1;
+      const reg_mod* rm2 = (const reg_mod*)el2;
+      return regs_equal (rm1->reg (), rm2->reg ())
+        && rm1->value () == rm2->value ()
+        && rm1->addr () == rm2->addr ()
+        && rm1->effective_addr () == rm2->effective_addr ();
+    }
+
+  if (el1->type () == type_reg_barrier)
+    return regs_equal (((const reg_barrier*)el1)->reg (),
+                       ((const reg_barrier*)el2)->reg ());
+
+  if (el1->type () == type_reg_use)
+    {
+      const reg_use* ru1 = (const reg_use*)el1;
+      const reg_use* ru2 = (const reg_use*)el2;
+      return regs_equal (ru1->reg (), ru2->reg ())
+        && ru1->effective_addr () == ru2->effective_addr ();
+    }
+
+  gcc_unreachable ();
+}
 
 // Return a non_mod_addr if it can be created with the given scale and
 // displacement.  Otherwise, return an invalid address.
@@ -710,9 +976,16 @@ sh_ams2::check_make_non_mod_addr (rtx base_reg, rtx index_reg,
 
 // Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
 // from the rtx X.
+// If SEQ and ACC is not null, trace back the effective addresses of the
+// registers in X (starting from ACC) and insert a reg mod into the sequence
+// for every address modifying insn that was used.
 sh_ams2::addr_expr
-sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
+sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
+                           sh_ams2::sequence* seq, sh_ams2::mem_access* acc,
+                           rtx_insn* curr_insn)
 {
+  const bool trace_back_addr = (seq != NULL && acc != NULL);
+
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
   HOST_WIDE_INT disp;
@@ -727,14 +1000,14 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
-      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode);
+      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, acc, curr_insn);
+      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode, seq, acc, curr_insn);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, acc, curr_insn);
       if (op1.is_invalid ())
         return op1;
     }
@@ -742,15 +1015,16 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
   else if (GET_RTX_CLASS (code) == RTX_AUTOINC)
     {
       addr_type_t mod_type;
+      bool apply_post_disp = (!trace_back_addr || acc->insn () != curr_insn);
 
       switch (code)
         {
         case POST_DEC:
-          disp = -GET_MODE_SIZE (mem_mach_mode);
+          disp = apply_post_disp ? -GET_MODE_SIZE (mem_mach_mode) : 0;
           mod_type = post_mod;
           break;
         case POST_INC:
-          disp = GET_MODE_SIZE (mem_mach_mode);
+          disp = apply_post_disp ? GET_MODE_SIZE (mem_mach_mode) : 0;
           mod_type = post_mod;
           break;
         case PRE_DEC:
@@ -763,14 +1037,17 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
           break;
         case POST_MODIFY:
           {
-            addr_expr a = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
+            addr_expr a = rtx_to_addr_expr (XEXP (x, apply_post_disp ? 1 : 0),
+                                            mem_mach_mode,
+                                            seq, acc, curr_insn);
             if (a.is_invalid ())
               return make_invalid_addr ();
             return post_mod_addr (a.base_reg (), a.disp ());
           }
         case PRE_MODIFY:
           {
-            addr_expr a = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode);
+            addr_expr a = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode,
+                                            seq, acc, curr_insn);
             if (a.is_invalid ())
               return make_invalid_addr ();
             return pre_mod_addr (a.base_reg (), a.disp ());
@@ -780,12 +1057,15 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
           return make_invalid_addr ();
         }
 
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, acc, curr_insn);
       if (op1.is_invalid ())
         return op1;
 
       disp += op1.disp ();
 
+      if (trace_back_addr)
+        return non_mod_addr (op1.base_reg (), op1.index_reg (),
+                             op1.scale (), disp);
       if (mod_type == post_mod)
         return post_mod_addr (op1.base_reg (), disp);
       else
@@ -801,7 +1081,56 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
       return make_const_addr (x);
 
     case REG:
-        return make_reg_addr (x);
+      if (trace_back_addr)
+        {
+          if (curr_insn == NULL_RTX)
+            return make_reg_addr (x);
+
+          // Find the expression that the register was last set to
+          // and convert it to an addr_expr.
+          std::pair<rtx, rtx_insn*> prev_val
+            = seq->find_reg_value (x, prev_nonnote_insn_bb (curr_insn));
+          rtx value = prev_val.first;
+          rtx_insn* mod_insn = prev_val.second;
+
+          // Stop expanding the reg if the reg can't be expanded any further.
+          if (value != NULL_RTX && REG_P (value) && regs_equal (value, x))
+            {
+              // Add to the sequence's start a reg mod that sets the reg
+              // to itself. This will be used by the address modification
+              // generator as a starting address.
+              reg_mod* new_reg_mod = new reg_mod (NULL, x, x);
+              if (seq->insert_element (new_reg_mod) == seq->elements ().end ())
+                delete new_reg_mod;
+
+              return make_reg_addr (x);
+            }
+
+          // Expand the register's value further.
+          addr_expr reg_effective_addr = rtx_to_addr_expr (
+            value, mem_mach_mode, seq, acc, mod_insn);
+
+          addr_expr reg_current_addr
+            = find_reg_note (mod_insn, REG_INC, NULL_RTX)
+            ? make_reg_addr (x)
+            : rtx_to_addr_expr (value, mem_mach_mode);
+
+          // Insert the modifying insn into the sequence as a reg mod.
+          reg_mod* new_reg_mod = new reg_mod (mod_insn, x, value,
+                                              reg_current_addr,
+                                              reg_effective_addr);
+          if (seq->insert_element (new_reg_mod) == seq->elements ().end ())
+            delete new_reg_mod;
+
+          // If the expression is something AMS can't handle, use the original
+          // reg instead.
+          if (reg_effective_addr.is_invalid ()
+              || reg_current_addr.is_invalid ())
+            return make_reg_addr (x);
+
+          return reg_effective_addr;
+        }
+      return make_reg_addr (x);
 
     // Handle MINUS by inverting OP1 and proceeding to PLUS.
     // NEG is handled similarly, but returns with OP1 after inverting it.
@@ -965,11 +1294,11 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
   return make_invalid_addr ();
 }
 
-// Find the memory accesses in X and add them to OUT.
-// TYPE indicates the type of the next mem that we
-// find (i.e. mem_load, mem_store or mem_operand).
+// Find the memory accesses in the rtx X of the insn I and add them to OUT.
+// TYPE indicates the type of the next mem that we find (i.e. mem_load,
+// mem_store or mem_operand).
 template <typename OutputIterator> void
-sh_ams2::find_mem_accesses (rtx& x, OutputIterator out,
+sh_ams2::find_mem_accesses (rtx_insn* i, rtx& x, OutputIterator out,
                             sh_ams2::element_type type)
 {
   switch (GET_CODE (x))
@@ -980,41 +1309,42 @@ sh_ams2::find_mem_accesses (rtx& x, OutputIterator out,
       switch (type)
         {
         case type_mem_load:
-          acc = new mem_load ();
+          acc = new mem_load (i, GET_MODE (x));
           break;
         case type_mem_store:
-          acc = new mem_store ();
+          acc = new mem_store (i, GET_MODE (x));
           break;
         case type_mem_operand:
-          acc = new mem_operand ();
+          acc = new mem_operand (i, GET_MODE (x));
           break;
         default:
           gcc_unreachable ();
         }
       acc->set_current_addr_rtx (XEXP (x, 0));
+      rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x));
       acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
       *out++ = acc;
       break;
 
     case PARALLEL:
-      for (int i = 0; i < XVECLEN (x, 0); i++)
-        find_mem_accesses (XVECEXP (x, 0, i), out, type);
+      for (int j = 0; j < XVECLEN (x, 0); j++)
+        find_mem_accesses (i, XVECEXP (x, 0, j), out, type);
       break;
 
     case SET:
-      find_mem_accesses (SET_DEST (x), out, type_mem_store);
-      find_mem_accesses (SET_SRC (x), out, type_mem_load);
+      find_mem_accesses (i, SET_DEST (x), out, type_mem_store);
+      find_mem_accesses (i, SET_SRC (x), out, type_mem_load);
       break;
 
     case CALL:
-      find_mem_accesses (XEXP (x, 0), out, type_mem_load);
+      find_mem_accesses (i, XEXP (x, 0), out, type_mem_load);
       break;
 
     default:
       if (UNARY_P (x) || ARITHMETIC_P (x))
         {
-          for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
-            find_mem_accesses (XEXP (x, i), out, type);
+          for (int j = 0; j < GET_RTX_LENGTH (GET_CODE (x)); j++)
+            find_mem_accesses (i, XEXP (x, j), out, type);
         }
       break;
     }
@@ -1056,14 +1386,15 @@ sh_ams2::execute (function* fun)
           // Search for memory accesses inside the current insn
           // and add them to the address sequence.
           mems.clear ();
-          find_mem_accesses (PATTERN (i), std::back_inserter (mems));
+          find_mem_accesses (i, PATTERN (i), std::back_inserter (mems));
 
           for (std::vector<mem_access*>::iterator m = mems.begin ();
                m != mems.end (); ++m)
             {
-              // TODO: calculate effective address
-              (*m)->set_insn (i);
               seq.insert_element (*m, seq.elements ().end ());
+              (*m)->set_effective_addr (rtx_to_addr_expr (
+                                        (*m)->current_addr_rtx (),
+                                        (*m)->mach_mode (), &seq, (*m)));
             }
          }
       log_sequence (seq, false);

@@ -147,6 +147,8 @@ public:
   static const rtx invalid_regno;
   static const rtx any_regno;
 
+  class sequence_element;
+
   static regno_t get_regno (const_rtx x);
 
   // Comparison struct for sets and maps containing reg rtx-es.
@@ -169,6 +171,9 @@ public:
     return REGNO (r1) == REGNO (r2);
   }
 
+  // Check whether two sequence elements are duplicates.
+  static bool
+  elements_equal (const sequence_element* el1, const sequence_element* el2);
 
   // the most complex non modifying address is of the form
   // 'base_reg + index_reg*scale + disp'.
@@ -431,8 +436,6 @@ public:
   // Support a limited number of alternatives only.
   typedef static_vector<alternative, 16> alternative_set;
 
-  class sequence_element;
-
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // A sequence element's adjacency information.
   // Probably only useful for mem access elements and reg-uses.
@@ -491,6 +494,12 @@ public:
     // Returns the type of the element.  Could also use RTTI for this.
     element_type type (void) const { return m_type; }
 
+    bool is_mem_access (void) const
+    {
+      return m_type == type_mem_load || m_type == type_mem_store
+        || m_type == type_mem_operand;
+    }
+
     // The cost of this element in the sequence.
     int cost (void) const { return m_cost; }
     void set_cost (int new_cost) { m_cost = new_cost; }
@@ -499,7 +508,6 @@ public:
     // The insn rtx of this element.  Maybe null if it has been inserted
     // by AMS into the sequence and is not present in the original insn list.
     rtx_insn* insn (void) const { return m_insn; }
-    void set_insn (rtx_insn* i) { m_insn = i; }
 
     // An increasing/decreasing chain of adjacent accesses that this access
     // is part of.
@@ -548,8 +556,8 @@ NOTE:
                                   const sequence_element& second);
 
   protected:
-    sequence_element (element_type t)
-    : m_type (t), m_cost (0), m_insn (NULL) { }
+    sequence_element (element_type t, rtx_insn* i)
+    : m_type (t), m_cost (0), m_insn (i) { }
 
   private:
     static const adjacent_chain_info g_no_incdec_chain;
@@ -625,11 +633,13 @@ NOTE:
     const addr_expr& current_addr (void) const { return m_current_addr; }
     void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
+    machine_mode mach_mode (void) const { return m_machine_mode; }
+
   protected:
-    mem_access (element_type t)
-      : sequence_element (t), m_effective_addr (make_invalid_addr ()),
-      m_current_addr (make_invalid_addr ()),
-      m_current_addr_rtx (NULL) { }
+    mem_access (element_type t, rtx_insn* i, machine_mode m)
+    : sequence_element (t, i), m_effective_addr (make_invalid_addr ()),
+      m_current_addr (make_invalid_addr ()), m_current_addr_rtx (NULL),
+      m_machine_mode (m) { }
 
     // The address expressions are usually set/updated by the sub-class.
     addr_expr m_effective_addr;
@@ -641,6 +651,7 @@ NOTE:
     alternative_set m_alternatives;
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
+    machine_mode m_machine_mode;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -648,7 +659,8 @@ NOTE:
   class mem_load : public mem_access
   {
   public:
-    mem_load (void) : mem_access (type_mem_load) { };
+    mem_load (rtx_insn* i, machine_mode m)
+    : mem_access (type_mem_load, i, m) { };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
@@ -665,7 +677,8 @@ NOTE:
   class mem_store : public mem_access
   {
   public:
-    mem_store (void) : mem_access (type_mem_store) { };
+    mem_store (rtx_insn* i, machine_mode m)
+    : mem_access (type_mem_store, i, m) { };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
@@ -685,7 +698,8 @@ NOTE:
   class mem_operand : public mem_access
   {
   public:
-    mem_operand (void) : mem_access (type_mem_operand) { };
+    mem_operand (rtx_insn* i, machine_mode m)
+    : mem_access (type_mem_operand, i, m) { };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
@@ -704,7 +718,13 @@ NOTE:
   class reg_mod : public sequence_element
   {
   public:
-    reg_mod (void) : sequence_element (type_reg_mod) { };
+    reg_mod (rtx_insn* i, rtx r, rtx v)
+    : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
+    m_addr (make_invalid_addr ()), m_effective_addr (make_invalid_addr ()) { };
+
+    reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a, addr_expr ea)
+    : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
+    m_addr (a), m_effective_addr (ea) { };
 
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
@@ -734,7 +754,7 @@ NOTE:
   class reg_barrier : public sequence_element
   {
   public:
-    reg_barrier (void) : sequence_element (type_reg_barrier) { };
+    reg_barrier (rtx_insn* i) : sequence_element (type_reg_barrier, i) { };
 
     // The address reg which is being referenced by this barrier.
     rtx reg (void) const { return m_reg; }
@@ -766,9 +786,9 @@ NOTE:
   class reg_use : public sequence_element
   {
   public:
-    reg_use (void) : sequence_element (type_reg_use) { };
+    reg_use (rtx_insn* i) : sequence_element (type_reg_use, i) { };
 
-    reg_use (rtx reg, const addr_expr& effective_addr);
+    reg_use (rtx_insn* i, rtx reg, const addr_expr& effective_addr);
 
     // construct a reg-use from an existing element.  this is usually used
     // when replacing an non-optimizable element into a reg-use.
@@ -826,6 +846,7 @@ NOTE:
   typedef std::list<sequence_element*>::const_reverse_iterator sequence_const_reverse_iterator;
 
   typedef std::multimap<rtx, sequence_iterator, cmp_by_regno> addr_reg_map;
+  typedef std::multimap<rtx_insn*, sequence_iterator> insn_map;
 
   // A structure used to store the address regs that can be used as a starting
   // point to arrive at another address during address mod generation.
@@ -866,11 +887,6 @@ NOTE:
     static std::list<sequence>::iterator
     split_sequence (std::list<sequence>::iterator seq,
                     std::list<sequence>& sequences);
-
-    // Trace back the effective address of REG, starting from EL.
-    // Insert a reg mod into the sequence for every address modifying
-    // insn that was used to arrive at REG's address.
-    addr_expr trace_effective_addr (rtx reg, sequence_iterator& el);
 
     // Add a reg mod for every insn that modifies an address register.
     void find_addr_reg_mods (void);
@@ -913,10 +929,15 @@ NOTE:
     // to the newly inserted element.
     sequence_iterator insert_element (sequence_element* el,
                                       sequence_iterator insert_before);
+    sequence_iterator insert_element (sequence_element* el);
 
     // Remove an element from the sequence.  Return an iterator pointing
     // to the next element.
     sequence_iterator remove_element (sequence_iterator el);
+
+    // Find the value that REG was last set to, starting the search from
+    // START_INSN.
+    std::pair<rtx, rtx_insn*> find_reg_value (rtx reg, rtx_insn* start_insn);
 
     // The first insn and basic block in the sequence.
     rtx_insn* start_insn (void) const;
@@ -925,6 +946,10 @@ NOTE:
     // A map containing the all the address regs used in the sequence
     // and the reg_mods that modify them.
     addr_reg_map& addr_regs (void) { return m_addr_regs; }
+
+    // Return the sequence elements that INSN contains.
+    std::pair<insn_map::iterator, insn_map::iterator>
+    elements_in_insn (rtx_insn* insn) { return m_insn_el_map.equal_range (insn); }
 
     // A structure for retrieving the starting addresses that could be
     // used to arrive at a given destination address.
@@ -964,8 +989,11 @@ NOTE:
     }
 
   private:
+    std::pair<rtx, bool> find_reg_value_1 (rtx reg, rtx pat);
+
     std::list<sequence_element*> m_els;
     addr_reg_map m_addr_regs;
+    insn_map m_insn_el_map;
     start_addr_list m_start_addr_list;
 
   };
@@ -987,14 +1015,37 @@ NOTE:
 
   // Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
   // from the rtx X.
-  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode = Pmode);
+  // If SEQ and ACC is not null, trace back the effective addresses of the
+  // registers in X (starting from ACC) and insert a reg mod into the sequence
+  // for every address modifying insn that was used.
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
+                                     sequence* seq, mem_access* acc,
+                                     rtx_insn* curr_insn);
 
-  // Find the memory accesses in X and add them to OUT.
-  // ACCESS_TYPE indicates the type of the next mem that we
-  // find (i.e. mem_load, mem_store or mem_operand).
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
+                                     sequence* seq, mem_access* acc)
+  {
+    return rtx_to_addr_expr (x, mem_mach_mode, seq,
+                             acc, acc ? acc->insn () : NULL);
+  }
+
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
+  {
+    return rtx_to_addr_expr(x, mem_mach_mode, NULL, NULL);
+  }
+
+  static addr_expr rtx_to_addr_expr (rtx x)
+  {
+    return rtx_to_addr_expr(x, Pmode, NULL, NULL);
+  }
+
+  // Find the memory accesses in the rtx X of the insn I and add them to OUT.
+  // TYPE indicates the type of the next mem that we find (i.e. mem_load,
+  // mem_store or mem_operand).
   template <typename OutputIterator>
-  static void find_mem_accesses (rtx& x, OutputIterator out,
+  static void find_mem_accesses (rtx_insn* i, rtx& x, OutputIterator out,
                                  element_type type = type_mem_load);
+
   void set_options (const options& opt);
 
 private:
@@ -1096,17 +1147,20 @@ sh_ams2::make_invalid_addr (void)
 inline bool
 sh_ams2::addr_expr::operator == (const addr_expr& other) const
 {
-  return base_reg () == other.base_reg ()
-	 && index_reg () == other.index_reg ()
-	 && scale () == other.scale ()
-	 && disp () == other.disp ();
+  if (is_invalid () || other.is_invalid ())
+    return is_invalid () && other.is_invalid ();
+
+  return regs_equal (base_reg (), other.base_reg ())
+         && regs_equal (index_reg (), other.index_reg ())
+         && scale () == other.scale ()
+         && disp () == other.disp ();
 }
 
 inline std::pair<sh_ams2::disp_t, bool>
 sh_ams2::addr_expr::operator - (const addr_expr& other) const
 {
-  if (base_reg () == other.base_reg ()
-      && index_reg () == other.index_reg ()
+  if (regs_equal (base_reg (), other.base_reg ())
+      && regs_equal (index_reg (), other.index_reg ())
       && (scale () == other.scale () || has_no_index_reg ()))
     return std::make_pair (disp () - other.disp (), true);
 
