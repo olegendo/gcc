@@ -697,6 +697,70 @@ sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
 
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 
+// Add a reg mod for every insn that modifies an address register.
+void
+sh_ams2::sequence::find_addr_reg_mods (void)
+{
+  rtx prev_reg = NULL;
+  rtx_insn* last_insn = BB_END (start_bb ());
+
+  for (addr_reg_map::iterator it = m_addr_regs.begin ();
+       it != m_addr_regs.end (); ++it)
+    {
+      rtx reg = it->first;
+      if (regs_equal (reg, prev_reg))
+        continue;
+
+      while (last_insn != NULL)
+        {
+          std::pair<rtx, rtx_insn*> prev_val = find_reg_value (reg, last_insn);
+          rtx value = prev_val.first;
+          rtx_insn* mod_insn = prev_val.second;
+
+          if (value != NULL_RTX && REG_P (value) && regs_equal (value, reg))
+            break;
+
+          addr_expr reg_current_addr
+            = find_reg_note (mod_insn, REG_INC, NULL_RTX)
+            ? make_reg_addr (reg) : rtx_to_addr_expr (value);
+          sequence_iterator new_reg_mod
+            = insert_element (new reg_mod (mod_insn, reg, value,
+                                           reg_current_addr));
+          addr_expr reg_effective_addr = rtx_to_addr_expr (value, Pmode,
+                                                           this, *new_reg_mod);
+          ((reg_mod*)*new_reg_mod)->set_effective_addr (reg_effective_addr);
+
+          last_insn = prev_nonnote_insn_bb (mod_insn);
+        }
+    }
+}
+
+// The basic block of the first insn in the access sequence.
+basic_block
+sh_ams2::sequence::start_bb (void) const
+{
+  for (sequence_const_iterator e = elements ().begin ();
+       e != elements ().end (); ++e)
+    {
+      if ((*e)->insn () && BLOCK_FOR_INSN ((*e)->insn ()))
+        return BLOCK_FOR_INSN ((*e)->insn ());
+    }
+  gcc_unreachable ();
+}
+
+// The first insn in the access sequence.
+rtx_insn*
+sh_ams2::sequence::start_insn (void) const
+{
+  for (sequence_const_iterator e = elements ().begin ();
+       e != elements ().end (); ++e)
+    {
+      if ((*e)->insn ())
+        return (*e)->insn ();
+    }
+  gcc_unreachable ();
+}
+
 // Insert a new element into the sequence.  Return an iterator pointing
 // to the newly inserted element.
 sh_ams2::sequence_iterator
@@ -708,6 +772,10 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el,
   // Update the insn -> element map.
   if (el->insn ())
       m_insn_el_map.insert (std::make_pair (el->insn (), iter));
+
+  // Update the address reg list.
+  if (el->type () == type_reg_mod)
+      m_addr_regs.insert (std::make_pair (((reg_mod*)el)->reg (), iter));
 
   return iter;
 }
@@ -746,6 +814,7 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
   // the element after them.
   std::pair<insn_map::iterator, insn_map::iterator>
     els_in_insn = elements_in_insn (el->insn ());
+
   if (els_in_insn.first != els_in_insn.second)
     {
       // Check for duplicates.
@@ -776,7 +845,14 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
     {
       els_in_insn = elements_in_insn (i);
       if (els_in_insn.first == els_in_insn.second)
-        continue;
+        {
+          // If there are no elements after this insn, insert it to the
+          // sequence's end.
+          if (i == NULL)
+            return insert_element (el, elements ().end ());
+          continue;
+        }
+
 
       for (insn_map::iterator els = els_in_insn.first;
            els != els_in_insn.second; ++els)
@@ -803,11 +879,26 @@ sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el)
     {
       std::pair<insn_map::iterator, insn_map::iterator> range
         = m_insn_el_map.equal_range ((*el)->insn ());
-      for (insn_map::iterator els = range.first; els != range.second; ++els)
+      for (insn_map::iterator it = range.first; it != range.second; ++it)
         {
-          if (els->second == el)
+          if (it->second == el)
             {
-              m_insn_el_map.erase (els);
+              m_insn_el_map.erase (it);
+              break;
+            }
+        }
+    }
+
+  // Update the address reg list.
+  if ((*el)->type () == type_reg_mod)
+    {
+      std::pair<addr_reg_map::iterator, addr_reg_map::iterator> range
+        = m_addr_regs.equal_range (((reg_mod*)*el)->reg ());
+      for (addr_reg_map::iterator it = range.first; it != range.second; ++it)
+        {
+          if (it->second == el)
+            {
+              m_addr_regs.erase (it);
               break;
             }
         }
@@ -1430,13 +1521,24 @@ sh_ams2::execute (function* fun)
                                         (*m)->mach_mode (), &seq, (*m)));
             }
          }
-      log_sequence (seq, false, true);
-      log_msg ("\n");
     }
 
   log_msg ("\nprocessing extracted sequences\n");
+  for (std::list<sequence>::iterator it = sequences.begin ();
+       it != sequences.end (); ++it)
+    {
+      sequence& seq = *it;
 
-  // TODO
+      if (seq.elements ().empty ())
+        continue;
+
+      log_msg ("add_missing_reg_mods\n");
+      seq.find_addr_reg_mods ();
+
+      log_sequence (seq, false, true);
+      log_msg ("\n\n");
+    }
+
 
   // Unfortunately, passes tend to access global variables to see if they
   // are supposed to actually execute.  Save those variables, set them

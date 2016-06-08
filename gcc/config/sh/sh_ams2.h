@@ -929,9 +929,6 @@ NOTE:
     void update_access_alternatives (delegate& d, bool force_validation,
 				     bool disable_validation);
 
-    // Update the content of M_ADDR_REGS.
-    void update_addr_reg_list (void);
-
     // Insert a new element into the sequence.  Return an iterator pointing
     // to the newly inserted element.
     sequence_iterator insert_element (sequence_element* el,
