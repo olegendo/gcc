@@ -541,6 +541,8 @@ NOTE:
     std::list<ref_counting_ptr<sequence_element> >&
     dependencies (void) { return m_dependencies; }
 
+    void add_dependency (sequence_element* dep);
+
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
     static bool adjacent_inc (const sequence_element& first,
@@ -726,6 +728,10 @@ NOTE:
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
     m_addr (a), m_effective_addr (ea) { };
 
+    reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a)
+    : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
+    m_addr (a), m_effective_addr (make_invalid_addr ()) { };
+
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
 
@@ -739,6 +745,7 @@ NOTE:
     // The effective address expression the reg is being set to.
     // Might be invalid if AMS was not able to understand it (-> barrier)
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
+    void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
 
   private:
     rtx m_reg;
@@ -1015,19 +1022,11 @@ NOTE:
 
   // Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
   // from the rtx X.
-  // If SEQ and ACC is not null, trace back the effective addresses of the
-  // registers in X (starting from ACC) and insert a reg mod into the sequence
+  // If SEQ and EL is not null, trace back the effective addresses of the
+  // registers in X (starting from EL) and insert a reg mod into the sequence
   // for every address modifying insn that was used.
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
-                                     sequence* seq, mem_access* acc,
-                                     rtx_insn* curr_insn);
-
-  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
-                                     sequence* seq, mem_access* acc)
-  {
-    return rtx_to_addr_expr (x, mem_mach_mode, seq,
-                             acc, acc ? acc->insn () : NULL);
-  }
+                                     sequence* seq, sequence_element* el);
 
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
   {

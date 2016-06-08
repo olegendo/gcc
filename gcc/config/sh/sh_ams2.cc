@@ -222,7 +222,8 @@ log_sequence_element_location (const sh_ams2::sequence_element& e)
 
 void
 log_sequence_element (const sh_ams2::sequence_element& e,
-                      bool log_alternatives = true)
+                      bool log_alternatives = true,
+                      bool log_dependencies = false)
 {
   if (dump_file == NULL)
     return;
@@ -302,6 +303,23 @@ log_sequence_element (const sh_ams2::sequence_element& e,
     log_msg ("\n  (dec chain pos: %d  length: %d)", e.dec_chain ().pos (),
 						    e.dec_chain ().length ());
 
+  if (log_dependencies)
+    {
+      log_msg ("\n  use count: %ld\n", e.use_count ());
+      if (!e.dependencies ().empty ())
+        {
+          log_msg ("\n  dependencies:\n");
+          for (std::list<ref_counting_ptr<sh_ams2::sequence_element> >
+               ::const_iterator it = e.dependencies ().begin ();
+               it != e.dependencies ().end (); ++it)
+            {
+              log_sequence_element (*it->get (), log_alternatives, false);
+              log_msg ("\n");
+            }
+          log_msg ("\n  ----\n");
+        }
+    }
+
   if (log_alternatives
       && (e.type () == sh_ams2::type_mem_load
           || e.type () == sh_ams2::type_mem_store
@@ -327,7 +345,8 @@ log_sequence_element (const sh_ams2::sequence_element& e,
 }
 
 void
-log_sequence (const sh_ams2::sequence& seq, bool log_alternatives = true)
+log_sequence (const sh_ams2::sequence& seq, bool log_alternatives = true,
+              bool log_dependencies = false)
 {
   if (dump_file == NULL)
     return;
@@ -341,7 +360,7 @@ log_sequence (const sh_ams2::sequence& seq, bool log_alternatives = true)
   for (sh_ams2::sequence_const_iterator it = seq.elements ().begin ();
        it != seq.elements ().end (); ++it)
     {
-      log_sequence_element (**it, log_alternatives);
+      log_sequence_element (**it, log_alternatives, log_dependencies);
       log_msg ("\n-----\n");
     }
 
@@ -664,6 +683,18 @@ sh_ams2::addr_expr::get_all_subterms (OutputIterator out) const
     }
 }
 
+void
+sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
+{
+  for (std::list<ref_counting_ptr<sequence_element> >::iterator it
+         = m_dependencies.begin (); it != m_dependencies.end (); ++it)
+    {
+      if (elements_equal (dep, it->get ()))
+        return;
+    }
+  m_dependencies.push_back (ref_counting_ptr<sequence_element> (dep));
+}
+
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 
 // Insert a new element into the sequence.  Return an iterator pointing
@@ -683,8 +714,8 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el,
 
 // Same as the previous function, except that the place of the element
 // is determined by its insn and no duplicates are allowed.
-// If the element is already inside the sequence, return an iterator to
-// the sequence's end.
+// If the element has a duplicate already in the sequence, return an
+// iterator to the duplicate and delete the original one.
 sh_ams2::sequence_iterator
 sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
 {
@@ -699,7 +730,10 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
            els != elements ().end () && !(*els)->insn (); ++els)
         {
           if (elements_equal (el, *els))
-              return elements ().end ();
+            {
+              delete el;
+              return els;
+            }
         }
 
       return insert_element (el, elements ().begin ());
@@ -719,7 +753,11 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
            els != els_in_insn.second; ++els)
         {
           if (elements_equal (el, *els->second))
-            return elements ().end ();
+            {
+              delete el;
+              return els->second;
+            }
+
         }
 
       for (insn_map::iterator els = els_in_insn.first;
@@ -941,8 +979,7 @@ sh_ams2::elements_equal (const sequence_element* el1,
       const reg_mod* rm2 = (const reg_mod*)el2;
       return regs_equal (rm1->reg (), rm2->reg ())
         && rm1->value () == rm2->value ()
-        && rm1->addr () == rm2->addr ()
-        && rm1->effective_addr () == rm2->effective_addr ();
+        && rm1->addr () == rm2->addr ();
     }
 
   if (el1->type () == type_reg_barrier)
@@ -953,8 +990,7 @@ sh_ams2::elements_equal (const sequence_element* el1,
     {
       const reg_use* ru1 = (const reg_use*)el1;
       const reg_use* ru2 = (const reg_use*)el2;
-      return regs_equal (ru1->reg (), ru2->reg ())
-        && ru1->effective_addr () == ru2->effective_addr ();
+      return regs_equal (ru1->reg (), ru2->reg ());
     }
 
   gcc_unreachable ();
@@ -976,15 +1012,15 @@ sh_ams2::check_make_non_mod_addr (rtx base_reg, rtx index_reg,
 
 // Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
 // from the rtx X.
-// If SEQ and ACC is not null, trace back the effective addresses of the
-// registers in X (starting from ACC) and insert a reg mod into the sequence
+// If SEQ and EL is not null, trace back the effective addresses of the
+// registers in X (starting from EL) and insert a reg mod into the sequence
 // for every address modifying insn that was used.
 sh_ams2::addr_expr
 sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
-                           sh_ams2::sequence* seq, sh_ams2::mem_access* acc,
-                           rtx_insn* curr_insn)
+                           sh_ams2::sequence* seq,
+                           sh_ams2::sequence_element* el)
 {
-  const bool trace_back_addr = (seq != NULL && acc != NULL);
+  const bool trace_back_addr = (seq != NULL && el != NULL);
 
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -1000,14 +1036,14 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, acc, curr_insn);
-      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode, seq, acc, curr_insn);
+      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, el);
+      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode, seq, el);
       if (op0.is_invalid () || op1.is_invalid ())
         return make_invalid_addr ();
     }
   else if (code == NEG)
     {
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, acc, curr_insn);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, el);
       if (op1.is_invalid ())
         return op1;
     }
@@ -1015,7 +1051,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
   else if (GET_RTX_CLASS (code) == RTX_AUTOINC)
     {
       addr_type_t mod_type;
-      bool apply_post_disp = (!trace_back_addr || acc->insn () != curr_insn);
+      bool apply_post_disp = (!trace_back_addr || !el->is_mem_access ());
 
       switch (code)
         {
@@ -1038,8 +1074,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
         case POST_MODIFY:
           {
             addr_expr a = rtx_to_addr_expr (XEXP (x, apply_post_disp ? 1 : 0),
-                                            mem_mach_mode,
-                                            seq, acc, curr_insn);
+                                            mem_mach_mode, seq, el);
             if (a.is_invalid ())
               return make_invalid_addr ();
             return post_mod_addr (a.base_reg (), a.disp ());
@@ -1047,7 +1082,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
         case PRE_MODIFY:
           {
             addr_expr a = rtx_to_addr_expr (XEXP (x, 1), mem_mach_mode,
-                                            seq, acc, curr_insn);
+                                            seq, el);
             if (a.is_invalid ())
               return make_invalid_addr ();
             return pre_mod_addr (a.base_reg (), a.disp ());
@@ -1057,7 +1092,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
           return make_invalid_addr ();
         }
 
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, acc, curr_insn);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mach_mode, seq, el);
       if (op1.is_invalid ())
         return op1;
 
@@ -1083,13 +1118,10 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
     case REG:
       if (trace_back_addr)
         {
-          if (curr_insn == NULL_RTX)
-            return make_reg_addr (x);
-
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
           std::pair<rtx, rtx_insn*> prev_val
-            = seq->find_reg_value (x, prev_nonnote_insn_bb (curr_insn));
+            = seq->find_reg_value (x, prev_nonnote_insn_bb (el->insn ()));
           rtx value = prev_val.first;
           rtx_insn* mod_insn = prev_val.second;
 
@@ -1099,16 +1131,12 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
               // Add to the sequence's start a reg mod that sets the reg
               // to itself. This will be used by the address modification
               // generator as a starting address.
-              reg_mod* new_reg_mod = new reg_mod (NULL, x, x);
-              if (seq->insert_element (new_reg_mod) == seq->elements ().end ())
-                delete new_reg_mod;
+              sequence_iterator new_reg_mod
+                = seq->insert_element (new reg_mod (NULL, x, x));
+              el->add_dependency (*new_reg_mod);
 
               return make_reg_addr (x);
             }
-
-          // Expand the register's value further.
-          addr_expr reg_effective_addr = rtx_to_addr_expr (
-            value, mem_mach_mode, seq, acc, mod_insn);
 
           addr_expr reg_current_addr
             = find_reg_note (mod_insn, REG_INC, NULL_RTX)
@@ -1116,11 +1144,16 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
             : rtx_to_addr_expr (value, mem_mach_mode);
 
           // Insert the modifying insn into the sequence as a reg mod.
-          reg_mod* new_reg_mod = new reg_mod (mod_insn, x, value,
-                                              reg_current_addr,
-                                              reg_effective_addr);
-          if (seq->insert_element (new_reg_mod) == seq->elements ().end ())
-            delete new_reg_mod;
+          sequence_iterator new_reg_mod
+            = seq->insert_element (new reg_mod (mod_insn, x, value,
+                                                reg_current_addr));
+          el->add_dependency (*new_reg_mod);
+
+          // Expand the register's value further.
+          addr_expr reg_effective_addr = rtx_to_addr_expr (
+            value, mem_mach_mode, seq, *new_reg_mod);
+
+          ((reg_mod*)*new_reg_mod)->set_effective_addr (reg_effective_addr);
 
           // If the expression is something AMS can't handle, use the original
           // reg instead.
@@ -1397,7 +1430,7 @@ sh_ams2::execute (function* fun)
                                         (*m)->mach_mode (), &seq, (*m)));
             }
          }
-      log_sequence (seq, false);
+      log_sequence (seq, false, true);
       log_msg ("\n");
     }
 
