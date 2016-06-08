@@ -1220,50 +1220,32 @@ sh_ams::access_sequence::start_insn (void) const
 // The recursive part of find_reg_value. If REG is modified in INSN,
 // return true and the SET pattern that modifies it. Otherwise, return
 // false.
-//
-// FIXME: see if we can re-use find_set_of_reg_bb from sh_treg_combine.cc
-// This is very similar to rtlanal.c (reg_set_p), except that we return
-// the known set rtx to avoid looking for it again.
-std::pair<rtx, bool> sh_ams::find_reg_value_1 (rtx reg, rtx pat)
+std::pair<rtx, bool> sh_ams::find_reg_value_1 (rtx reg, const_rtx insn)
 {
-  switch (GET_CODE (pat))
+  if (INSN_P (insn) && GET_CODE (PATTERN (insn)) == SEQUENCE)
     {
-    case SET:
-      {
-        rtx dest = SET_DEST (pat);
-        if (REG_P (dest) && regs_equal (dest, reg))
-          {
-            // We're in the last insn that modified REG, so return
-            // the modifying SET rtx.
-            return std::make_pair (pat, true);
-          }
-      }
-      break;
-
-    case CLOBBER:
-      {
-        rtx dest = XEXP (pat, 0);
-        if (REG_P (dest) && regs_equal (dest, reg))
-	  {
-	    // The value of REG is unknown.
-	    return std::make_pair (NULL_RTX, true);
-	  }
-      }
-      break;
-
-    case PARALLEL:
-      for (int i = 0; i < XVECLEN (pat, 0); i++)
+      for (int i = 0; i < XVECLEN (PATTERN (insn), 0); ++i)
         {
-          std::pair<rtx, bool> r = find_reg_value_1 (reg, XVECEXP (pat, 0, i));
+          std::pair<rtx, bool> r =
+                        find_reg_value_1 (reg, XVECEXP (PATTERN (insn), 0, i));
           if (r.second)
             return r;
         }
-      break;
-
-    default:
-      break;
+      return std::make_pair (NULL_RTX, false);
     }
-  return std::make_pair (NULL_RTX, false);
+
+  if (INSN_P (insn)
+      && (FIND_REG_INC_NOTE (insn, reg)
+          || (CALL_P (insn)
+              && ((REG_P (reg)
+                   && REGNO (reg) < FIRST_PSEUDO_REGISTER
+                   && overlaps_hard_reg_set_p (regs_invalidated_by_call,
+                                               GET_MODE (reg), REGNO (reg)))
+                  || find_reg_fusage (insn, CLOBBER, reg)))))
+    return std::make_pair (NULL_RTX, true);
+
+  rtx r = const_cast<rtx> (set_of (reg, insn));
+  return std::make_pair (r, r != NULL);
 }
 
 // Find the value that REG was last set to, starting the search from INSN.
@@ -1287,36 +1269,51 @@ sh_ams::find_reg_value_result sh_ams::find_reg_value (rtx reg, rtx_insn* insn)
 	return find_reg_value_result (NULL, i);
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
-
       if (reg_set_p (reg, i) && CALL_P (i))
 	return find_reg_value_result (NULL, i);
 
-      std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
-      if (r.second)
-        {
-          rtx value = r.first ? SET_SRC (r.first) : NULL;
-          return find_reg_value_result (value, i);
-        }
-      else if (find_regno_note (i, REG_INC, REGNO (reg)) != NULL)
-        {
-          // Search for auto-mod memory accesses in the current
-          // insn that modify REG.
-          mems.clear ();
-	  mems.reserve (32);
+      std::pair<rtx, bool> r = find_reg_value_1 (reg, i);
+      if (!r.second)
+        continue;
 
-          find_mem_accesses (PATTERN (i), std::back_inserter (mems));
-          for (std::vector<std::pair<rtx*, access_type_t> >
-	       ::reverse_iterator m = mems.rbegin (); m != mems.rend (); ++m)
+      if (r.first == NULL)
+        {
+          if (find_regno_note (i, REG_INC, REGNO (reg)) != NULL)
             {
-              rtx mem_addr = XEXP (*(m->first), 0);
-              rtx_code code = GET_CODE (mem_addr);
-              if (GET_RTX_CLASS (code) == RTX_AUTOINC
-                  && REG_P (XEXP (mem_addr, 0))
-                  && regs_equal (XEXP (mem_addr, 0), reg))
-                return find_reg_value_result (mem_addr, i,
-                                              GET_MODE (*(m->first)));
+              // Search for auto-mod memory accesses in the current
+              // insn that modify REG.
+              mems.clear ();
+              mems.reserve (32);
+
+              find_mem_accesses (PATTERN (i), std::back_inserter (mems));
+              for (std::vector<std::pair<rtx*, access_type_t> >
+                   ::reverse_iterator m = mems.rbegin (); m != mems.rend ();
+                   ++m)
+                {
+                  rtx mem_addr = XEXP (*(m->first), 0);
+                  rtx_code code = GET_CODE (mem_addr);
+                  if (GET_RTX_CLASS (code) == RTX_AUTOINC
+                      && REG_P (XEXP (mem_addr, 0))
+                      && regs_equal (XEXP (mem_addr, 0), reg))
+                    return find_reg_value_result (mem_addr, i,
+                                                  GET_MODE (*(m->first)));
+                }
+              gcc_unreachable ();
+            }
+          else
+            {
+              // The reg is modified in some unspecified way, e.g. a clobber.
+              return find_reg_value_result (NULL, i);
             }
         }
+      else
+        {
+          if (GET_CODE (r.first) == SET)
+            return find_reg_value_result (SET_SRC (r.first), i);
+          else
+            return find_reg_value_result (NULL, i);
+        }
+
     }
   return find_reg_value_result (reg, i);
 }

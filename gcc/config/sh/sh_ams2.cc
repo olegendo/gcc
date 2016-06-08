@@ -807,37 +807,51 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
 	return std::make_pair (NULL_RTX, i);
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
-
       if (reg_set_p (reg, i) && CALL_P (i))
 	return std::make_pair (NULL_RTX, i);
 
-      std::pair<rtx, bool> r = find_reg_value_1 (reg, PATTERN (i));
-      if (r.second)
+      std::pair<rtx, bool> r = find_reg_value_1 (reg, i);
+      if (!r.second)
+        continue;
+
+      if (r.first == NULL)
         {
-          rtx value = r.first ? SET_SRC (r.first) : NULL_RTX;
-          return std::make_pair (value, i);
-        }
-      else if (find_regno_note (i, REG_INC, REGNO (reg)) != NULL)
-        {
-          // Search for auto-mod memory accesses in the current
-          // insn that modify REG.
-          std::pair<insn_map::iterator, insn_map::iterator>
-            els_in_insn = elements_in_insn (i);
-          for (insn_map::iterator els = els_in_insn.first;
-               els != els_in_insn.second; ++els)
+          if (find_regno_note (i, REG_INC, REGNO (reg)) != NULL)
             {
-              if (!(*els->second)->is_mem_access ())
-                continue;
 
-              mem_access* acc = (mem_access*)*els->second;
-              rtx mem_addr = acc->current_addr_rtx ();
-              rtx_code code = GET_CODE (mem_addr);
+              // Search for auto-mod memory accesses in the current
+              // insn that modify REG.
+              std::pair<insn_map::iterator, insn_map::iterator>
+                els_in_insn = elements_in_insn (i);
+              for (insn_map::iterator els = els_in_insn.first;
+                   els != els_in_insn.second; ++els)
+                {
+                  if (!(*els->second)->is_mem_access ())
+                    continue;
 
-              if (GET_RTX_CLASS (code) == RTX_AUTOINC
-                  && REG_P (XEXP (mem_addr, 0))
-                  && regs_equal (XEXP (mem_addr, 0), reg))
-                return std::make_pair (mem_addr, i);
+                  mem_access* acc = (mem_access*)*els->second;
+                  rtx mem_addr = acc->current_addr_rtx ();
+                  rtx_code code = GET_CODE (mem_addr);
+
+                  if (GET_RTX_CLASS (code) == RTX_AUTOINC
+                      && REG_P (XEXP (mem_addr, 0))
+                      && regs_equal (XEXP (mem_addr, 0), reg))
+                    return std::make_pair (mem_addr, i);
+                }
+              gcc_unreachable ();
             }
+          else
+            {
+              // The reg is modified in some unspecified way, e.g. a clobber.
+              return std::make_pair (NULL_RTX, i);
+            }
+        }
+      else
+        {
+          if (GET_CODE (r.first) == SET)
+            return std::make_pair (SET_SRC (r.first), i);
+          else
+            return std::make_pair (NULL_RTX, i);
         }
     }
 
@@ -848,46 +862,32 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
 // return true and the SET pattern that modifies it. Otherwise, return
 // false.
 std::pair<rtx, bool>
-sh_ams2::sequence::find_reg_value_1 (rtx reg, rtx pat)
+sh_ams2::sequence::find_reg_value_1 (rtx reg, const_rtx insn)
 {
-  switch (GET_CODE (pat))
+  if (INSN_P (insn) && GET_CODE (PATTERN (insn)) == SEQUENCE)
     {
-    case SET:
-      {
-        rtx dest = SET_DEST (pat);
-        if (REG_P (dest) && regs_equal (dest, reg))
-          {
-            // We're in the last insn that modified REG, so return
-            // the modifying SET rtx.
-            return std::make_pair (pat, true);
-          }
-      }
-      break;
-
-    case CLOBBER:
-      {
-        rtx dest = XEXP (pat, 0);
-        if (REG_P (dest) && regs_equal (dest, reg))
-	  {
-	    // The value of REG is unknown.
-	    return std::make_pair (NULL_RTX, true);
-	  }
-      }
-      break;
-
-    case PARALLEL:
-      for (int i = 0; i < XVECLEN (pat, 0); i++)
+      for (int i = 0; i < XVECLEN (PATTERN (insn), 0); ++i)
         {
-          std::pair<rtx, bool> r = find_reg_value_1 (reg, XVECEXP (pat, 0, i));
+          std::pair<rtx, bool> r =
+                        find_reg_value_1 (reg, XVECEXP (PATTERN (insn), 0, i));
           if (r.second)
             return r;
         }
-      break;
-
-    default:
-      break;
+      return std::make_pair (NULL_RTX, false);
     }
-  return std::make_pair (NULL_RTX, false);
+
+  if (INSN_P (insn)
+      && (FIND_REG_INC_NOTE (insn, reg)
+          || (CALL_P (insn)
+              && ((REG_P (reg)
+                   && REGNO (reg) < FIRST_PSEUDO_REGISTER
+                   && overlaps_hard_reg_set_p (regs_invalidated_by_call,
+                                               GET_MODE (reg), REGNO (reg)))
+                  || find_reg_fusage (insn, CLOBBER, reg)))))
+    return std::make_pair (NULL_RTX, true);
+
+  rtx r = const_cast<rtx> (set_of (reg, insn));
+  return std::make_pair (r, r != NULL);
 }
 
 // TODO: Implement these functions.  For now, they are defined as empty

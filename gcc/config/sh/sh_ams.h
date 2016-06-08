@@ -1238,7 +1238,7 @@ private:
   };
 
   static find_reg_value_result find_reg_value (rtx reg, rtx_insn* insn);
-  static std::pair<rtx, bool> find_reg_value_1 (rtx reg, rtx insn);
+  static std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
 
   static addr_expr
   extract_addr_expr (rtx x, rtx_insn* search_start_i, rtx_insn* last_access_i,

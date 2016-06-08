@@ -989,7 +989,7 @@ NOTE:
     }
 
   private:
-    std::pair<rtx, bool> find_reg_value_1 (rtx reg, rtx pat);
+    std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
 
     std::list<sequence_element*> m_els;
     addr_reg_map m_addr_regs;
