@@ -795,7 +795,13 @@ NOTE:
   public:
     reg_use (rtx_insn* i) : sequence_element (type_reg_use, i) { };
 
-    reg_use (rtx_insn* i, rtx reg, const addr_expr& effective_addr);
+    reg_use (rtx_insn* i, rtx reg, rtx* ref)
+    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
+    m_effective_addr (make_invalid_addr ()) { }
+
+    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& effective_addr)
+    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
+    m_effective_addr (effective_addr) { }
 
     // construct a reg-use from an existing element.  this is usually used
     // when replacing an non-optimizable element into a reg-use.
@@ -814,10 +820,15 @@ NOTE:
     set_dec_chain (const adjacent_chain_info& c) { m_dec_chain = c; }
 
     // The reg that is being used.
-    rtx reg (void) const { return *m_reg_ref; }
+    rtx reg (void) const { return m_reg; }
+
+    // The reg rtx inside the insn. Can also be a (PLUS reg const_int)
+    // expression. If NULL, the reg use is unspecified.
+    const rtx* reg_ref (void) const { return m_reg_ref; }
 
     // The effective address expression the reg is expected to have.
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
+    void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
 
   private:
     // if a mem access is not to be optimized, it is converted into a
@@ -826,7 +837,7 @@ NOTE:
     // an insn that AMS understands.  in this case AMS can optimize it away.
     // ref_counted_ptr<sequence_element> m_original;
 
-    // The reg rtx inside the insn.
+    rtx m_reg;
     rtx* m_reg_ref;
 
     addr_expr m_effective_addr;
@@ -852,7 +863,6 @@ NOTE:
   typedef std::list<sequence_element*>::reverse_iterator sequence_reverse_iterator;
   typedef std::list<sequence_element*>::const_reverse_iterator sequence_const_reverse_iterator;
 
-  typedef std::multimap<rtx, sequence_iterator, cmp_by_regno> addr_reg_map;
   typedef std::multimap<rtx_insn*, sequence_iterator> insn_map;
 
   // A structure used to store the address regs that can be used as a starting
@@ -994,6 +1004,8 @@ NOTE:
 
   private:
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
+    template <typename OutputIterator> void
+    find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out);
 
     std::list<sequence_element*> m_els;
     addr_reg_map m_addr_regs;

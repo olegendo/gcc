@@ -290,6 +290,26 @@ log_sequence_element (const sh_ams2::sequence_element& e,
           log_addr_expr (rm.effective_addr ());
         }
     }
+  else if (e.type () == sh_ams2::type_reg_use)
+    {
+      const sh_ams2::reg_use& ru = (const sh_ams2::reg_use&)e;
+      log_msg ("\n  use ");
+      if (ru.reg_ref ())
+        log_rtx (*ru.reg_ref ());
+      else
+        log_rtx (ru.reg ());
+      log_msg ("\n  effective addr:   ");
+
+      if (ru.effective_addr ().is_invalid ())
+        log_msg ("unknown");
+      else
+        log_addr_expr (ru.effective_addr ());
+      if (ru.reg_ref ())
+        {
+          log_msg ("\n  in insn\n");
+          log_insn (ru.insn ());
+        }
+    }
 
   if (e.cost () == sh_ams2::infinite_costs)
     log_msg ("\n  cost: infinite");
@@ -732,6 +752,151 @@ sh_ams2::sequence::find_addr_reg_mods (void)
 
           last_insn = prev_nonnote_insn_bb (mod_insn);
         }
+    }
+}
+
+// Add a reg use for every use of an address register that's not a
+// memory access or address reg modification.
+void
+sh_ams2::sequence::find_addr_reg_uses (void)
+{
+  std::set<rtx, cmp_by_regno> visited_addr_regs;
+  std::map<rtx, reg_mod*, cmp_by_regno> live_addr_regs;
+  std::vector<rtx*> reg_use_refs;
+  rtx_insn* last_el_insn = NULL;
+
+  for (rtx_insn* i = start_insn (); i != NULL_RTX; i = next_nonnote_insn_bb (i))
+    {
+      // Search for reg uses only if the insn doesn't contain any
+      // mem accesses or reg mods.
+      std::pair<insn_map::iterator, insn_map::iterator>
+        els_in_insn = elements_in_insn (i);
+
+      if (els_in_insn.first == els_in_insn.second)
+        {
+          for (std::set<rtx, cmp_by_regno>::iterator
+                 regs = visited_addr_regs.begin ();
+               regs !=  visited_addr_regs.end (); ++regs)
+            {
+              // Check if the reg is used in this insn.
+              if (reg_overlap_mentioned_p (*regs, PATTERN (i))
+                  || (CALL_P (i) && find_reg_fusage (i, USE, *regs)))
+                {
+                  // If so, find all references to the reg in this insn.
+                  reg_use_refs.clear ();
+                  find_addr_reg_uses_1 (*regs, PATTERN (i),
+                                        std::back_inserter (reg_use_refs));
+
+                  // If no refs were found, an unspecified reg use will be
+                  // created.
+                  if (reg_use_refs.empty ())
+                    reg_use_refs.push_back (NULL);
+
+                  // Create a reg use for each reference that was found.
+                  for (std::vector<rtx*>::iterator it = reg_use_refs.begin ();
+                       it != reg_use_refs.end (); ++it)
+                    {
+                      rtx* use_ref = *it;
+                      reg_use* new_reg_use = (reg_use*)*insert_element (
+                        new reg_use (i, *regs, use_ref));
+                      addr_expr effective_addr
+                        = rtx_to_addr_expr (*regs, Pmode, this, new_reg_use);
+
+                      // If the use ref also contains a constant displacement,
+                      // add that to the effective address.
+                      if (!effective_addr.is_invalid () && use_ref
+                          && (UNARY_P (*use_ref) || ARITHMETIC_P (*use_ref)))
+                        {
+                          addr_expr use_expr = rtx_to_addr_expr (*use_ref);
+                          effective_addr = check_make_non_mod_addr (
+                            effective_addr.base_reg (),
+                            effective_addr.index_reg (),
+                            effective_addr.scale (),
+                            effective_addr.disp () + use_expr.disp ());
+                        }
+                      new_reg_use->set_effective_addr (effective_addr);
+
+                      last_el_insn = new_reg_use->insn ();
+                    }
+                }
+            }
+        }
+
+      // Update the visited and live address regs list.
+      for (insn_map::iterator els = els_in_insn.first;
+           els != els_in_insn.second; ++els)
+        {
+          if ((*els->second)->type () == type_reg_mod)
+            {
+              reg_mod* rm = (reg_mod*)*els->second;
+              visited_addr_regs.insert (rm->reg ());
+              live_addr_regs[rm->reg ()] = rm;
+            }
+          last_el_insn = (*els->second)->insn ();
+        }
+      for (std::map<rtx, reg_mod*, cmp_by_regno>::iterator it
+             = live_addr_regs.begin (); it != live_addr_regs.end ();)
+        {
+          if (find_reg_note (i, REG_DEAD, it->first))
+            live_addr_regs.erase (it++);
+          else
+            ++it;
+        }
+    }
+
+  // Add unspecified reg uses for regs that are still alive at the
+  // end of the sequence.
+  for (std::map<rtx, reg_mod*, cmp_by_regno>::iterator it
+         = live_addr_regs.begin (); it != live_addr_regs.end (); ++it)
+    {
+      rtx reg = it->first;
+      reg_mod* rm = it->second;
+      reg_use* new_reg_use = (reg_use*)*insert_element (
+        new reg_use (last_el_insn, reg, NULL));
+      new_reg_use->set_effective_addr (rm->effective_addr ());
+      new_reg_use->add_dependency (rm);
+    }
+}
+
+// The recursive part of find_addr_reg_uses. Find all references to REG
+// in X and add them to OUT.
+template <typename OutputIterator> void
+sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
+{
+  switch (GET_CODE (x))
+    {
+    case REG:
+      if (regs_equal (reg, x))
+          *out++ = &x;
+      break;
+
+    case PARALLEL:
+      for (int i = 0; i < XVECLEN (x, 0); i++)
+	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out);
+      break;
+
+    case SET:
+      find_addr_reg_uses_1 (reg, SET_SRC (x), out);
+      break;
+
+    default:
+      if (UNARY_P (x) || ARITHMETIC_P (x))
+        {
+          // If the reg is inside a (plus reg (const_int ...)) rtx,
+          // add the whole rtx instead of just the reg.
+          addr_expr use_expr = rtx_to_addr_expr (x);
+          if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
+              && use_expr.has_base_reg () && use_expr.has_disp ()
+              && regs_equal (reg, use_expr.base_reg ()))
+            {
+              *out++ = &x;
+              break;
+            }
+
+	  for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
+	    find_addr_reg_uses_1 (reg, XEXP (x, i), out);
+        }
+      break;
     }
 }
 
@@ -1532,8 +1697,14 @@ sh_ams2::execute (function* fun)
       if (seq.elements ().empty ())
         continue;
 
-      log_msg ("add_missing_reg_mods\n");
+      log_msg ("find_addr_reg_mods\n");
       seq.find_addr_reg_mods ();
+
+      log_sequence (seq, false);
+      log_msg ("\n\n");
+
+      log_msg ("find_addr_reg_uses\n");
+      seq.find_addr_reg_uses ();
 
       log_sequence (seq, false, true);
       log_msg ("\n\n");
