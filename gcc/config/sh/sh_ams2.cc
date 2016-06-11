@@ -721,15 +721,12 @@ const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 void
 sh_ams2::sequence::find_addr_reg_mods (void)
 {
-  rtx prev_reg = NULL;
   rtx_insn* last_insn = BB_END (start_bb ());
 
   for (addr_reg_map::iterator it = m_addr_regs.begin ();
        it != m_addr_regs.end (); ++it)
     {
       rtx reg = it->first;
-      if (regs_equal (reg, prev_reg))
-        continue;
 
       while (last_insn != NULL)
         {
@@ -940,7 +937,7 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el,
 
   // Update the address reg list.
   if (el->type () == type_reg_mod)
-      m_addr_regs.insert (std::make_pair (((reg_mod*)el)->reg (), iter));
+      ++m_addr_regs[((reg_mod*)el)->reg ()];
 
   return iter;
 }
@@ -1057,16 +1054,11 @@ sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el)
   // Update the address reg list.
   if ((*el)->type () == type_reg_mod)
     {
-      std::pair<addr_reg_map::iterator, addr_reg_map::iterator> range
-        = m_addr_regs.equal_range (((reg_mod*)*el)->reg ());
-      for (addr_reg_map::iterator it = range.first; it != range.second; ++it)
-        {
-          if (it->second == el)
-            {
-              m_addr_regs.erase (it);
-              break;
-            }
-        }
+      addr_reg_map::iterator addr_reg
+        = m_addr_regs.find (((reg_mod*)*el)->reg ());
+      --addr_reg->second;
+      if (addr_reg->second == 0)
+        m_addr_regs.erase (addr_reg);
     }
 
   return elements ().erase (el);

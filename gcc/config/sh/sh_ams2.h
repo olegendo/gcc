@@ -863,6 +863,7 @@ NOTE:
   typedef std::list<sequence_element*>::reverse_iterator sequence_reverse_iterator;
   typedef std::list<sequence_element*>::const_reverse_iterator sequence_const_reverse_iterator;
 
+  typedef std::map<rtx, unsigned, cmp_by_regno> addr_reg_map;
   typedef std::multimap<rtx_insn*, sequence_iterator> insn_map;
 
   // A structure used to store the address regs that can be used as a starting
@@ -886,7 +887,7 @@ NOTE:
     // A map for storing addresses that have a base and/or index reg.
     // The key of each stored address is its base or index reg (the
     // address is stored twice if it has both).
-    addr_reg_map m_reg_addresses;
+    typedef std::multimap<rtx, reg_mod*, cmp_by_regno> m_reg_addresses;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -957,8 +958,8 @@ NOTE:
     rtx_insn* start_insn (void) const;
     basic_block start_bb (void) const;
 
-    // A map containing the all the address regs used in the sequence
-    // and the reg_mods that modify them.
+    // A map containing all the address regs used in the sequence
+    // and the number of elements that use them.
     addr_reg_map& addr_regs (void) { return m_addr_regs; }
 
     // Return the sequence elements that INSN contains.
