@@ -148,6 +148,12 @@ public:
 
   class sequence_element;
   class sequence;
+  class addr_expr;
+
+ private:
+  class split_sequence_info;
+
+ public:
 
   typedef std::list<sequence_element*>::iterator sequence_iterator;
   typedef std::list<sequence_element*>::const_iterator sequence_const_iterator;
@@ -162,6 +168,38 @@ public:
     bool operator () (const rtx a, const rtx b) const
     {
       return REGNO (a) < REGNO (b);
+    }
+  };
+
+  // Comparison struct for sets and maps containing address expressions.
+  struct cmp_addr_expr
+  {
+    bool operator () (const addr_expr& a, const addr_expr& b) const
+    {
+      if (a.is_invalid () && b.is_invalid ())
+        return false;
+      if (a.is_invalid () || b.is_invalid ())
+        return a.is_invalid ();
+
+      if (a.has_base_reg () && b.has_base_reg ())
+        {
+          if (REGNO (a.base_reg ()) != REGNO (b.base_reg ()))
+            return REGNO (a.base_reg ()) < REGNO (b.base_reg ());
+        }
+      else if (a.has_base_reg () || b.has_base_reg ())
+        return a.has_base_reg ();
+
+      if (a.has_index_reg () && b.has_index_reg ())
+        {
+          if (REGNO (a.index_reg ()) != REGNO (b.index_reg ()))
+            return REGNO (a.index_reg ()) < REGNO (b.index_reg ());
+        }
+      else if (a.has_index_reg () || b.has_index_reg ())
+        return a.has_index_reg ();
+
+      if (a.disp () == b.disp () && a.has_index_reg () && b.has_index_reg ())
+        return a.scale () < b.scale ();
+      return a.disp () < b.disp ();
     }
   };
 
@@ -919,8 +957,8 @@ NOTE:
     // together.  Return an iterator to the sequence that comes after the newly
     // inserted sequences.
     static std::list<sequence>::iterator
-    split_sequence (std::list<sequence>::iterator seq,
-                    std::list<sequence>& sequences);
+    split (std::list<sequence>::iterator seq_it,
+           std::list<sequence>& sequences);
 
     // Add a reg mod for every insn that modifies an address register.
     void find_addr_reg_mods (void);
@@ -1020,6 +1058,10 @@ NOTE:
     }
 
   private:
+    static void split_1 (std::list<split_sequence_info>& new_seqs,
+                         reg_mod* rm, bool add_to_front, bool add_to_back);
+    static void split_2 (split_sequence_info& seq_info, sequence_element* el);
+
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void
     find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out);
@@ -1075,13 +1117,9 @@ NOTE:
 			 sequence_const_iterator acc) = 0;
   };
 
-  // A structure for keeping track of modifications to an access sequence.
-  // Used in address mod generation for backtracking.
-  class mod_tracker;
-
-  // Used to store information about newly created sequences during
-  // sequence splitting.
-  class split_sequence_info;
+  // Used to keep track of shared address (sub)expressions
+  // during access sequence splitting.
+  class shared_term;
 
   sh_ams2 (gcc::context* ctx, const char* name, delegate& dlg,
 	  const options& opt = options ());

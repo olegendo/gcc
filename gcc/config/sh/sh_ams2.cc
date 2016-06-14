@@ -730,6 +730,320 @@ sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
 
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 
+// Used to store information about newly created sequences during
+// sequence splitting.
+class sh_ams2::split_sequence_info
+{
+public:
+  split_sequence_info (sequence* seq) : m_seq (seq), m_addr_regs () {}
+
+  // The sequence itself.
+  sequence* seq (void) const { return m_seq; }
+
+  // Return true if REG is present in m_addr_regs.
+  bool uses_addr_reg (rtx reg) const
+  {
+    return m_addr_regs.find (reg) != m_addr_regs.end ();
+  }
+
+  // Add REG to the address reg lists.
+  void add_reg (rtx reg) { m_addr_regs.insert (reg); }
+
+private:
+  sequence *m_seq;
+
+  // A set of the address registers used in the sequence.
+  std::set<rtx, cmp_by_regno> m_addr_regs;
+};
+
+// Used to keep track of shared address (sub)expressions
+// during sequence splitting.
+class sh_ams2::shared_term
+{
+public:
+  shared_term (addr_expr& t, sequence_element* el)
+    : m_term (t), m_sharing_els (), m_new_seq (NULL) {
+    m_sharing_els.push_back (el);
+  }
+
+  // The shared term.
+  const addr_expr& term () { return m_term; }
+
+  // The elements that share this term.
+  std::vector<sequence_element*>& sharing_els () { return m_sharing_els; }
+
+  // The term's newly created access sequence.
+  split_sequence_info* new_seq (void) const { return m_new_seq; }
+  void set_new_seq (split_sequence_info *s) {  m_new_seq = s; }
+
+  static bool compare (shared_term* a, shared_term* b)
+  { return a->score () > b->score (); }
+
+  // A score that's used to determine which shared expressions should
+  // be used for splitting access sequences.  A higher score means that
+  // the shared term is more likely to be selected as a base for a
+  // new sequence.
+  unsigned int score (void) const
+  {
+    if (m_term.is_invalid ())
+      return 0;
+
+    unsigned int score = 10;
+
+    // Displacement-only terms with large displacements are
+    // represented with a constant 0 address.
+    if (m_term.has_no_base_reg () && m_term.has_no_index_reg ()
+        && m_term.has_no_disp ())
+      score += 2;
+
+    if (m_term.has_base_reg ())
+      score += 2;
+    if (m_term.has_index_reg ())
+      {
+        score += 2;
+        if (m_term.scale () != 1)
+          ++score;
+      }
+    if (m_term.has_disp ())
+      ++score;
+
+    return score*m_sharing_els.size ();
+  }
+
+private:
+  addr_expr m_term;
+  std::vector<sequence_element*> m_sharing_els;
+  split_sequence_info* m_new_seq;
+};
+
+// Split the access sequence pointed to by SEQ_IT into multiple sequences,
+// grouping the accesses that have common terms in their effective address
+// together.  Return an iterator to the sequence that comes after the newly
+// inserted sequences.
+std::list<sh_ams2::sequence>::iterator
+sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
+                          std::list<sequence>& sequences)
+{
+  typedef std::map<sequence_element*, split_sequence_info*> element_to_seq_map;
+  typedef std::map<addr_expr, shared_term, cmp_addr_expr> shared_term_map;
+
+  // Stores the newly created sequences.
+  std::list<split_sequence_info> new_seqs;
+
+  // Shows which new sequence each sequence element should go into.
+  element_to_seq_map element_new_seqs;
+
+  shared_term_map shared_terms;
+  sequence& seq = *seq_it;
+
+  // Find all terms that appear in the effective addresses of the mem accesses
+  // and reg uses.  These will be used as potential bases for new sequences.
+  std::vector<addr_expr> terms;
+  for (sequence_iterator el = seq.elements ().begin ();
+       el != seq.elements ().end (); ++el)
+    {
+      addr_expr addr;
+      if ((*el)->is_mem_access ())
+        addr = ((mem_access*)*el)->effective_addr ();
+      else if ((*el)->type () == type_reg_use)
+        addr = ((reg_use*)*el)->effective_addr ();
+      else
+        continue;
+
+      terms.clear ();
+      addr.get_all_subterms (std::back_inserter (terms));
+      for (std::vector<addr_expr>::iterator it = terms.begin ();
+           it != terms.end (); ++it)
+        {
+          if (!it->is_invalid () && it->has_no_base_reg ()
+              && it->has_no_index_reg ())
+            {
+              // If a displacement-only term fits into an address alternative,
+              // it's not likely to be useful as a base term, so skip those.
+              if (!(*el)->is_mem_access ())
+                continue;
+              if (((mem_access*)*el)->displacement_fits_alternative (
+                                        it->disp ()))
+                continue;
+
+              // If it doesn't fit, treat them as one base term instead of
+              // having a separate term for each constant.
+              else
+                *it = make_const_addr ((disp_t)0);
+            }
+
+          shared_term_map::iterator term = shared_terms.find (*it);
+          if (term == shared_terms.end ())
+            shared_terms.insert (std::make_pair (*it, shared_term (*it, *el)));
+          else
+            term->second.sharing_els ().push_back (*el);
+        }
+    }
+
+  // Sort the shared terms by their score.
+  std::vector<shared_term*> sorted_terms;
+  for (shared_term_map::iterator it = shared_terms.begin ();
+       it != shared_terms.end (); ++it)
+      sorted_terms.push_back (&(it->second));
+  std::sort (sorted_terms.begin (), sorted_terms.end (), shared_term::compare);
+
+  // Create new sequences for the shared terms with the highest scores
+  // and mark the accesses' new sequences in ELEMENT_NEW_SEQS appropriately.
+  std::set<sequence_element*> inserted_els;
+  for (std::vector<shared_term*>::iterator it
+         = sorted_terms.begin (); it != sorted_terms.end (); ++it)
+    {
+      shared_term& term = **it;
+      for (std::vector<sequence_element*>::iterator el
+             = term.sharing_els ().begin ();
+           el != term.sharing_els ().end (); ++el)
+        {
+          if (inserted_els.find (*el) != inserted_els.end ())
+            continue;
+
+          inserted_els.insert (*el);
+
+          if (!term.new_seq ())
+            {
+              sequence& new_seq = *sequences.insert (seq_it, sequence ());
+              new_seqs.push_back (split_sequence_info (&new_seq));
+              term.set_new_seq (&new_seqs.back ());
+            }
+
+          element_new_seqs[*el] = term.new_seq ();
+        }
+    }
+
+  shared_terms.clear ();
+  sorted_terms.clear ();
+
+  // Add each mem access and reg use from the original sequence to the
+  // appropriate new sequence based on ELEMENT_NEW_SEQS.  Also add the
+  // reg mods to all sequences where they are used to calculate addresses.
+  //
+  // To determine which reg mods should be added to a sequence, we go over
+  // the elements twice: In the first pass, we record the address regs that
+  // the sequence uses.  In the second, we add the relevant elements to the
+  // sequence.
+  sequence_iterator last_non_mod = seq.elements ().end ();
+  for (unsigned pass = 0; pass < 2; ++pass)
+    {
+      bool add_to_seq = (pass==1);
+      for (sequence_reverse_iterator el =
+             seq.elements ().rbegin (); el != seq.elements ().rend (); ++el)
+        {
+          if ((*el)->type () == type_reg_mod)
+            // Add reg mods to multiple sequences.
+            split_1 (new_seqs, (reg_mod*)*el, add_to_seq, false);
+          else
+            {
+              if (add_to_seq && last_non_mod == seq.elements ().end ())
+                last_non_mod = stdx::prev (el.base ());
+
+              // Find which sequence the element should go to
+              // and place it to that sequence's front.
+              split_sequence_info& new_seq
+                = *(element_new_seqs.find (*el)->second);
+
+              split_2 (new_seq, *el);
+              if (add_to_seq)
+                new_seq.seq ()->insert_element (
+                  *el, new_seq.seq ()->elements ().begin ());
+            }
+        }
+    }
+
+  // Add the remaining reg mods from the end of the original sequence.
+  for (sequence_iterator el = last_non_mod; el != seq.elements ().end (); ++el)
+    {
+      if ((*el)->type () == type_reg_mod)
+        split_1 (new_seqs, (reg_mod*)*el, false, true);
+    }
+
+  // Remove the old sequence and return the next element after the
+  // newly inserted sequences.
+  return sequences.erase (seq_it);
+}
+
+// Internal function of access_sequence::split.  Adds the reg_mod RM to
+// those sequences in NEW_SEQS that use it in their address calculations.
+void
+sh_ams2::sequence::split_1 (std::list<split_sequence_info>& new_seqs,
+                            sh_ams2::reg_mod* rm, bool add_to_front,
+                            bool add_to_back)
+{
+  for (std::list<split_sequence_info>::iterator seq_info = new_seqs.begin ();
+       seq_info != new_seqs.end (); ++seq_info)
+    {
+      sequence& seq = *seq_info->seq ();
+
+      // Add the reg mod only if it's used to calculate
+      // one of the addresses in this new sequence.
+      if (!seq_info->uses_addr_reg (rm->reg ()))
+        continue;
+
+      split_2 (*seq_info, rm);
+      if (add_to_front)
+        seq.insert_element (rm, seq.elements ().begin ());
+      else if (add_to_back)
+        seq.insert_element (rm, seq.elements ().end ());
+    }
+}
+
+// Internal function of access_sequence::split.  Adds all the address regs
+// referenced by EL to SEQ_INFO.
+void
+sh_ams2::sequence::split_2 (split_sequence_info& seq_info,
+                            sh_ams2::sequence_element* el)
+{
+  if (el->type () == type_reg_mod && ((reg_mod*)el)->reg () != NULL)
+    seq_info.add_reg (((reg_mod*)el)->reg ());
+
+  if (el->type () == type_reg_use)
+    {
+      if (((reg_use*)el)->reg () != NULL)
+        seq_info.add_reg (((reg_use*)el)->reg ());
+      return;
+    }
+
+  addr_expr address;
+  rtx addr_rtx;
+
+  if (el->is_mem_access ())
+    {
+      mem_access* m = (mem_access*)el;
+      address = m->current_addr ();
+      addr_rtx = m->current_addr_rtx ();
+    }
+  else if (el->type () == type_reg_mod)
+    {
+      reg_mod* rm = (reg_mod*)el;
+      address = rm->addr ();
+      addr_rtx = rm->value ();
+    }
+  else
+    gcc_unreachable ();
+
+  if (!address.is_invalid ())
+    {
+      if (address.has_base_reg ())
+        seq_info.add_reg (address.base_reg ());
+      if (address.has_index_reg ())
+        seq_info.add_reg (address.index_reg ());
+    }
+  else if (addr_rtx != NULL)
+    {
+      // Search the RTX for regs.
+      subrtx_var_iterator::array_type array;
+      FOR_EACH_SUBRTX_VAR (it, array, addr_rtx, NONCONST)
+        {
+          rtx x = *it;
+          if (REG_P (x))
+            seq_info.add_reg (x);
+        }
+    }
+}
+
 // Add a reg mod for every insn that modifies an address register.
 void
 sh_ams2::sequence::find_addr_reg_mods (void)
@@ -1953,12 +2267,15 @@ sh_ams2::execute (function* fun)
 
   log_msg ("\nprocessing extracted sequences\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
-       it != sequences.end (); ++it)
+       it != sequences.end ();)
     {
       sequence& seq = *it;
 
       if (seq.elements ().empty ())
-        continue;
+        {
+          ++it;
+          continue;
+        }
 
       log_msg ("find_addr_reg_mods\n");
       seq.find_addr_reg_mods ();
@@ -1979,6 +2296,28 @@ sh_ams2::execute (function* fun)
 
       log_sequence (seq, true, true);
       log_msg ("\n\n");
+
+      log_msg ("split_access_sequence\n");
+      if (m_options.split_sequences)
+        it = sequence::split (it, sequences);
+      else
+        ++it;
+    }
+
+  log_msg ("\nprocessing split sequences\n");
+  for (std::list<sequence>::iterator it = sequences.begin ();
+       it != sequences.end (); ++it)
+    {
+      sequence& seq = *it;
+
+      log_sequence (seq, false);
+      log_msg ("\n\n");
+
+      if (seq.elements ().empty ())
+        {
+          log_msg ("skipping empty sequence\n");
+          continue;
+        }
     }
 
 
