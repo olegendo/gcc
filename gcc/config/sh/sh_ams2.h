@@ -73,9 +73,6 @@
 #include "static_vector.h"
 #include "ref_counted.h"
 
-// Needed for the old AMS's delegate struct.
-#include "sh_ams.h"
-
 class sh_ams2 : public rtl_opt_pass
 {
 public:
@@ -131,6 +128,8 @@ public:
     int base_lookahead_count;
   };
 
+  struct delegate;
+
 
   typedef int regno_t;
 
@@ -148,6 +147,12 @@ public:
   static const rtx any_regno;
 
   class sequence_element;
+  class sequence;
+
+  typedef std::list<sequence_element*>::iterator sequence_iterator;
+  typedef std::list<sequence_element*>::const_iterator sequence_const_iterator;
+  typedef std::list<sequence_element*>::reverse_iterator sequence_reverse_iterator;
+  typedef std::list<sequence_element*>::const_reverse_iterator sequence_const_reverse_iterator;
 
   static regno_t get_regno (const_rtx x);
 
@@ -168,6 +173,18 @@ public:
       return true;
     if (!r1 || !r2)
       return false;
+    return REGNO (r1) == REGNO (r2);
+  }
+
+  static bool
+  regs_match (const rtx r1, const rtx r2)
+  {
+    if (r1 == invalid_regno || r2 == invalid_regno)
+      return false;
+
+    if (r1 == any_regno || r2 == any_regno)
+      return true;
+
     return REGNO (r1) == REGNO (r2);
   }
 
@@ -389,10 +406,6 @@ public:
   static addr_expr
   make_invalid_addr (void);
 
-  // Reuse the old AMS's delegate to avoid duplicating functions
-  // in the delegate implementations.
-  typedef sh_ams::delegate delegate;
-
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // An alternative for an address mode.  These are usually provided
   // to AMS by the delegate for each memory access in an (access) sequence.
@@ -432,6 +445,9 @@ public:
     // use that alternative.
     addr_expr m_addr_expr;
   };
+
+  struct alternative_valid;
+  struct alternative_invalid;
 
   // Support a limited number of alternatives only.
   typedef static_vector<alternative, 16> alternative_set;
@@ -595,6 +611,11 @@ NOTE:
     alternative_set& alternatives (void) { return m_alternatives; }
     const alternative_set& alternatives (void) const { return m_alternatives; }
 
+    void update_access_alternatives (const sequence& seq,
+                                     sequence_const_iterator it,
+                                     delegate& d, bool force_validation,
+				     bool disable_validation);
+
     // FIXME: find shorter name.
     bool alternative_validation_enabled (void) const { return m_validate_alts; }
     void set_alternative_validation (bool val) { m_validate_alts = val; }
@@ -636,12 +657,17 @@ NOTE:
     void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
+    int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
+
+    // If false, AMS skips this access when optimizing.
+    bool optimization_enabled (void) const { return m_optimization_enabled; }
+    void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
 
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m)
     : sequence_element (t, i), m_effective_addr (make_invalid_addr ()),
       m_current_addr (make_invalid_addr ()), m_current_addr_rtx (NULL),
-      m_machine_mode (m) { }
+      m_optimization_enabled (true), m_machine_mode (m) { }
 
     // The address expressions are usually set/updated by the sub-class.
     addr_expr m_effective_addr;
@@ -650,6 +676,7 @@ NOTE:
 
   private:
     bool m_validate_alts;
+    bool m_optimization_enabled;
     alternative_set m_alternatives;
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
@@ -661,13 +688,11 @@ NOTE:
   class mem_load : public mem_access
   {
   public:
-    mem_load (rtx_insn* i, machine_mode m)
-    : mem_access (type_mem_load, i, m) { };
+    mem_load (rtx_insn* i, machine_mode m, rtx* mem_ref)
+    : mem_access (type_mem_load, i, m), m_mem_ref (mem_ref) { };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
-    virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
-    virtual bool replace_addr_rtx (const addr_expr& new_addr);
 
   private:
     // Reference into the rtx_insn where the mem rtx resides.
@@ -679,13 +704,11 @@ NOTE:
   class mem_store : public mem_access
   {
   public:
-    mem_store (rtx_insn* i, machine_mode m)
-    : mem_access (type_mem_store, i, m) { };
+    mem_store (rtx_insn* i, machine_mode m, rtx* mem_ref)
+    : mem_access (type_mem_store, i, m), m_mem_ref (mem_ref) { };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
-    virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
-    virtual bool replace_addr_rtx (const addr_expr& new_addr);
 
   private:
     // Reference into the rtx_insn where the mem rtx resides.
@@ -700,17 +723,15 @@ NOTE:
   class mem_operand : public mem_access
   {
   public:
-    mem_operand (rtx_insn* i, machine_mode m)
-    : mem_access (type_mem_operand, i, m) { };
+    mem_operand (rtx_insn* i, machine_mode m, static_vector<rtx*, 16> mem_refs)
+    : mem_access (type_mem_operand, i, m), m_mem_refs (mem_refs) { };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
-    virtual bool try_replace_addr_rtx (const addr_expr& new_addr);
-    virtual bool replace_addr_rtx (const addr_expr& new_addr);
 
   private:
     // References into the rtx_insn where the mem rtx'es reside.
-    static_vector<rtx*, 16> m_mem_ref;
+    static_vector<rtx*, 16> m_mem_refs;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -849,19 +870,14 @@ NOTE:
   template <element_type T1, element_type T2 = T1, element_type T3 = T1>
   struct element_type_matches
   {
-    bool operator () (const sequence_element& e) const
+    bool operator () (const sequence_element* e) const
     {
-      return e.type () == T1 || e.type () == T2
-	     || e.type () == T3;
+      return e->type () == T1 || e->type () == T2
+	     || e->type () == T3;
     }
   };
 
   struct element_to_optimize;
-
-  typedef std::list<sequence_element*>::iterator sequence_iterator;
-  typedef std::list<sequence_element*>::const_iterator sequence_const_iterator;
-  typedef std::list<sequence_element*>::reverse_iterator sequence_reverse_iterator;
-  typedef std::list<sequence_element*>::const_reverse_iterator sequence_const_reverse_iterator;
 
   typedef std::map<rtx, unsigned, cmp_by_regno> addr_reg_map;
   typedef std::multimap<rtx_insn*, sequence_iterator> insn_map;
@@ -1013,6 +1029,50 @@ NOTE:
     insn_map m_insn_el_map;
     start_addr_list m_start_addr_list;
 
+  };
+
+  // a delegate for the ams pass.  usually implemented by the target.
+  struct delegate
+  {
+    // provide alternatives for the specified access.
+    virtual void
+    mem_access_alternatives (alternative_set& alt,
+			     const sequence& seq,
+			     sequence_const_iterator acc,
+			     bool& validate_alternatives) = 0;
+
+    // adjust the costs of the specified alternative of the specified
+    // access.  called after the alternatives of all accesses have
+    // been retrieved.
+    virtual void
+    adjust_alternative_costs (alternative& alt,
+			      const sequence& seq,
+                              sequence_const_iterator acc) = 0;
+
+    // provide the number of subsequent accesses that should be taken into
+    // account when trying to minimize the costs of the specified access.
+    virtual int
+    adjust_lookahead_count (const sequence& as,
+			    sequence_const_iterator acc) = 0;
+
+    // provide the cost for setting the specified address register to
+    // an rtx expression.
+    // the cost must be somehow relative to the cost provided for access
+    // alternatives.
+    virtual int
+    addr_reg_mod_cost (const_rtx reg, const_rtx val,
+		       const sequence& seq,
+		       sequence_const_iterator acc) = 0;
+
+    // provide the cost for cloning the address register, which is usually
+    // required when splitting an access sequence.  if (address) register
+    // pressure is high, return a higher cost to avoid splitting.
+    //
+    // FIXME: alternative would be 'sequence_split_cost'
+    virtual int
+    addr_reg_clone_cost (const_rtx reg,
+			 const sequence& seq,
+			 sequence_const_iterator acc) = 0;
   };
 
   // A structure for keeping track of modifications to an access sequence.

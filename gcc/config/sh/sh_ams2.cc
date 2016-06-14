@@ -266,6 +266,9 @@ log_sequence_element (const sh_ams2::sequence_element& e,
           log_msg ("\n  effective addr:  ");
           log_addr_expr (m.effective_addr ());
         }
+
+      if (!m.optimization_enabled ())
+        log_msg ("\n  (won't be optimized)");
     }
   else if (e.type () == sh_ams2::type_reg_mod)
     {
@@ -637,6 +640,16 @@ struct sh_ams2::element_to_optimize
             || el.type () == type_mem_operand
             || el.type () == type_reg_mod || el.type () == type_reg_use);
   }
+};
+
+struct sh_ams2::alternative_valid
+{
+  bool operator () (const alternative& a) const { return a.valid (); }
+};
+
+struct sh_ams2::alternative_invalid
+{
+  bool operator () (const alternative& a) const { return !a.valid (); }
 };
 
 // Get all sub-expressions that are contained inside the addr_expr.
@@ -1075,6 +1088,218 @@ sh_ams2::sequence::cost (void) const
   return cost;
 }
 
+// Update the alternatives of the sequence's accesses.
+void
+sh_ams2::sequence::update_access_alternatives (delegate& d,
+                                               bool force_validation,
+                                               bool disable_validation)
+{
+  typedef element_type_matches<type_mem_load, type_mem_store, type_mem_operand>
+    match;
+  typedef filter_iterator<sequence_iterator, match> iter;
+
+  for (iter e = begin<match> (), e_end = end<match> (); e != e_end; ++e)
+    ((mem_access*)*e)->update_access_alternatives (*this, e.base_iterator (), d,
+                                                   force_validation,
+                                                   disable_validation);
+}
+
+// Update the alternatives of the access.
+void
+sh_ams2::mem_access::update_access_alternatives (const sequence& seq,
+                                                 sequence_const_iterator it,
+                                                 delegate& d,
+                                                 bool force_validation,
+                                                 bool disable_validation)
+{
+  bool val_alts = alternative_validation_enabled ();
+
+  alternatives ().clear ();
+
+  d.mem_access_alternatives (alternatives (), seq, it, val_alts);
+  set_alternative_validation (val_alts);
+
+  typedef alternative_valid match;
+  typedef filter_iterator<alternative_set::iterator, match> iter;
+
+  // By default alternative validation is enabled for all accesses.
+  // The target's delegate implementation might disable validation for insns
+  // to speed up processing, if it knows that all the alternatives are valid.
+  if ((alternative_validation_enabled () || force_validation)
+      && !disable_validation)
+    {
+      log_msg ("\nvalidating alternatives for insn\n");
+      log_insn (insn ());
+
+      #define log_invalidate_cont(msg) do { if (dump_file != NULL) { \
+	log_msg ("alternative  "); \
+	log_addr_expr (alt->address ()); \
+	log_msg ("  invalid: %s\n", msg); } \
+	alt->set_invalid (); \
+	goto Lcontinue; } while (0)
+
+      // Alternatives might have reg placeholders such as any_regno.
+      // When validating the change in the insn we need to have real pseudos.
+      // To avoid creating a lot of pseudos, use this one.
+      rtx tmp_reg = gen_rtx_REG (Pmode, LAST_VIRTUAL_REGISTER + 1);
+
+      addr_expr tmp_addr;
+
+      for (iter alt = iter (alternatives ().begin (),
+			    alternatives ().end ()),
+	   alt_end = iter (alternatives ().end (),
+			   alternatives ().end ()); alt != alt_end; ++alt)
+	{
+	  if (alt->address ().has_no_base_reg ())
+	    log_invalidate_cont ("has no base reg");
+
+	  tmp_addr = alt->address ();
+	  if (tmp_addr.base_reg () == any_regno)
+	    tmp_addr.set_base_reg (tmp_reg);
+	  if (tmp_addr.index_reg () == any_regno)
+	    tmp_addr.set_index_reg (tmp_reg);
+
+	  if (!try_replace_addr (tmp_addr))
+	    log_invalidate_cont ("failed to substitute regs");
+
+	  if (alt->address ().disp_min () > alt->address ().disp_max ())
+	    log_invalidate_cont ("min disp > max disp");
+
+	  if (alt->address ().disp_min () != alt->address ().disp_max ())
+	    {
+	      // Probe some displacement values and hope that we cover enough.
+	      tmp_addr.set_disp (alt->address ().disp_min ());
+	      if (!try_replace_addr (tmp_addr))
+		log_invalidate_cont ("bad min disp");
+
+	      tmp_addr.set_disp (alt->address ().disp_max ());
+	      if (!try_replace_addr (tmp_addr))
+		log_invalidate_cont ("bad max disp");
+	    }
+
+	  if (alt->address ().has_index_reg ())
+	    {
+	      if (alt->address ().scale_min () > alt->address ().scale_max ())
+		log_invalidate_cont ("min scale > max scale");
+
+	      if (alt->address ().scale_min () != alt->address ().scale_max ())
+		{
+		  // Probe some displacement and index scale combinations and
+		  // hope that we cover enough.
+		  tmp_addr.set_disp (alt->address ().disp_min ());
+		  tmp_addr.set_scale (alt->address ().scale_min ());
+		  if (!try_replace_addr (tmp_addr))
+		    log_invalidate_cont ("bad min disp min scale");
+
+		  tmp_addr.set_disp (alt->address ().disp_min ());
+		  tmp_addr.set_scale (alt->address ().scale_max ());
+		  if (!try_replace_addr (tmp_addr))
+		    log_invalidate_cont ("bad min disp max scale");
+
+		  tmp_addr.set_disp (alt->address ().disp_max ());
+		  tmp_addr.set_scale (alt->address ().scale_min ());
+		  if (!try_replace_addr (tmp_addr))
+		    log_invalidate_cont ("bad max disp min scale");
+
+		  tmp_addr.set_disp (alt->address ().disp_max ());
+		  tmp_addr.set_scale (alt->address ().scale_max ());
+		  if (!try_replace_addr (tmp_addr))
+		    log_invalidate_cont ("bad max disp max scale");
+		}
+	    }
+
+        Lcontinue:;
+	}
+
+      #undef log_set_invalid_continue
+    }
+
+  // Remove invalid alternatives from the set.
+  // Instead we could also use a filter_iterator each time the
+  // alternatives are accessed.  This would allow for more flexible
+  // alternative valid/invalid scenarios.  Currently we allow invalid
+  // alternatives only right here.
+  alternative_set::iterator first_invalid =
+    std::stable_partition (alternatives ().begin (), alternatives ().end (),
+                           alternative_valid ());
+
+  // FIXME: Implement erase (iter, iter) for alternative_set.
+  if (first_invalid != alternatives ().end ())
+    {
+      unsigned int c = std::distance (first_invalid, alternatives ().end ());
+      log_msg ("removing %u invalid alternatives\n", c);
+
+      for (; c > 0; --c)
+	alternatives ().pop_back ();
+    }
+
+  if (alternatives ().empty ())
+    {
+      log_msg ("no valid alternatives, not optimizing this access\n");
+      set_optimization_enabled (false);
+    }
+
+  // At least on clang/libc++ there is a problem with bind1st, mem_fun and
+  // &access::matches_alternative.
+  alternative_set::iterator alt_match;
+  for (alt_match = alternatives ().begin ();
+       alt_match != alternatives ().end (); ++alt_match)
+    if (matches_alternative (*alt_match))
+      break;
+
+  if (alt_match == alternatives ().end ())
+    {
+      log_msg ("original address does not match any alternative, "
+	       "not optimizing this access\n");
+      set_optimization_enabled (false);
+    }
+}
+
+bool
+sh_ams2::mem_access::matches_alternative (const sh_ams2::alternative& alt) const
+{
+  const addr_expr& ae = current_addr ();
+  const addr_expr& alt_ae = alt.address ();
+
+  if (ae.type () != alt_ae.type ())
+    return false;
+
+  if (ae.has_base_reg () != alt_ae.has_base_reg ())
+    return false;
+  if (ae.has_index_reg () != alt_ae.has_index_reg ())
+    return false;
+
+  if (ae.has_base_reg () && alt_ae.has_base_reg ()
+      && !regs_match (ae.base_reg (), alt_ae.base_reg ()))
+    return false;
+
+  if (ae.disp () < alt_ae.disp_min () || ae.disp () > alt_ae.disp_max ())
+    return false;
+
+  if (ae.has_index_reg ()
+      && (ae.scale () < alt_ae.scale_min ()
+          || ae.scale () > alt_ae.scale_max ()
+          || !regs_match (ae.index_reg (), alt_ae.index_reg ())))
+    return false;
+
+  return true;
+}
+
+// Check if DISP can be used as constant displacement in any of the address
+// alternatives of the access.
+bool
+sh_ams2::mem_access::displacement_fits_alternative (disp_t disp) const
+{
+  for (alternative_set::const_iterator alt = alternatives ().begin ();
+       alt != alternatives ().end (); ++alt)
+    {
+      if (alt->address ().disp_min () <= disp
+          && alt->address ().disp_max () >= disp)
+        return true;
+    }
+  return false;
+}
+
 // Find the value that REG was last set to, starting the search from
 // START_INSN.  Return that value along with the insn in which REG gets
 // modified.  If the value of REG cannot be determined, return NULL.
@@ -1176,33 +1401,76 @@ sh_ams2::sequence::find_reg_value_1 (rtx reg, const_rtx insn)
   return std::make_pair (r, r != NULL);
 }
 
-// TODO: Implement these functions.  For now, they are defined as empty
-// functions to avoid undefined references.
-bool sh_ams2::
-mem_load::try_replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_load::replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_load::try_replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_load::replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+bool
+sh_ams2::mem_load::try_replace_addr (const sh_ams2::addr_expr& new_addr)
+{
+  rtx prev_rtx = XEXP (*m_mem_ref, 0);
+  rtx new_rtx = new_addr.to_rtx ();
+
+  XEXP (*m_mem_ref, 0) = new_rtx;
+
+  int new_insn_code = recog (PATTERN (insn ()), insn (), NULL);
+
+  XEXP (*m_mem_ref, 0) = prev_rtx;
+  return new_insn_code >= 0;
+}
 
 bool
-sh_ams2::mem_store::try_replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_store::try_replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_store::replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+sh_ams2::mem_load::replace_addr (const sh_ams2::addr_expr& new_addr)
+{
+  return validate_change (insn (), m_mem_ref, new_addr.to_rtx (), false);
+}
 
-bool sh_ams2::
-mem_operand::try_replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_operand::try_replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
-bool sh_ams2::
-mem_operand::replace_addr_rtx (const sh_ams2::addr_expr& new_addr) { return true; }
+bool
+sh_ams2::mem_store::try_replace_addr (const sh_ams2::addr_expr& new_addr)
+{
+  rtx prev_rtx = XEXP (*m_mem_ref, 0);
+  rtx new_rtx = new_addr.to_rtx ();
+
+  XEXP (*m_mem_ref, 0) = new_rtx;
+
+  int new_insn_code = recog (PATTERN (insn ()), insn (), NULL);
+
+  XEXP (*m_mem_ref, 0) = prev_rtx;
+  return new_insn_code >= 0;
+}
+
+bool
+sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr)
+{
+  return validate_change (insn (), m_mem_ref, new_addr.to_rtx (), false);
+}
+
+bool
+sh_ams2::mem_operand::try_replace_addr (const sh_ams2::addr_expr& new_addr)
+{
+  rtx new_rtx = new_addr.to_rtx ();
+  for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
+       it != m_mem_refs.end (); ++it)
+    {
+      rtx prev_rtx = XEXP (**it, 0);
+
+      XEXP (**it, 0) = new_rtx;
+
+      int new_insn_code = recog (PATTERN (insn ()), insn (), NULL);
+
+      XEXP (**it, 0) = prev_rtx;
+      if (new_insn_code < 0)
+        return false;
+    }
+  return true;
+}
+
+bool
+sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
+{
+  rtx new_rtx = new_addr.to_rtx ();
+  for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
+       it != m_mem_refs.end (); ++it)
+    if (!validate_change (insn (), *it, new_rtx, false))
+      return false;
+  return true;
+}
 
 // Check whether two sequence elements are duplicates.
 bool
@@ -1578,10 +1846,12 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
 // Find the memory accesses in the rtx X of the insn I and add them to OUT.
 // TYPE indicates the type of the next mem that we find (i.e. mem_load,
 // mem_store or mem_operand).
+// FIXME: Handle mem_operands properly.
 template <typename OutputIterator> void
 sh_ams2::find_mem_accesses (rtx_insn* i, rtx& x, OutputIterator out,
                             sh_ams2::element_type type)
 {
+  static_vector<rtx*, 16> v;
   switch (GET_CODE (x))
     {
     case MEM:
@@ -1590,13 +1860,14 @@ sh_ams2::find_mem_accesses (rtx_insn* i, rtx& x, OutputIterator out,
       switch (type)
         {
         case type_mem_load:
-          acc = new mem_load (i, GET_MODE (x));
+          acc = new mem_load (i, GET_MODE (x), &x);
           break;
         case type_mem_store:
-          acc = new mem_store (i, GET_MODE (x));
+          acc = new mem_store (i, GET_MODE (x), &x);
           break;
         case type_mem_operand:
-          acc = new mem_operand (i, GET_MODE (x));
+          v.push_back (&x);
+          acc = new mem_operand (i, GET_MODE (x), v);
           break;
         default:
           gcc_unreachable ();
@@ -1698,7 +1969,15 @@ sh_ams2::execute (function* fun)
       log_msg ("find_addr_reg_uses\n");
       seq.find_addr_reg_uses ();
 
-      log_sequence (seq, false, true);
+      log_sequence (seq, false);
+      log_msg ("\n\n");
+
+      log_msg ("updating access alternatives\n");
+      seq.update_access_alternatives (m_delegate,
+                                      m_options.force_alt_validation,
+                                      m_options.disable_alt_validation);
+
+      log_sequence (seq, true, true);
       log_msg ("\n\n");
     }
 

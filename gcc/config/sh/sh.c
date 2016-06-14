@@ -843,6 +843,31 @@ static struct ams_delegate : public sh_ams::delegate
 		       sh_ams::access_sequence::const_iterator acc);
 } g_ams_delegate;
 
+static struct ams2_delegate : public sh_ams2::delegate
+{
+  virtual void
+  mem_access_alternatives (sh_ams2::alternative_set& alt,
+                           const sh_ams2::sequence& seq,
+                           sh_ams2::sequence_const_iterator acc,
+                           bool& validate_alternatives);
+  virtual void
+  adjust_alternative_costs (sh_ams2::alternative& alt,
+                            const sh_ams2::sequence& seq,
+                            sh_ams2::sequence_const_iterator acc);
+  virtual int
+  adjust_lookahead_count (const sh_ams2::sequence& as,
+                          sh_ams2::sequence_const_iterator acc);
+
+  virtual int
+  addr_reg_mod_cost (const_rtx reg, const_rtx val,
+                     const sh_ams2::sequence& seq,
+                     sh_ams2::sequence_const_iterator acc);
+  virtual int
+  addr_reg_clone_cost (const_rtx reg,
+                       const sh_ams2::sequence& seq,
+                       sh_ams2::sequence_const_iterator acc);
+} g_ams2_delegate;
+
 static void
 register_sh_passes (void)
 {
@@ -882,7 +907,7 @@ register_sh_passes (void)
 
   /* Same for the newer AMS pass.  */
   if (sh_ams2_enable)
-    register_pass (new sh_ams2 (g, "sh_ams2", g_ams_delegate,
+    register_pass (new sh_ams2 (g, "sh_ams2", g_ams2_delegate,
                                 sh_ams2::options (sh_ams2_opt)),
 		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 
@@ -13999,6 +14024,309 @@ addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
 		     const sh_ams::access_sequence& as ATTRIBUTE_UNUSED,
 		     sh_ams::access_sequence::const_iterator acc
 		     ATTRIBUTE_UNUSED)
+{
+  // FIXME: maybe cloning the GBR should be cheaper?
+  // FIXME: if register pressure is (expected to be) high, increase the cost
+  // a bit to avoid addr reg cloning.
+  return 4;
+}
+
+// ------------------------------------------------------------------------------
+
+
+// ------------------------------------------------------------------------------
+// New AMS delegate functions
+
+// similar to sh_address_cost, but for the AMS pass.
+void ams2_delegate::
+mem_access_alternatives (sh_ams2::alternative_set& alt,
+			 const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+			 sh_ams2::sequence_const_iterator acc,
+			 bool& validate_alternatives)
+
+{
+  typedef sh_ams2::alternative ams2_alt;
+  std::back_insert_iterator <sh_ams2::alternative_set> alts (alt);
+
+  gcc_assert ((*acc)->is_mem_access ());
+  sh_ams2::mem_access* mem_acc = (sh_ams2::mem_access*)*acc;
+
+  const machine_mode acc_mode = mem_acc->mach_mode ();
+  const int acc_size = mem_acc->access_size ();
+  const sh_ams2::addr_expr& addr = mem_acc->effective_addr ();
+
+  validate_alternatives = get_attr_ams_validate_alternatives ((*acc)->insn ())
+			  == AMS_VALIDATE_ALTERNATIVES_YES;
+
+  // FIXME: For now always do alternative validation because AMS can't
+  // handle multi-mem insns properly.  Alternative validation will effectively
+  // disable AMS optimization for those insns.
+  validate_alternatives = true;
+
+  // FIXME: determine R0 extra cost dynamically, based on what is happening
+  // around the memory access.
+  // if there are insns that are likely to use R0 (tst #imm, and/or/xor #imm)
+  // using it for indexed addresses is more expensive.  using it as load/store
+  // dst/src is not that expensive.
+  // in order to evaluate that, the ams_delegate needs to scan the insns around
+  // the memory access.  to prevent repeated scans in the same areas we could
+  // use some caching, but then the delegate needs to be stateful and the ams
+  // pass needs to 'reset' it whenever a new function starts or something
+  // like that.
+  const int r0_extra_cost = 1;
+
+  int gbr_extra_cost = 0;
+
+  // FIXME: this should actually be the GBR_REGS reg class.
+  // if AMS is done before register allocation most of the stuff should work
+  // on pseudos, unless value tracing ends in a hard-reg.
+  // in this case, GBR_REG should work.
+  // on targets that have dedicated address registers (e.g. 68K) running AMS
+  // on pseudos before RA will work.  but when ran after RA, AMS will have to
+  // deal with hard-regs and do the checking on register classes + reg numbers.
+  // this is some sort of register constraint handling.
+  if (sh_ams2::get_regno (addr.base_reg ()) == GBR_REG)
+  {
+    // A GBR relative address.  Sticking to the GBR base reg is the cheapest
+    // and also allows for the largest displacement.
+    // Everything else is possible, but costs more, as the GBR reg has to be
+    // loaded into a GP reg.  Accessing floating point values via GBR will
+    // ferry the values through FPUL and R0, so avoid it.
+    // FIXME: If it's only one or two SFmode values, it could be still OK.
+
+    //if (REG_P (a.other_operand ()) && FP_REGISTER_P (a.other_operand ()))
+
+    if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
+      {
+        *alts++ = ams2_alt (1, sh_ams2::make_disp_addr (get_gbr_reg_rtx (), 0,
+                                                        255 * acc_size));
+	gbr_extra_cost = 2;
+      }
+  }
+
+  // simple register access and indexed access is available for pretty much
+  // everything.
+  // FIXME: except for a few system register accesses such as SR, GBR, VBR,
+  // MOD, RE, RS, SGR, SSR, SPC, DBR, Rn_Bank, MACH, MACL, PR, DSR, A0, X0, X1,
+  // Y0, Y1, FPSCR, FPUL.
+  // FIXME: also constant pool loads (LABEL_REF?).
+  // FIXME: also mac.w and mac.l insns (post-inc loads only).
+  *alts++ = ams2_alt (1 + gbr_extra_cost, sh_ams2::make_reg_addr ());
+
+  // For QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
+  // are part of adjacent chains of 3 or more insns.  This will make AMS
+  // prefer them over displacement alternatives.
+  // Also prefer post-inc/pre-dec accesses when the last element of the
+  // adjacency chain is a reg_use.
+  const int inc_cost = (acc_size < 4
+		        && (*acc)->inc_chain ().length () >= 3
+                        && !(*acc)->inc_chain ().is_last ())
+                       || ((*acc)->inc_chain ().last ()
+                           && ((*acc)->inc_chain ().last ()->type ()
+                               == sh_ams2::type_reg_use
+                               || (*acc)->inc_chain ().last ()->type ()
+                                  == sh_ams2::type_reg_mod)) ? -2 : 0;
+  const int dec_cost = (acc_size < 4
+		        && (*acc)->dec_chain ().length () >= 3
+                        && !(*acc)->dec_chain ().is_last ())
+                       || ((*acc)->dec_chain ().last ()
+                           && ((*acc)->dec_chain ().last ()->type ()
+                               == sh_ams2::type_reg_use
+                               || (*acc)->dec_chain ().last ()->type ()
+                                  == sh_ams2::type_reg_mod)) ? -2 : 0;
+
+  // If there is no FPU GP regs will be used for storing FP modes, so we
+  // allow normal QIHISImode alternatives also for FP modes.
+  if (!TARGET_FPU_ANY
+      || (GET_MODE_CLASS (acc_mode) != MODE_FLOAT
+	  && GET_MODE_CLASS (acc_mode) != MODE_COMPLEX_FLOAT
+	  && GET_MODE_CLASS (acc_mode) != MODE_VECTOR_FLOAT))
+    {
+      // SH2A allows pre-dec load to R0 and post-inc store from R0.
+      // However, don't use it for DImode since this results in worse code
+      // than using displacement modes.
+      if ((*acc)->type () == sh_ams2::type_mem_load && TARGET_SH2A
+	  && acc_mode != DImode)
+        *alts++ = ams2_alt (1 + r0_extra_cost + gbr_extra_cost + dec_cost,
+                            sh_ams2::make_pre_dec_addr (acc_mode));
+
+      if ((*acc)->type () == sh_ams2::type_mem_store && TARGET_SH2A
+	  && acc_mode != DImode)
+        *alts++ = ams2_alt (1 + r0_extra_cost + gbr_extra_cost + inc_cost,
+                            sh_ams2::make_post_inc_addr (acc_mode));
+
+      // QImode and HImode accesses with displacements work with R0 only,
+      // thus charge extra.
+      const int disp_cost = 1 + (acc_size < 4 ? r0_extra_cost : 0)
+			    + gbr_extra_cost;
+      const int max_disp = sh_max_mov_insn_displacement (acc_mode, false);
+
+      *alts++ = ams2_alt (disp_cost, sh_ams2::make_disp_addr (0, max_disp));
+    }
+
+  // indexed addressing has to use R0 for either base or index reg.
+  // FIXME: may be disallow indexed mode for access size > 4?
+  *alts++ = ams2_alt (1 + gbr_extra_cost + r0_extra_cost,
+                      sh_ams2::make_index_addr ());
+
+  // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
+  // everything.
+  if ((*acc)->type () == sh_ams2::type_mem_load)
+    *alts++ = ams2_alt (1 + gbr_extra_cost + inc_cost,
+                        sh_ams2::make_post_inc_addr (acc_mode));
+  else if ((*acc)->type () == sh_ams2::type_mem_store)
+    *alts++ = ams2_alt (1 + gbr_extra_cost + dec_cost,
+                        sh_ams2::make_pre_dec_addr (acc_mode));
+
+  // On SH2A we can do larger displacements and also do FP modes with
+  // displacements, but those are 32 bit insns, which we generally try to avoid.
+  // FIXME: maybe this is a good alternative for GBR access (i.e. reduce cost
+  // in this case if base reg is GBR)
+  if (TARGET_SH2A)
+    {
+      const int max_disp = sh_max_mov_insn_displacement (acc_mode, true);
+      *alts++ = ams2_alt (3 + gbr_extra_cost,
+                          sh_ams2::make_disp_addr (0, max_disp));
+    }
+}
+
+void
+ams2_delegate::
+adjust_alternative_costs (sh_ams2::alternative& alt ATTRIBUTE_UNUSED,
+                          const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+                          sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+{
+}
+
+int
+ams2_delegate::
+adjust_lookahead_count (const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+                        sh_ams2::sequence_const_iterator acc)
+{
+  // If the next 2 or more accesses can be reached with post-inc, look
+  // a bit further ahead.
+  if ((*acc)->inc_chain ().length () >= 3)
+    return 1;
+
+  return 0;
+}
+
+int
+ams2_reg_disp_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams2::disp_t disp,
+                   const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+                   sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+{
+  // the costs for adding small constants should be higher than
+  // QI/HI displacement mode addresses.
+  if (CONST_OK_FOR_I08 (disp))
+    return 4;
+
+  // assume that everything else is even worse.
+  // FIXME: if register pressure is (expected to be) high, reduce the cost
+  // a bit to avoid addr reg cloning.
+  return 6;
+}
+
+int
+ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
+                        const_rtx disp_reg ATTRIBUTE_UNUSED,
+                        const sh_ams2::sequence& seq,
+                        sh_ams2::sequence_const_iterator acc)
+{
+  gcc_assert ((*acc)->is_mem_access ());
+  sh_ams2::mem_access* mem_acc = (sh_ams2::mem_access*)*acc;
+
+  // increase the costs if the next mem access that uses this
+  // could also use reg+reg addressing mode instead.
+  sh_ams2::sequence_const_iterator next_el = acc;
+  sh_ams2::mem_access* next_acc = NULL;
+  ++next_el;
+  if (next_el != seq.elements ().end () && (*next_el)->is_mem_access ())
+    next_acc = (sh_ams2::mem_access*)*next_el;
+  if (next_acc != NULL
+      && next_acc->effective_addr () == mem_acc->effective_addr ())
+    {
+      for (sh_ams2::alternative_set::const_iterator
+	     alt = next_acc->alternatives ().begin ();
+	   alt != next_acc->alternatives ().end (); ++alt)
+	{
+	  if (alt->address ().base_reg () == sh_ams2::any_regno
+	      && alt->address ().index_reg () == sh_ams2::any_regno)
+	    return 5;
+	}
+    }
+
+  // the costs for adding a register should be around the same
+  // as adding a small constant.
+  return 3;
+}
+
+int
+ams2_reg_scale_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams2::scale_t scale,
+                     const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+                     sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+{
+  // multiplying by powers of 2 can be done cheaper with shifts.
+  if ((scale & (scale - 1)) == 0)
+    return 2;
+
+  return 3;
+}
+
+int
+ams2_const_load_cost (const_rtx reg ATTRIBUTE_UNUSED,
+                      sh_ams2::disp_t value,
+                      const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+                      sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+{
+  if (CONST_OK_FOR_I08 (value))
+    return 2;
+
+  return 4;
+}
+
+int
+ams2_delegate::
+addr_reg_mod_cost (const_rtx reg, const_rtx val,
+                   const sh_ams2::sequence& seq,
+                   sh_ams2::sequence_const_iterator acc)
+{
+  // modifying the GBR is impossible.
+  if (sh_ams2::get_regno (reg) == GBR_REG)
+    return sh_ams2::infinite_costs;
+
+  enum rtx_code code = GET_CODE (val);
+  if ((code == PLUS || code == MULT) && !REG_P (XEXP (val, 0)))
+    return sh_ams2::infinite_costs;
+
+  switch (code)
+    {
+    case REG:
+      return 0;
+    case PLUS:
+      if (CONST_INT_P (XEXP (val, 1)))
+        return ams2_reg_disp_cost (reg, INTVAL (XEXP (val, 1)), seq, acc);
+      if (REG_P (XEXP (val, 1)))
+        return ams2_reg_plus_reg_cost (reg, XEXP (val, 1), seq, acc);
+      break;
+    case MULT:
+      if (CONST_INT_P (XEXP (val, 1)))
+        return ams2_reg_scale_cost (reg, INTVAL (XEXP (val, 1)), seq, acc);
+      break;
+    case CONST_INT:
+      return ams2_const_load_cost (reg, INTVAL (val), seq, acc);
+    default:
+      break;
+    }
+
+  return sh_ams2::infinite_costs;
+}
+
+int
+ams2_delegate::
+addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
+		     const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+		     sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
 {
   // FIXME: maybe cloning the GBR should be cheaper?
   // FIXME: if register pressure is (expected to be) high, increase the cost

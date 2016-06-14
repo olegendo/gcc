@@ -64,7 +64,11 @@ class static_vector
   size_type capacity (void) const { return max_data_size; }
 
   void clear (void) { m_size = 0; }
-  void push_back (const value_type& v);
+  void push_back (const value_type& v)
+  {
+    gcc_assert (size () < max_size ());
+    m_data[m_size++] = v;
+  }
   void pop_back (void) { --m_size; }
 
  private:
