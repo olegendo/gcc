@@ -599,17 +599,17 @@ NOTE:
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
-    static bool adjacent_inc (const sequence_element& first,
-                              const sequence_element& second);
-    static bool not_adjacent_inc (const sequence_element& first,
-                                  const sequence_element& second);
+    static bool adjacent_inc (const sequence_element* first,
+                              const sequence_element* second);
+    static bool not_adjacent_inc (const sequence_element* first,
+                                  const sequence_element* second);
 
     // Same as adjacent_inc, except that the displacement of SECOND should
     // be the smaller one.
-    static bool adjacent_dec (const sequence_element& first,
-                              const sequence_element& second);
-    static bool not_adjacent_dec (const sequence_element& first,
-                                  const sequence_element& second);
+    static bool adjacent_dec (const sequence_element* first,
+                              const sequence_element* second);
+    static bool not_adjacent_dec (const sequence_element* first,
+                                  const sequence_element* second);
 
   protected:
     sequence_element (element_type t, rtx_insn* i)

@@ -1493,8 +1493,6 @@ sh_ams::adjacent_inc (const access& first, const access& second)
   if (first.address ().is_invalid () || second.address ().is_invalid ())
     return false;
 
-  // FIXME: This one checks for adjacent loads/stores only for now.
-  // This will miss cases where reg uses are interleaved with loads/stores.
   std::pair<disp_t, bool> distance = second.address () - first.address ();
   return (first.access_type () == load || first.access_type () == store)
 	 && distance.second && distance.first == first.access_size ();

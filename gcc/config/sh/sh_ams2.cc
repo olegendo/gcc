@@ -634,11 +634,11 @@ sh_ams2::addr_expr::set_scale (scale_t val)
 
 struct sh_ams2::element_to_optimize
 {
-  bool operator () (const sequence_element& el) const
+  bool operator () (const sequence_element* el) const
   {
-    return (el.type () == type_mem_load || el.type () == type_mem_store
-            || el.type () == type_mem_operand
-            || el.type () == type_reg_mod || el.type () == type_reg_use);
+    return (el->type () == type_mem_load || el->type () == type_mem_store
+            || el->type () == type_mem_operand
+            || el->type () == type_reg_mod || el->type () == type_reg_use);
   }
 };
 
@@ -726,6 +726,76 @@ sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
         return;
     }
   m_dependencies.push_back (ref_counting_ptr<sequence_element> (dep));
+}
+
+// Return true if the effective address of FIRST and SECOND only differs in
+// the constant displacement and the difference is the access size of FIRST.
+bool
+sh_ams2::sequence_element::adjacent_inc (const sequence_element* first,
+                                         const sequence_element* second)
+{
+  addr_expr first_addr, second_addr;
+
+  if (!first->is_mem_access ())
+    return false;
+
+  const mem_access* first_acc = (const mem_access*)first;
+  first_addr = first_acc->effective_addr ();
+
+  if (second->is_mem_access ())
+    second_addr = ((const mem_access*)second)->effective_addr ();
+  else if (second->type () == type_reg_use)
+    second_addr = ((const reg_use*)second)->effective_addr ();
+  else
+    return false;
+
+  if (first_addr.is_invalid () || second_addr.is_invalid ())
+    return false;
+
+  std::pair<disp_t, bool> distance = second_addr - first_addr;
+  return distance.second && distance.first == first_acc->access_size ();
+}
+
+bool
+sh_ams2::sequence_element::not_adjacent_inc (const sequence_element* first,
+                                             const sequence_element* second)
+{
+  return !adjacent_inc (first, second);;
+}
+
+// Same as adjacent_inc, except that the displacement of SECOND should
+// be the smaller one.
+bool
+sh_ams2::sequence_element::adjacent_dec (const sequence_element* first,
+                                         const sequence_element* second)
+{
+  addr_expr first_addr, second_addr;
+
+  if (!first->is_mem_access ())
+    return false;
+
+  const mem_access* first_acc = (const mem_access*)first;
+  first_addr = first_acc->effective_addr ();
+
+  if (second->is_mem_access ())
+    second_addr = ((const mem_access*)second)->effective_addr ();
+  else if (second->type () == type_reg_use)
+    second_addr = ((const reg_use*)second)->effective_addr ();
+  else
+    return false;
+
+  if (first_addr.is_invalid () || second_addr.is_invalid ())
+    return false;
+
+  std::pair<disp_t, bool> distance = first_addr - second_addr;
+  return distance.second && distance.first == first_acc->access_size ();
+}
+
+bool
+sh_ams2::sequence_element::not_adjacent_dec (const sequence_element* first,
+                                             const sequence_element* second)
+{
+  return !adjacent_dec (first, second);;
 }
 
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
@@ -1400,6 +1470,75 @@ sh_ams2::sequence::cost (void) const
        els != elements ().end () && cost != infinite_costs; ++els)
     cost += (*els)->cost ();
   return cost;
+}
+
+// Fill the m_inc/dec_chain fields of the elements in the sequence.
+//
+// for cases such as
+//    (1) @(reg + 0)
+//    (2) @(reg + 4)
+//    (3) @(reg + 40)
+//    (4) @(reg + 8)
+//
+// it will not see that (2) and (4) are adjacent, which is the hypothetical
+// adjacency as opposed to the actual adjacency.  it might be interesting
+// to also add a function that calculates the hypothetical adjacency.
+// it should do something like this
+//    (1) @(reg + 0)     hyp adj = 3 (chain 1,2,6)
+//    (2) @(reg + 4)     hyp adj = 3 (chain 1,2,6)
+//    (3) @(reg + 40)    hyp adj = 3 (chain 3,4,5)
+//    (4) @(reg + 44)    hyp adj = 3 (chain 3,4,5)
+//    (5) @(reg + 48)    hyp adj = 3 (chain 3,4,5)
+//    (6) @(reg + 8)     hyp adj = 3 (chain 1,2,6)
+//
+void
+sh_ams2::sequence::calculate_adjacency_info (void)
+{
+  typedef filter_iterator<sequence_iterator, element_to_optimize> iter;
+
+  for (iter m = begin<element_to_optimize> (),
+         mend = end<element_to_optimize> ();
+       m != mend; )
+    {
+      iter inc_end = std::adjacent_find (m, mend,
+                                         sequence_element::not_adjacent_inc);
+      if (inc_end != mend)
+        ++inc_end;
+
+      const int inc_len = std::distance (m, inc_end);
+      const sequence_element* first_el = *m;
+      iter last_el = inc_end;
+      --last_el;
+
+      for (int i = 0; i < inc_len; ++i)
+	{
+	  (*m)->set_inc_chain (adjacent_chain_info (i, inc_len, first_el,
+                                                    *last_el));
+	  ++m;
+	}
+    }
+
+  for (iter m = begin<element_to_optimize> (),
+         mend = end<element_to_optimize> ();
+       m != mend; )
+    {
+      iter dec_end = std::adjacent_find (m, mend,
+                                         sequence_element::not_adjacent_dec);
+      if (dec_end != mend)
+        ++dec_end;
+
+      const int dec_len = std::distance (m, dec_end);
+      const sequence_element* first_el = *m;
+      iter last_el = dec_end;
+      --last_el;
+
+      for (int i = 0; i < dec_len; ++i)
+	{
+	  (*m)->set_dec_chain (adjacent_chain_info (i, dec_len, first_el,
+                                                    *last_el));
+	  ++m;
+	}
+    }
 }
 
 // Update the alternatives of the sequence's accesses.
@@ -2318,6 +2457,20 @@ sh_ams2::execute (function* fun)
           log_msg ("skipping empty sequence\n");
           continue;
         }
+
+      typedef element_type_matches<type_mem_load, type_mem_store,
+                                   type_mem_operand> mem_match;
+      if (seq.begin<mem_match> () == seq.end<mem_match> ())
+        {
+          log_msg ("skipping sequence as it contains no memory accesses\n");
+          continue;
+        }
+
+      log_msg ("doing adjacency analysis\n");
+      seq.calculate_adjacency_info ();
+
+      log_sequence (seq, false);
+      log_msg ("\n\n");
     }
 
 
