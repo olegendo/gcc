@@ -728,6 +728,18 @@ sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
   m_dependencies.push_back (ref_counting_ptr<sequence_element> (dep));
 }
 
+void
+sh_ams2::sequence_element::add_dependent_el (sh_ams2::sequence_element* dep)
+{
+  for (std::list<ref_counting_ptr<sequence_element> >::iterator it
+         = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
+    {
+      if (elements_equal (dep, it->get ()))
+        return;
+    }
+  m_dependent_els.push_back (ref_counting_ptr<sequence_element> (dep));
+}
+
 // Return true if the effective address of FIRST and SECOND only differs in
 // the constant displacement and the difference is the access size of FIRST.
 bool
@@ -1249,6 +1261,7 @@ sh_ams2::sequence::find_addr_reg_uses (void)
         new reg_use (last_el_insn, reg, NULL));
       new_reg_use->set_effective_addr (rm->effective_addr ());
       new_reg_use->add_dependency (rm);
+      rm->add_dependent_el (new_reg_use);
     }
 }
 
@@ -2103,6 +2116,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
               sequence_iterator new_reg_mod
                 = seq->insert_element (new reg_mod (NULL, x, x));
               el->add_dependency (*new_reg_mod);
+              (*new_reg_mod)->add_dependent_el (el);
 
               return make_reg_addr (x);
             }
@@ -2117,6 +2131,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
             = seq->insert_element (new reg_mod (mod_insn, x, value,
                                                 reg_current_addr));
           el->add_dependency (*new_reg_mod);
+          (*new_reg_mod)->add_dependent_el (el);
 
           // Expand the register's value further.
           addr_expr reg_effective_addr = rtx_to_addr_expr (

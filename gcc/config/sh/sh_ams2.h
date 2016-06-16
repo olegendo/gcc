@@ -577,10 +577,11 @@ public:
     virtual void
     set_dec_chain (const adjacent_chain_info&) { }
 
-    // List of all the immediate dependencies for this element.
-    // E.g. if a reg-mod is required by a mem access, the reg-mod will be
-    // listed here.  Another case are reg-mods that require the result of
-    // other reg-mods.
+    // List of all the immediate dependencies for this element in both
+    // directions. E.g. if a reg-mod is required by a mem access, the reg-mod
+    // will be listed in the mem's dependencies and the mem will be listed in
+    // the reg-mod's dependent elements.
+    // Another case are reg-mods that require the result of other reg-mods.
 
 /*
 NOTE:
@@ -595,7 +596,14 @@ NOTE:
     std::list<ref_counting_ptr<sequence_element> >&
     dependencies (void) { return m_dependencies; }
 
+    const std::list<ref_counting_ptr<sequence_element> >&
+    dependent_els (void) const { return m_dependent_els; }
+
+    std::list<ref_counting_ptr<sequence_element> >&
+    dependent_els (void) { return m_dependent_els; }
+
     void add_dependency (sequence_element* dep);
+    void add_dependent_el (sequence_element* dep);
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
@@ -625,6 +633,7 @@ NOTE:
     rtx_insn* m_insn;
 
     std::list<ref_counting_ptr<sequence_element> > m_dependencies;
+    std::list<ref_counting_ptr<sequence_element> > m_dependent_els;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
