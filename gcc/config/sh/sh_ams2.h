@@ -809,6 +809,7 @@ NOTE:
     // The address expression the reg is being set to.
     // Might be invalid if AMS was not able to understand it (-> barrier)
     const addr_expr& addr (void) const { return m_addr; }
+    void set_addr (const addr_expr& addr) { m_addr = addr; }
 
     // The effective address expression the reg is being set to.
     // Might be invalid if AMS was not able to understand it (-> barrier)
@@ -889,6 +890,7 @@ NOTE:
 
     // The reg that is being used.
     rtx reg (void) const { return m_reg; }
+    void set_reg (const rtx reg) { m_reg = reg; }
 
     // The reg rtx inside the insn. Can also be a (PLUS reg const_int)
     // expression. If NULL, the reg use is unspecified.
@@ -935,22 +937,22 @@ NOTE:
   {
   public:
 
-    typedef std::list<sequence_iterator>::iterator iterator;
-    std::list<sequence_iterator>
-      get_relevant_addresses (const addr_expr& end_addr);
+    typedef std::list<reg_mod*>::iterator iterator;
+    typedef std::multimap<rtx, reg_mod*, cmp_by_regno> reg_map;
+    std::list<reg_mod*> get_relevant_addresses (const addr_expr& end_addr);
 
-    void add (sequence_iterator start_addr);
-    void remove (sequence_iterator start_addr);
+    void add (reg_mod* start_addr);
+    void remove (reg_mod* start_addr);
 
   private:
 
     // List of addresses that only have a constant displacement.
-    std::list<sequence_iterator> m_const_addresses;
+    std::list<reg_mod*> m_const_addresses;
 
     // A map for storing addresses that have a base and/or index reg.
     // The key of each stored address is its base or index reg (the
     // address is stored twice if it has both).
-    typedef std::multimap<rtx, reg_mod*, cmp_by_regno> m_reg_addresses;
+    reg_map m_reg_addresses;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -

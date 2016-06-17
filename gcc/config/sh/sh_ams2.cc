@@ -898,6 +898,94 @@ private:
   split_sequence_info* m_new_seq;
 };
 
+// Return all the start addresses that could be used to arrive at END_ADDR.
+// FIXME: Avoid copying the list elements over and over.
+std::list<sh_ams2::reg_mod*>
+sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr)
+{
+  std::list<reg_mod*> start_addrs;
+
+  // Constant displacements can always be used as start addresses.
+  start_addrs.insert (start_addrs.end (),
+                      m_const_addresses.begin (),
+                      m_const_addresses.end ());
+
+  // Addresses containing registers might be used if they have a
+  // register in common with the end address.
+  typedef std::pair <reg_map::iterator, reg_map::iterator> matching_range_t;
+  if (end_addr.has_base_reg ())
+    {
+      matching_range_t r = m_reg_addresses.equal_range (end_addr.base_reg ());
+      for (matching_range_t::first_type it = r.first; it != r.second; ++it)
+        start_addrs.push_back (it->second);
+    }
+  if (end_addr.has_index_reg ())
+    {
+      matching_range_t r = m_reg_addresses.equal_range (end_addr.index_reg ());
+      for (matching_range_t::first_type it = r.first; it != r.second; ++it)
+        start_addrs.push_back (it->second);
+    }
+
+  return start_addrs;
+}
+
+// Add START_ADDR to the list of available start addresses.
+void
+sh_ams2::start_addr_list::add (reg_mod* start_addr)
+{
+  addr_expr addr = start_addr->addr ().is_invalid ()
+    ? make_reg_addr (start_addr->reg ()) : start_addr->addr ();
+
+  // If the address has a base or index reg, add it to M_REG_ADDRESSES.
+  if (addr.has_base_reg ())
+    m_reg_addresses.insert (std::make_pair (addr.base_reg (), start_addr));
+  if (addr.has_index_reg ())
+    m_reg_addresses.insert (std::make_pair (addr.index_reg (), start_addr));
+
+  // Otherwise, add it to the constant list.
+  if (addr.has_no_base_reg () && addr.has_no_index_reg ())
+    m_const_addresses.push_back (start_addr);
+}
+
+// Remove START_ADDR from the list of available start addresses.
+void
+sh_ams2::start_addr_list::remove (reg_mod* start_addr)
+{
+  addr_expr addr = start_addr->addr ().is_invalid ()
+    ? make_reg_addr (start_addr->reg ()) : start_addr->addr ();
+
+  std::pair <reg_map::iterator, reg_map::iterator> matching_range;
+  if (addr.has_base_reg ())
+    {
+      matching_range = m_reg_addresses.equal_range (addr.base_reg ());
+      for (reg_map::iterator it = matching_range.first;
+           it != matching_range.second; ++it)
+        {
+          if (it->second == start_addr)
+            {
+              m_reg_addresses.erase (it);
+              break;
+            }
+        }
+    }
+  if (addr.has_index_reg ())
+    {
+      matching_range = m_reg_addresses.equal_range (addr.index_reg ());
+      for (reg_map::iterator it = matching_range.first;
+           it != matching_range.second; ++it)
+        {
+          if (it->second == start_addr)
+            {
+              m_reg_addresses.erase (it);
+              break;
+            }
+        }
+    }
+
+  if (addr.has_no_base_reg () && addr.has_no_index_reg ())
+    m_const_addresses.remove (start_addr);
+}
+
 // Split the access sequence pointed to by SEQ_IT into multiple sequences,
 // grouping the accesses that have common terms in their effective address
 // together.  Return an iterator to the sequence that comes after the newly
@@ -1264,6 +1352,69 @@ sh_ams2::sequence::find_addr_reg_uses (void)
       rm->add_dependent_el (new_reg_use);
     }
 }
+
+// A structure used for tracking and reverting modifications
+// to access sequences.
+class sh_ams2::mod_tracker
+{
+public:
+  mod_tracker (std::set<reg_mod*>& used_reg_mods, sequence& seq)
+    : m_used_reg_mods (used_reg_mods), m_seq (seq)
+  {
+    m_inserted_reg_mods.reserve (8);
+    m_use_changed_reg_mods.reserve (4);
+    m_addr_changed_els.reserve (4);
+  }
+
+  void reset_changes (void)
+  {
+    std::for_each (m_inserted_reg_mods.rbegin (), m_inserted_reg_mods.rend (),
+                   std::bind1st (std::mem_fun (&sequence::remove_element),
+                                 &m_seq));
+    m_inserted_reg_mods.clear ();
+
+    for (std::vector<reg_mod*>::iterator
+           it = m_use_changed_reg_mods.begin ();
+         it != m_use_changed_reg_mods.end (); ++it)
+      m_used_reg_mods.erase (*it);
+    m_use_changed_reg_mods.clear ();
+
+    for (std::vector<std::pair <sequence_element*, addr_expr> >
+           ::reverse_iterator it = m_addr_changed_els.rbegin ();
+         it != m_addr_changed_els.rend (); ++it)
+      {
+        if (it->first->is_mem_access ())
+          ((mem_access*)it->first)->set_current_addr (it->second);
+        else if (it->first->type () == type_reg_mod)
+          ((reg_mod*)it->first)->set_addr (it->second);
+        else if (it->first->type () == type_reg_use)
+          ((reg_use*)it->first)->set_reg (it->second.base_reg ());
+        else
+          gcc_unreachable ();
+      }
+    m_addr_changed_els.clear ();
+  }
+
+  // List of reg-mods that were inserted into the sequence.
+  std::vector<sequence_iterator>&
+  inserted_reg_mods (void) { return m_inserted_reg_mods; }
+
+  // List of reg-mods whose value got used by another reg-mod.
+  std::vector<reg_mod*>&
+  use_changed_reg_mods (void) { return m_use_changed_reg_mods; }
+
+  // List of sequence elements whose address changed, along
+  // with their previous values.
+  std::vector<std::pair <sequence_element*, addr_expr> >&
+  addr_changed_els (void) { return m_addr_changed_els; }
+
+private:
+  std::vector<sequence_iterator> m_inserted_reg_mods;
+  std::vector<reg_mod*> m_use_changed_reg_mods;
+  std::vector<std::pair <sequence_element*, addr_expr> > m_addr_changed_els;
+  std::set<reg_mod*>& m_used_reg_mods;
+  sequence& m_seq;
+};
 
 // The recursive part of find_addr_reg_uses. Find all references to REG
 // in X and add them to OUT.
