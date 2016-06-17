@@ -312,6 +312,8 @@ log_sequence_element (const sh_ams2::sequence_element& e,
           log_msg ("\n  in insn\n");
           log_insn (ru.insn ());
         }
+      if (!ru.optimization_enabled ())
+        log_msg ("\n  (won't be optimized)");
     }
 
   if (e.cost () == sh_ams2::infinite_costs)
@@ -332,11 +334,11 @@ log_sequence_element (const sh_ams2::sequence_element& e,
       if (!e.dependencies ().empty ())
         {
           log_msg ("\n  dependencies:\n");
-          for (std::list<ref_counting_ptr<sh_ams2::sequence_element> >
+          for (std::list<sh_ams2::sequence_element*>
                ::const_iterator it = e.dependencies ().begin ();
                it != e.dependencies ().end (); ++it)
             {
-              log_sequence_element (*it->get (), log_alternatives, false);
+              log_sequence_element (**it, log_alternatives, false);
               log_msg ("\n");
             }
           log_msg ("\n  ----\n");
@@ -719,25 +721,73 @@ sh_ams2::addr_expr::get_all_subterms (OutputIterator out) const
 void
 sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
 {
-  for (std::list<ref_counting_ptr<sequence_element> >::iterator it
+  for (std::list<sequence_element*>::iterator it
          = m_dependencies.begin (); it != m_dependencies.end (); ++it)
     {
-      if (elements_equal (dep, it->get ()))
+      if (elements_equal (dep, *it))
         return;
     }
-  m_dependencies.push_back (ref_counting_ptr<sequence_element> (dep));
+  m_dependencies.push_back (dep);
+}
+void
+sh_ams2::sequence_element::remove_dependency (sh_ams2::sequence_element* dep)
+{
+  for (std::list<sequence_element*>::iterator it
+         = m_dependencies.begin (); it != m_dependencies.end (); ++it)
+    {
+      if (elements_equal (dep, *it))
+        {
+          m_dependencies.erase (it);
+          return;
+        }
+    }
 }
 
 void
 sh_ams2::sequence_element::add_dependent_el (sh_ams2::sequence_element* dep)
 {
-  for (std::list<ref_counting_ptr<sequence_element> >::iterator it
+  for (std::list<sequence_element*>::iterator it
          = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
     {
-      if (elements_equal (dep, it->get ()))
+      if (elements_equal (dep, *it))
         return;
     }
-  m_dependent_els.push_back (ref_counting_ptr<sequence_element> (dep));
+  m_dependent_els.push_back (dep);
+}
+void
+sh_ams2::sequence_element::remove_dependent_el (sh_ams2::sequence_element* dep)
+{
+  for (std::list<sequence_element*>::iterator it
+         = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
+    {
+      if (elements_equal (dep, *it))
+        {
+          m_dependent_els.erase (it);
+          return;
+        }
+    }
+}
+
+// Returns true if the element is used (directly or indirectly) by
+// another element that cannot be optimized.
+bool
+sh_ams2::sequence_element::used_by_unoptimizable_el (void) const
+{
+  for (std::list<sequence_element*>::const_iterator it
+         = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
+    {
+      if ((*it)->used_by_unoptimizable_el ())
+        return true;
+      if ((*it)->is_mem_access () &&
+          (!((mem_access*)*it)->optimization_enabled ()
+           || ((mem_access*)*it)->effective_addr ().is_invalid ()))
+        return true;
+      if ((*it)->type () == type_reg_use &&
+          (!((reg_use*)*it)->optimization_enabled ()
+           || ((reg_use*)*it)->effective_addr ().is_invalid ()))
+        return true;
+    }
+  return false;
 }
 
 // Return true if the effective address of FIRST and SECOND only differs in
@@ -1368,9 +1418,13 @@ public:
 
   void reset_changes (void)
   {
-    std::for_each (m_inserted_reg_mods.rbegin (), m_inserted_reg_mods.rend (),
-                   std::bind1st (std::mem_fun (&sequence::remove_element),
-                                 &m_seq));
+    for (std::vector<sequence_iterator>::reverse_iterator it
+           = m_inserted_reg_mods.rbegin ();
+         it != m_inserted_reg_mods.rend (); ++it)
+      {
+        m_seq.remove_element (*it);
+        delete **it;
+      }
     m_inserted_reg_mods.clear ();
 
     for (std::vector<reg_mod*>::iterator
@@ -1415,6 +1469,29 @@ private:
   std::set<reg_mod*>& m_used_reg_mods;
   sequence& m_seq;
 };
+
+// Generate the address modifications needed to arrive at the
+// addresses in the sequence.
+void
+sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
+{
+  typedef element_type_matches<type_reg_mod> reg_mod_match;
+  typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
+
+  // Remove the sequence's original reg-mods.
+  for (reg_mod_iter els = begin<reg_mod_match> (),
+       els_end = end<reg_mod_match> (); els != els_end; )
+    {
+      if ((*els)->insn () == NULL || (*els)->used_by_unoptimizable_el ())
+        {
+          ++els;
+          continue;
+        }
+      els = remove_element (els);
+    }
+
+  // TODO
+}
 
 // The recursive part of find_addr_reg_uses. Find all references to REG
 // in X and add them to OUT.
@@ -1621,6 +1698,18 @@ sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el)
       if (addr_reg->second == 0)
         m_addr_regs.erase (addr_reg);
     }
+
+  // Update the element's dependencies.
+  for (std::list<sequence_element*>::iterator deps
+         = (*el)->dependencies ().begin ();
+       deps != (*el)->dependencies ().end (); ++deps)
+      (*deps)->remove_dependent_el (*el);
+  (*el)->dependencies ().clear ();
+  for (std::list<sequence_element*>::iterator dep_els
+         = (*el)->dependent_els ().begin ();
+       dep_els != (*el)->dependent_els ().end (); ++dep_els)
+    (*dep_els)->remove_dependency (*el);
+  (*el)->dependent_els ().clear ();
 
   return elements ().erase (el);
 }
@@ -2714,6 +2803,7 @@ sh_ams2::execute (function* fun)
 
   std::list<sequence> sequences;
   std::vector<mem_access*> mems;
+  std::vector<reg_mod*> original_reg_mods;
 
   log_msg ("extracting access sequences\n");
   basic_block bb;
@@ -2764,6 +2854,13 @@ sh_ams2::execute (function* fun)
       log_msg ("find_addr_reg_mods\n");
       seq.find_addr_reg_mods ();
 
+      // Add the sequence's reg-mods to the original reg-mod list.
+      typedef element_type_matches<type_reg_mod> reg_mod_match;
+      typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
+      for (reg_mod_iter rm = seq.begin<reg_mod_match> (),
+             rm_end = seq.end<reg_mod_match> (); rm != rm_end; ++rm)
+        original_reg_mods.push_back ((reg_mod*)*rm);
+
       log_sequence (seq, false);
       log_msg ("\n\n");
 
@@ -2808,6 +2905,14 @@ sh_ams2::execute (function* fun)
       if (seq.begin<mem_match> () == seq.end<mem_match> ())
         {
           log_msg ("skipping sequence as it contains no memory accesses\n");
+
+          // Mark all reg-uses of this sequence unoptimizable.
+          typedef element_type_matches<type_reg_use> reg_use_match;
+          typedef filter_iterator<sequence_iterator, reg_use_match> reg_use_iter;
+          for (reg_use_iter ru = seq.begin<reg_use_match> (),
+                 ru_end = seq.end<reg_use_match> (); ru != ru_end; ++ru)
+            ((reg_use*)*ru)->set_optimization_enabled (false);
+
           continue;
         }
 
@@ -2834,6 +2939,20 @@ sh_ams2::execute (function* fun)
 
 	  log_msg ("continuing anyway\n");
         }
+
+      log_msg ("generating new address modifications\n");
+      seq.gen_address_mod (m_delegate, m_options.base_lookahead_count);
+
+      log_sequence (seq, false, true);
+      log_msg ("\n");
+    }
+
+  // Free all unused reg-mods.
+  for (std::vector<reg_mod*>::iterator it = original_reg_mods.begin ();
+       it != original_reg_mods.end (); ++it)
+    {
+      if ((*it)->insn () != NULL && (*it)->dependent_els ().empty ())
+        delete *it;
     }
 
 

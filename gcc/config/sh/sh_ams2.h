@@ -590,20 +590,26 @@ NOTE:
     the BB where the limit was exceeded.
 */
 
-    const std::list<ref_counting_ptr<sequence_element> >&
+    const std::list<sequence_element*>&
     dependencies (void) const { return m_dependencies; }
 
-    std::list<ref_counting_ptr<sequence_element> >&
+    std::list<sequence_element*>&
     dependencies (void) { return m_dependencies; }
 
-    const std::list<ref_counting_ptr<sequence_element> >&
+    const std::list<sequence_element*>&
     dependent_els (void) const { return m_dependent_els; }
 
-    std::list<ref_counting_ptr<sequence_element> >&
+    std::list<sequence_element*>&
     dependent_els (void) { return m_dependent_els; }
 
     void add_dependency (sequence_element* dep);
+    void remove_dependency (sequence_element* dep);
     void add_dependent_el (sequence_element* dep);
+    void remove_dependent_el (sequence_element* dep);
+
+    // Returns true if the element is used (directly or indirectly) by
+    // another element that cannot be optimized.
+    bool used_by_unoptimizable_el (void) const;
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
@@ -632,8 +638,8 @@ NOTE:
     int m_cost;
     rtx_insn* m_insn;
 
-    std::list<ref_counting_ptr<sequence_element> > m_dependencies;
-    std::list<ref_counting_ptr<sequence_element> > m_dependent_els;
+    std::list<sequence_element*> m_dependencies;
+    std::list<sequence_element*> m_dependent_els;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -862,15 +868,16 @@ NOTE:
   class reg_use : public sequence_element
   {
   public:
-    reg_use (rtx_insn* i) : sequence_element (type_reg_use, i) { };
+    reg_use (rtx_insn* i)
+    : sequence_element (type_reg_use, i), m_optimization_enabled (true) { };
 
     reg_use (rtx_insn* i, rtx reg, rtx* ref)
     : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
-    m_effective_addr (make_invalid_addr ()) { }
+      m_effective_addr (make_invalid_addr ()), m_optimization_enabled (true) { }
 
     reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& effective_addr)
     : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
-    m_effective_addr (effective_addr) { }
+      m_effective_addr (effective_addr), m_optimization_enabled (true) { }
 
     // construct a reg-use from an existing element.  this is usually used
     // when replacing an non-optimizable element into a reg-use.
@@ -900,6 +907,10 @@ NOTE:
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
     void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
 
+    // If false, AMS skips this reg-use when optimizing.
+    bool optimization_enabled (void) const { return m_optimization_enabled; }
+    void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
+
   private:
     // if a mem access is not to be optimized, it is converted into a
     // reg-use.  in this case maybe it's useful to keep the original element
@@ -911,6 +922,7 @@ NOTE:
     rtx* m_reg_ref;
 
     addr_expr m_effective_addr;
+    bool m_optimization_enabled;
 
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
