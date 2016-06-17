@@ -1554,11 +1554,180 @@ sh_ams2::sequence::calculate_adjacency_info (void)
     }
 }
 
+// Re-calculate the sequence's cost.
+void
+sh_ams2::sequence::update_cost (delegate& d)
+{
+  std::set<reg_mod*> used_reg_mods;
+  for (sequence_iterator els = elements ().begin ();
+       els != elements ().end (); ++els)
+    {
+      if ((*els)->is_mem_access ())
+        {
+          mem_access* m = (mem_access*)*els;
+          // Skip this access if it won't be optimized.
+          if (!m->optimization_enabled () || m->effective_addr ().is_invalid ())
+            {
+              m->set_cost (0);
+              continue;
+            }
+
+          // Find the alternative that the access uses and update
+          // its cost accordingly.
+          // FIXME: When selecting an alternative, remember the alternative
+          // iterator as the "currently selected alternative".  Then we don't
+          // need to find it over and over again.
+          for (alternative_set::const_iterator alt
+                 = m->alternatives ().begin (); ; ++alt)
+            {
+              if (m->matches_alternative (*alt))
+                {
+                  m->set_cost (alt->cost ());
+                  break;
+                }
+              if (alt == m->alternatives ().end ())
+                gcc_unreachable ();
+            }
+        }
+      else if ((*els)->type () == type_reg_mod)
+        {
+          reg_mod* rm = (reg_mod*)*els;
+
+          // Skip this reg-mod if the address doesn't fit into an addr_expr.
+          if (rm->addr ().is_invalid ())
+            {
+              rm->set_cost (0);
+              continue;
+            }
+
+          int cost = 0;
+          const addr_expr &ae = rm->addr ();
+
+          // Scaling costs
+          if (ae.has_no_base_reg () && ae.has_index_reg () && ae.scale () != 1)
+            cost += d.addr_reg_mod_cost (rm->reg (),
+                                         gen_rtx_MULT (Pmode,
+                                                       ae.index_reg (),
+                                                       GEN_INT (ae.scale ())),
+                                         *this, els);
+
+          // Costs for adding or subtracting another reg
+          else if (ae.has_no_disp () && std::abs (ae.scale ()) == 1
+                   && ae.has_base_reg () && ae.has_index_reg ())
+            cost += d.addr_reg_mod_cost (rm->reg (),
+                                         gen_rtx_PLUS (Pmode,
+                                                       ae.index_reg (),
+                                                       ae.base_reg ()),
+                                         *this, els);
+
+          // Constant displacement costs
+          else if (ae.has_base_reg () && ae.has_no_index_reg ()
+                   && ae.has_disp ())
+            cost += d.addr_reg_mod_cost (rm->reg (),
+                                         gen_rtx_PLUS (Pmode,
+                                                       ae.base_reg (),
+                                                       GEN_INT (ae.disp ())),
+                                         *this, els);
+
+          // Constant loading costs
+          else if (ae.has_no_base_reg () && ae.has_no_index_reg ())
+            cost += d.addr_reg_mod_cost (rm->reg (),
+                                         GEN_INT (ae.disp ()),
+                                         *this, els);
+
+          // If none of the previous branches were taken, the reg-mod
+          // is a (reg <- reg) copy, and doesn't have any modification cost.
+          else
+            {
+              gcc_assert (ae.has_base_reg () && ae.has_no_index_reg ()
+                          && ae.has_no_disp ());
+              cost = 0;
+            }
+
+          // Cloning costs
+          cost += update_cost_1 (els, d, used_reg_mods);
+
+          rm->set_cost (cost);
+        }
+    }
+}
+
+// Internal function of sequence::update_cost. Get the cloning costs
+// associated with the reg-mod, if any.
+int
+sh_ams2::sequence::update_cost_1 (sequence_iterator& rm_it, delegate& d,
+                                  std::set<reg_mod*>& used_reg_mods)
+{
+  reg_mod* rm = (reg_mod*)*rm_it;
+  rtx reused_reg = NULL;
+
+  if (rm->addr ().has_base_reg ())
+    reused_reg = rm->addr ().base_reg ();
+  else if (rm->addr ().has_index_reg ())
+    reused_reg = rm->addr ().index_reg ();
+  else
+    return 0;
+
+  // There's no cloning cost for reg-mods that set the reg to itself.
+  if (regs_equal (reused_reg, rm->reg ()))
+    return 0;
+
+  // There might be cloning costs if the register of the
+  // reg-mod that sets REUSED_REG is already used elsewhere.
+  for (sequence_iterator prev_els = elements ().begin ();
+       prev_els != rm_it; ++prev_els)
+    {
+      if ((*prev_els)->type () == type_reg_mod)
+        {
+          reg_mod* prev_rm = (reg_mod*)*prev_els;
+          if (regs_equal (prev_rm->reg (), reused_reg))
+            {
+              // If the reused reg is already used by another access,
+              // we'll have to clone it.
+              if (used_reg_mods.find (prev_rm) != used_reg_mods.end ())
+                return  d.addr_reg_clone_cost (reused_reg, *this, rm_it);
+
+              // Otherwise, we can use it without any cloning penalty.
+              used_reg_mods.insert (prev_rm);
+              return 0;
+            }
+        }
+    }
+  return 0;
+}
+
+// Check whether the cost of the sequence is already minimal and
+// can't be improved further, i.e. if all memory accesses use the
+// cheapest alternative and there are no reg-mods with nonzero cost.
+bool
+sh_ams2::sequence::cost_already_minimal (void) const
+{
+  for (sequence_const_iterator els = elements ().begin ();
+       els != elements ().end (); ++els)
+    {
+      if ((*els)->is_mem_access ())
+        {
+          mem_access *m = (mem_access*)*els;
+          for (alternative_set::const_iterator
+		  alt = m->alternatives ().begin ();
+               alt != m->alternatives ().end (); ++alt)
+            {
+              if (alt->cost () < m->cost ())
+                return false;
+            }
+        }
+      else if ((*els)->cost () > 0)
+        return false;
+    }
+  return true;
+}
+
 // Update the alternatives of the sequence's accesses.
 void
 sh_ams2::sequence::update_access_alternatives (delegate& d,
                                                bool force_validation,
-                                               bool disable_validation)
+                                               bool disable_validation,
+                                               bool adjust_costs)
 {
   typedef element_type_matches<type_mem_load, type_mem_store, type_mem_operand>
     match;
@@ -1568,6 +1737,16 @@ sh_ams2::sequence::update_access_alternatives (delegate& d,
     ((mem_access*)*e)->update_access_alternatives (*this, e.base_iterator (), d,
                                                    force_validation,
                                                    disable_validation);
+  if (!adjust_costs)
+    return;
+
+  for (iter e = begin<match> (), e_end = end<match> (); e != e_end; ++e)
+    {
+      mem_access* m = (mem_access*)*e;
+      for (alternative_set::iterator alt = m->alternatives ().begin ();
+           alt != m->alternatives ().end (); ++alt)
+        d.adjust_alternative_costs (*alt, *this, e.base_iterator ());
+    }
 }
 
 // Update the alternatives of the access.
@@ -2484,8 +2663,26 @@ sh_ams2::execute (function* fun)
       log_msg ("doing adjacency analysis\n");
       seq.calculate_adjacency_info ();
 
-      log_sequence (seq, false);
+      log_msg ("updating access alternatives\n");
+      seq.update_access_alternatives (m_delegate,
+                                      m_options.force_alt_validation,
+                                      m_options.disable_alt_validation, true);
+
+      log_msg ("updating sequence cost\n");
+      seq.update_cost (m_delegate);
+
+      log_sequence (seq, true);
       log_msg ("\n\n");
+
+      if (seq.cost_already_minimal ())
+        {
+          log_msg ("costs are already minimal\n");
+
+	  if (m_options.check_minimal_cost)
+	    continue;
+
+	  log_msg ("continuing anyway\n");
+        }
     }
 
 

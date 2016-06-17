@@ -990,7 +990,7 @@ NOTE:
     int cost (void) const;
 
     // Re-calculate the cost.
-    void update_cost (delegate& dlg);
+    void update_cost (delegate& d);
 
     // Check whether the cost of the sequence is already minimal and
     // can't be improved further.
@@ -1001,7 +1001,8 @@ NOTE:
 
     // Update the alternatives of the sequence's accesses.
     void update_access_alternatives (delegate& d, bool force_validation,
-				     bool disable_validation);
+                                     bool disable_validation,
+                                     bool adjust_costs = false);
 
     // Insert a new element into the sequence.  Return an iterator pointing
     // to the newly inserted element.
@@ -1070,6 +1071,9 @@ NOTE:
     static void split_1 (std::list<split_sequence_info>& new_seqs,
                          reg_mod* rm, bool add_to_front, bool add_to_back);
     static void split_2 (split_sequence_info& seq_info, sequence_element* el);
+
+    int update_cost_1 (sequence_iterator& rm_it, delegate& d,
+                       std::set<reg_mod*>& used_reg_mods);
 
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void
@@ -1165,6 +1169,11 @@ NOTE:
   void set_options (const options& opt);
 
 private:
+
+  // A structure used for tracking and reverting modifications
+  // to access sequences.
+  class mod_tracker;
+
   static const pass_data default_pass_data;
 
   delegate& m_delegate;

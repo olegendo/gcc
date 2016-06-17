@@ -14214,7 +14214,7 @@ adjust_lookahead_count (const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
 int
 ams2_reg_disp_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams2::disp_t disp,
                    const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                   sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+                   sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
 {
   // the costs for adding small constants should be higher than
   // QI/HI displacement mode addresses.
@@ -14231,20 +14231,20 @@ int
 ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
                         const_rtx disp_reg ATTRIBUTE_UNUSED,
                         const sh_ams2::sequence& seq,
-                        sh_ams2::sequence_const_iterator acc)
+                        sh_ams2::sequence_const_iterator el)
 {
-  gcc_assert ((*acc)->is_mem_access ());
-  sh_ams2::mem_access* mem_acc = (sh_ams2::mem_access*)*acc;
+  gcc_assert ((*el)->type () == sh_ams2::type_reg_mod);
+  sh_ams2::reg_mod* rm = (sh_ams2::reg_mod*)*el;
 
   // increase the costs if the next mem access that uses this
   // could also use reg+reg addressing mode instead.
-  sh_ams2::sequence_const_iterator next_el = acc;
+  sh_ams2::sequence_const_iterator next_el = el;
   sh_ams2::mem_access* next_acc = NULL;
   ++next_el;
   if (next_el != seq.elements ().end () && (*next_el)->is_mem_access ())
     next_acc = (sh_ams2::mem_access*)*next_el;
   if (next_acc != NULL
-      && next_acc->effective_addr () == mem_acc->effective_addr ())
+      && next_acc->effective_addr () == rm->effective_addr ())
     {
       for (sh_ams2::alternative_set::const_iterator
 	     alt = next_acc->alternatives ().begin ();
@@ -14264,7 +14264,7 @@ ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
 int
 ams2_reg_scale_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams2::scale_t scale,
                      const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                     sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+                     sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
 {
   // multiplying by powers of 2 can be done cheaper with shifts.
   if ((scale & (scale - 1)) == 0)
@@ -14277,7 +14277,7 @@ int
 ams2_const_load_cost (const_rtx reg ATTRIBUTE_UNUSED,
                       sh_ams2::disp_t value,
                       const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                      sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+                      sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
 {
   if (CONST_OK_FOR_I08 (value))
     return 2;
