@@ -638,9 +638,10 @@ struct sh_ams2::element_to_optimize
 {
   bool operator () (const sequence_element* el) const
   {
-    return (el->type () == type_mem_load || el->type () == type_mem_store
-            || el->type () == type_mem_operand
-            || el->type () == type_reg_mod || el->type () == type_reg_use);
+    return ((el->is_mem_access ()
+             && ((const mem_access*)el)->optimization_enabled ())
+            || (el->type () == type_reg_use
+                && ((const reg_use*)el)->optimization_enabled ()));
   }
 };
 
@@ -768,7 +769,7 @@ sh_ams2::sequence_element::remove_dependent_el (sh_ams2::sequence_element* dep)
     }
 }
 
-// Returns true if the element is used (directly or indirectly) by
+// Return true if the element is used (directly or indirectly) by
 // another element that cannot be optimized.
 bool
 sh_ams2::sequence_element::used_by_unoptimizable_el (void) const
@@ -1408,11 +1409,14 @@ sh_ams2::sequence::find_addr_reg_uses (void)
 class sh_ams2::mod_tracker
 {
 public:
-  mod_tracker (std::set<reg_mod*>& used_reg_mods, sequence& seq)
-    : m_used_reg_mods (used_reg_mods), m_seq (seq)
+  mod_tracker (sequence& seq, std::set<reg_mod*>& used_reg_mods,
+               std::set<reg_mod*>& visited_reg_mods)
+    : m_seq (seq), m_used_reg_mods (used_reg_mods),
+      m_visited_reg_mods (visited_reg_mods)
   {
     m_inserted_reg_mods.reserve (8);
     m_use_changed_reg_mods.reserve (4);
+    m_visited_changed_reg_mods.reserve (4);
     m_addr_changed_els.reserve (4);
   }
 
@@ -1432,6 +1436,12 @@ public:
          it != m_use_changed_reg_mods.end (); ++it)
       m_used_reg_mods.erase (*it);
     m_use_changed_reg_mods.clear ();
+
+    for (std::vector<reg_mod*>::iterator
+           it = m_visited_changed_reg_mods.begin ();
+         it != m_visited_changed_reg_mods.end (); ++it)
+      m_visited_reg_mods.erase (*it);
+    m_visited_changed_reg_mods.clear ();
 
     for (std::vector<std::pair <sequence_element*, addr_expr> >
            ::reverse_iterator it = m_addr_changed_els.rbegin ();
@@ -1457,17 +1467,21 @@ public:
   std::vector<reg_mod*>&
   use_changed_reg_mods (void) { return m_use_changed_reg_mods; }
 
+  // List of reg-mods that got visited.
+  std::vector<reg_mod*>&
+  visited_changed_reg_mods (void) { return m_visited_changed_reg_mods; }
+
   // List of sequence elements whose address changed, along
   // with their previous values.
   std::vector<std::pair <sequence_element*, addr_expr> >&
   addr_changed_els (void) { return m_addr_changed_els; }
 
 private:
-  std::vector<sequence_iterator> m_inserted_reg_mods;
-  std::vector<reg_mod*> m_use_changed_reg_mods;
-  std::vector<std::pair <sequence_element*, addr_expr> > m_addr_changed_els;
-  std::set<reg_mod*>& m_used_reg_mods;
   sequence& m_seq;
+  std::vector<sequence_iterator> m_inserted_reg_mods;
+  std::vector<reg_mod*> m_use_changed_reg_mods, m_visited_changed_reg_mods;
+  std::vector<std::pair <sequence_element*, addr_expr> > m_addr_changed_els;
+  std::set<reg_mod*>& m_used_reg_mods, m_visited_reg_mods;
 };
 
 // Generate the address modifications needed to arrive at the
@@ -1490,6 +1504,232 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
       els = remove_element (els);
     }
 
+  std::set<reg_mod*> used_reg_mods, visited_reg_mods;
+  typedef filter_iterator<sequence_iterator, element_to_optimize> el_opt_iter;
+  sequence_iterator prev_el = elements ().begin ();
+
+  for (el_opt_iter els = begin<element_to_optimize> (),
+       els_end = end<element_to_optimize> (); els != els_end; ++els)
+    {
+      // Mark the reg-mods before the current element as visited.
+      for (sequence_iterator it = prev_el; it != els; ++it)
+        {
+          if ((*it)->type () == type_reg_mod)
+            visited_reg_mods.insert ((reg_mod*)*it);
+        }
+
+      gen_address_mod_1 (els, dlg, used_reg_mods, visited_reg_mods,
+                         base_lookahead
+                         + dlg.adjust_lookahead_count (*this,
+                                                       (sequence_iterator)els));
+    }
+
+  // Remove the unused reg <- constant copies that might have been
+  // added while trying different address calculations.
+  for (reg_mod_iter els = begin<reg_mod_match> (),
+       els_end = end<reg_mod_match> (); els != els_end; )
+    {
+      gcc_assert ((*els)->type() == type_reg_mod);
+      reg_mod* rm = (reg_mod*)*els;
+      if (!rm->addr ().is_invalid ()
+	  && rm->addr ().has_no_base_reg () && rm->addr ().has_no_index_reg ())
+	{
+	  if (!reg_used_in_sequence (rm->reg (),
+                                     stdx::next ((sequence_iterator)els)))
+	    {
+	      els = remove_element (els);
+              delete rm;
+	      continue;
+            }
+        }
+      ++els;
+    }
+}
+
+// Internal function of gen_address_mod. Generate reg-mods needed to arrive at
+// the address of EL and return the cost of the address modifications.
+// If RECORD_IN_SEQUENCE is false, don't insert the actual modifications
+// in the sequence, only calculate the cost.
+int sh_ams2::sequence::
+gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
+                   delegate& dlg, std::set<reg_mod*>& used_reg_mods,
+                   std::set<reg_mod*>& visited_reg_mods,
+                   int lookahead_num, bool record_in_sequence)
+{
+  addr_expr ae;
+  if ((*el)->is_mem_access ())
+    ae = ((mem_access*)*el)->effective_addr ();
+  else if ((*el)->type () == type_reg_use)
+    ae = ((reg_use*)*el)->effective_addr ();
+  else
+    gcc_unreachable ();
+
+  if (ae.is_invalid ())
+    return 0;
+
+  if (record_in_sequence)
+    {
+      log_msg ("\nprocessing element ");
+      log_sequence_element (**el);
+      log_msg ("\n");
+    }
+
+  int min_cost = infinite_costs;
+  const alternative* min_alternative = NULL;
+  reg_mod* min_start_base;
+  reg_mod* min_start_index;
+  addr_expr min_end_base, min_end_index;
+  mod_tracker tracker (*this, used_reg_mods, visited_reg_mods);
+
+  filter_iterator<sequence_iterator, element_to_optimize> next_el =
+    lookahead_num ? stdx::next (el) : end<element_to_optimize> ();
+
+  const alternative_set* alternatives;
+
+  alternative_set reg_use_alt;
+  if ((*el)->type () == type_reg_use)
+    {
+      // If this is a reg use, the address will be stored in a single reg.
+      reg_use_alt.push_back (alternative (0, make_reg_addr (any_regno)));
+      alternatives = &reg_use_alt;
+    }
+  else
+    // Otherwise, the mem access' alternatives will be used.
+    alternatives = &((mem_access*)*el)->alternatives ();
+
+  // Find the alternative with the least cost.
+  for (alternative_set::const_iterator alt = alternatives->begin ();
+       alt != alternatives->end (); ++alt)
+    {
+      const addr_expr& alt_ae = alt->address ();
+      addr_expr end_base, end_index;
+
+      // Handle only SH-specific access alternatives for now.
+      if (alt_ae.has_no_base_reg ()
+          || (alt_ae.type () != non_mod && alt_ae.has_index_reg ())
+          || (alt_ae.has_index_reg () && alt_ae.scale () != 1))
+        continue;
+
+      if (alt_ae.has_no_index_reg ())
+        {
+          // If the alternative only has one address register, it must
+          // contain the whole address in AE.
+          end_base = ae;
+        }
+      else
+        {
+          // For base+index type accesses, the base register of the generated
+          // access will contain the base of the address in AE.
+          end_base = make_reg_addr (ae.base_reg ());
+
+          // The index reg will contain the rest (index*scale+disp).
+          end_index = non_mod_addr (invalid_regno, ae.index_reg (),
+				    ae.scale (), ae.disp ());
+        }
+
+      // Get the costs for using this alternative.
+      int alt_min_cost = alt->cost ();
+
+      std::pair<int, reg_mod*> base_start_addr =
+        find_cheapest_start_addr (end_base, (sequence_iterator)el,
+                                  alt_ae.disp_min (), alt_ae.disp_max (),
+                                  alt_ae.type (), dlg,
+                                  used_reg_mods, visited_reg_mods);
+
+      if (base_start_addr.first == infinite_costs)
+        continue;
+
+      alt_min_cost += base_start_addr.first;
+
+      std::pair<int, reg_mod*> index_start_addr;
+
+      if (alt_ae.has_index_reg ())
+        {
+          index_start_addr
+            = find_cheapest_start_addr (end_index, (sequence_iterator)el,
+                                        alt_ae.disp_min (), alt_ae.disp_max (),
+                                        alt_ae.type (), dlg,
+                                        used_reg_mods, visited_reg_mods);
+          if (index_start_addr.first == infinite_costs)
+            continue;
+
+          alt_min_cost += index_start_addr.first;
+        }
+
+      // Calculate the costs of the next element when this alternative is used.
+      // This is done by inserting the address modifications of this alternative
+      // into the sequence, calling this function on the next element and then
+      // removing the inserted address mods.
+      if (next_el != elements ().end ())
+        {
+          insert_address_mods (*alt, base_start_addr.second,
+                               index_start_addr.second,
+                               end_base, end_index, el,
+                               tracker, used_reg_mods, dlg);
+
+          int next_cost = gen_address_mod_1 (next_el, dlg,
+                                             used_reg_mods, visited_reg_mods,
+                                             lookahead_num-1, false);
+          tracker.reset_changes ();
+
+          if (next_cost == infinite_costs)
+            continue;
+          alt_min_cost += next_cost;
+        }
+
+      if (alt_min_cost < min_cost)
+        {
+          min_cost = alt_min_cost;
+          min_start_base = base_start_addr.second;
+          min_end_base = end_base;
+          if (alt_ae.has_index_reg ())
+            {
+              min_start_index = index_start_addr.second;
+              min_end_index = end_index;
+            }
+          min_alternative = alt;
+        }
+    }
+
+  gcc_assert (min_cost != infinite_costs);
+
+  if (record_in_sequence)
+    {
+      log_msg ("  min alternative: %d  min costs = %d\n",
+               (int)(min_alternative - alternatives->begin ()),
+               min_cost);
+      insert_address_mods (*min_alternative,
+                           min_start_base, min_start_index,
+                           min_end_base, min_end_index, el,
+                           tracker, used_reg_mods, dlg);
+    }
+
+  return min_cost;
+}
+
+// Find the cheapest starting address that can be used to arrive at END_ADDR.
+// Return it along with the cost of the address modifications.
+std::pair<int, sh_ams2::reg_mod*> sh_ams2::sequence::
+find_cheapest_start_addr (const addr_expr& end_addr, sequence_const_iterator el,
+                          int min_disp, int max_disp, addr_type_t addr_type,
+                          delegate& dlg, std::set<reg_mod*>& used_reg_mods,
+                          std::set<reg_mod*>& visited_reg_mods)
+{
+  // TODO
+  return std::pair<int, reg_mod*> (0, NULL);
+}
+
+// Generate the address modifications needed to arrive at BASE_END_ADDR and
+// INDEX_END_ADDR from BASE/INDEX_START_ADDR when using ALT as the access
+// alternative.  Record any changes to the sequence in TRACKER.
+void sh_ams2::sequence::
+insert_address_mods (const alternative& alt, const reg_mod* base_start_addr,
+                     const reg_mod* index_start_addr,
+                     const addr_expr& base_end_addr,
+                     const addr_expr& index_end_addr,
+                     sequence_iterator el, mod_tracker& tracker,
+                     std::set<reg_mod*>& used_reg_mods, delegate& dlg)
+{
   // TODO
 }
 
@@ -1723,6 +1963,18 @@ sh_ams2::sequence::cost (void) const
        els != elements ().end () && cost != infinite_costs; ++els)
     cost += (*els)->cost ();
   return cost;
+}
+
+// Check whether REG is used in any element after START.
+bool
+sh_ams2::sequence::reg_used_in_sequence (rtx reg, sequence_iterator start)
+{
+  for (sequence_iterator els = start; els != elements ().end (); ++els)
+    {
+      if ((*els)->uses_reg (reg))
+        return true;
+    }
+  return false;
 }
 
 // Fill the m_inc/dec_chain fields of the elements in the sequence.

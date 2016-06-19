@@ -152,6 +152,7 @@ public:
 
  private:
   class split_sequence_info;
+  class mod_tracker;
 
  public:
 
@@ -607,9 +608,12 @@ NOTE:
     void add_dependent_el (sequence_element* dep);
     void remove_dependent_el (sequence_element* dep);
 
-    // Returns true if the element is used (directly or indirectly) by
+    // Return true if the element is used (directly or indirectly) by
     // another element that cannot be optimized.
     bool used_by_unoptimizable_el (void) const;
+
+    // Check whether the element uses the register R in any way.
+    virtual bool uses_reg (rtx r ATTRIBUTE_UNUSED) const { return false; }
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
@@ -715,6 +719,13 @@ NOTE:
     // If false, AMS skips this access when optimizing.
     bool optimization_enabled (void) const { return m_optimization_enabled; }
     void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
+
+    virtual bool uses_reg (rtx r) const
+    {
+      return (current_addr ().is_invalid ()
+              && (regs_equal (current_addr ().base_reg (), r)
+                  || regs_equal (current_addr ().index_reg (), r)));
+    }
 
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m)
@@ -822,6 +833,13 @@ NOTE:
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
     void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
 
+    virtual bool uses_reg (rtx r) const
+    {
+      return (addr ().is_invalid ()
+              && (regs_equal (addr ().base_reg (), r)
+                  || regs_equal (addr ().index_reg (), r)));
+    }
+
   private:
     rtx m_reg;
     rtx m_value;
@@ -910,6 +928,8 @@ NOTE:
     // If false, AMS skips this reg-use when optimizing.
     bool optimization_enabled (void) const { return m_optimization_enabled; }
     void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
+
+    virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
 
   private:
     // if a mem access is not to be optimized, it is converted into a
@@ -1000,6 +1020,9 @@ NOTE:
     // Fill the m_inc/dec_chain fields of the sequence elements.
     void calculate_adjacency_info (void);
 
+    // Check whether REG is used in any element after START.
+    bool reg_used_in_sequence (rtx reg, sequence_iterator start);
+
     // The total cost of the accesses in the sequence.
     int cost (void) const;
 
@@ -1085,6 +1108,27 @@ NOTE:
     static void split_1 (std::list<split_sequence_info>& new_seqs,
                          reg_mod* rm, bool add_to_front, bool add_to_back);
     static void split_2 (split_sequence_info& seq_info, sequence_element* el);
+
+    int gen_address_mod_1 (filter_iterator<sequence_iterator,
+                                           element_to_optimize> el,
+                           delegate& dlg, std::set<reg_mod*>& visited_reg_mods,
+                           std::set<reg_mod*>& used_reg_mods,
+                           int lookahead_num, bool record_in_sequence = true);
+
+    std::pair<int, reg_mod*>
+    find_cheapest_start_addr (const addr_expr& end_addr,
+                              sequence_const_iterator el,
+                              int min_disp, int max_disp, addr_type_t addr_type,
+                              delegate& dlg, std::set<reg_mod*>& used_reg_mods,
+                              std::set<reg_mod*>& visited_reg_mods);
+
+    void insert_address_mods (const alternative& alt,
+                              const reg_mod* base_start_addr,
+                              const reg_mod* index_start_addr,
+                              const addr_expr& base_end_addr,
+                              const addr_expr& index_end_addr,
+                              sequence_iterator el, mod_tracker& tracker,
+                              std::set<reg_mod*>& used_reg_mods, delegate& dlg);
 
     int update_cost_1 (sequence_iterator& rm_it, delegate& d,
                        std::set<reg_mod*>& used_reg_mods);
@@ -1183,10 +1227,6 @@ NOTE:
   void set_options (const options& opt);
 
 private:
-
-  // A structure used for tracking and reverting modifications
-  // to access sequences.
-  class mod_tracker;
 
   static const pass_data default_pass_data;
 
