@@ -153,6 +153,7 @@ public:
  private:
   class split_sequence_info;
   class mod_tracker;
+  class mod_addr_result;
 
  public:
 
@@ -1117,8 +1118,9 @@ NOTE:
 
     std::pair<int, reg_mod*>
     find_cheapest_start_addr (const addr_expr& end_addr,
-                              sequence_const_iterator el,
-                              int min_disp, int max_disp, addr_type_t addr_type,
+                              sequence_iterator el,
+                              disp_t min_disp, disp_t max_disp,
+                              addr_type_t addr_type,
                               delegate& dlg, std::set<reg_mod*>& used_reg_mods,
                               std::set<reg_mod*>& visited_reg_mods);
 
@@ -1128,7 +1130,21 @@ NOTE:
                               const addr_expr& base_end_addr,
                               const addr_expr& index_end_addr,
                               sequence_iterator el, mod_tracker& tracker,
-                              std::set<reg_mod*>& used_reg_mods, delegate& dlg);
+                              std::set<reg_mod*>& used_reg_mods,
+                              std::set<reg_mod*>& visited_reg_mods,
+                              delegate& dlg);
+
+    mod_addr_result
+    try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
+                             disp_t min_disp, disp_t max_disp,
+                             addr_type_t addr_type, machine_mode acc_mode,
+                             sequence_iterator el, mod_tracker& tracker,
+                             std::set<reg_mod*>& used_reg_mods,
+                             std::set<reg_mod*>& visited_reg_mods,
+                             delegate& dlg);
+    reg_mod* find_start_addr_for_reg (rtx reg,
+                                      std::set<reg_mod*>& used_reg_mods,
+                                      std::set<reg_mod*>& visited_reg_mods);
 
     int update_cost_1 (sequence_iterator& rm_it, delegate& d,
                        std::set<reg_mod*>& used_reg_mods);
