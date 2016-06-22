@@ -808,15 +808,16 @@ NOTE:
   public:
     reg_mod (rtx_insn* i, rtx r, rtx v)
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_addr (make_invalid_addr ()), m_effective_addr (make_invalid_addr ()) { };
+    m_current_addr (make_invalid_addr ()),
+    m_effective_addr (make_invalid_addr ()) { };
 
     reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a, addr_expr ea)
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_addr (a), m_effective_addr (ea) { };
+    m_current_addr (a), m_effective_addr (ea) { };
 
     reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a)
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_addr (a), m_effective_addr (make_invalid_addr ()) { };
+    m_current_addr (a), m_effective_addr (make_invalid_addr ()) { };
 
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
@@ -826,8 +827,8 @@ NOTE:
 
     // The address expression the reg is being set to.
     // Might be invalid if AMS was not able to understand it (-> barrier)
-    const addr_expr& addr (void) const { return m_addr; }
-    void set_addr (const addr_expr& addr) { m_addr = addr; }
+    const addr_expr& current_addr (void) const { return m_current_addr; }
+    void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
     // The effective address expression the reg is being set to.
     // Might be invalid if AMS was not able to understand it (-> barrier)
@@ -836,15 +837,15 @@ NOTE:
 
     virtual bool uses_reg (rtx r) const
     {
-      return (addr ().is_invalid ()
-              && (regs_equal (addr ().base_reg (), r)
-                  || regs_equal (addr ().index_reg (), r)));
+      return (current_addr ().is_invalid ()
+              && (regs_equal (current_addr ().base_reg (), r)
+                  || regs_equal (current_addr ().index_reg (), r)));
     }
 
   private:
     rtx m_reg;
     rtx m_value;
-    addr_expr m_addr;
+    addr_expr m_current_addr;
     addr_expr m_effective_addr;
   };
 
@@ -1125,8 +1126,8 @@ NOTE:
                               std::set<reg_mod*>& visited_reg_mods);
 
     void insert_address_mods (const alternative& alt,
-                              const reg_mod* base_start_addr,
-                              const reg_mod* index_start_addr,
+                              reg_mod* base_start_addr,
+                              reg_mod* index_start_addr,
                               const addr_expr& base_end_addr,
                               const addr_expr& index_end_addr,
                               sequence_iterator el, mod_tracker& tracker,
