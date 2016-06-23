@@ -1311,6 +1311,9 @@ sh_ams2::sequence::find_addr_reg_uses (void)
 
   for (rtx_insn* i = start_insn (); i != NULL_RTX; i = next_nonnote_insn_bb (i))
     {
+      if (!INSN_P (i) || DEBUG_INSN_P (i))
+	continue;
+
       // Search for reg uses only if the insn doesn't contain any
       // mem accesses or reg mods.
       std::pair<insn_map::iterator, insn_map::iterator>
@@ -1495,7 +1498,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   for (reg_mod_iter els = begin<reg_mod_match> (),
        els_end = end<reg_mod_match> (); els != els_end; )
     {
-      if ((*els)->insn () == NULL || (*els)->used_by_unoptimizable_el ())
+      if ((*els)->insn () == NULL || (*els)->used_by_unoptimizable_el ()
+          || ((reg_mod*)*els)->effective_addr ().is_invalid ())
         {
           ++els;
           continue;
@@ -2173,9 +2177,10 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
       if (visited_reg_mods.find (*addrs) == visited_reg_mods.end ())
         continue;
 
-      const addr_expr &ae = (*addrs)->effective_addr ();
-      if ((!ae.is_invalid () && ae.has_no_index_reg ()
-           && regs_equal (ae.base_reg (), reg)))
+      const addr_expr &ae = (*addrs)->effective_addr ().is_invalid ()
+                            ? make_reg_addr ((*addrs)->reg ())
+                            : (*addrs)->effective_addr ();
+      if (ae.has_no_index_reg () && regs_equal (ae.base_reg (), reg))
         {
           found_addr = *addrs;
           if (used_reg_mods.find (found_addr) == used_reg_mods.end ())
