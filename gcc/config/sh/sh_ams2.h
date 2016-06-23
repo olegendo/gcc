@@ -837,7 +837,7 @@ NOTE:
 
     virtual bool uses_reg (rtx r) const
     {
-      return (current_addr ().is_invalid ()
+      return (!current_addr ().is_invalid ()
               && (regs_equal (current_addr ().base_reg (), r)
                   || regs_equal (current_addr ().index_reg (), r)));
     }
