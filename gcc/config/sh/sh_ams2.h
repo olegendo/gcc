@@ -564,6 +564,7 @@ public:
     // The insn rtx of this element.  Maybe null if it has been inserted
     // by AMS into the sequence and is not present in the original insn list.
     rtx_insn* insn (void) const { return m_insn; }
+    void set_insn (rtx_insn* i) { m_insn = i; }
 
     // An increasing/decreasing chain of adjacent accesses that this access
     // is part of.
@@ -759,6 +760,8 @@ NOTE:
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
 
+    rtx* mem_ref (void) const { return m_mem_ref; }
+
   private:
     // Reference into the rtx_insn where the mem rtx resides.
     rtx* m_mem_ref;
@@ -774,6 +777,8 @@ NOTE:
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
+
+    rtx* mem_ref (void) const { return m_mem_ref; }
 
   private:
     // Reference into the rtx_insn where the mem rtx resides.
@@ -922,6 +927,7 @@ NOTE:
     // The reg rtx inside the insn. Can also be a (PLUS reg const_int)
     // expression. If NULL, the reg use is unspecified.
     const rtx* reg_ref (void) const { return m_reg_ref; }
+    bool set_reg_ref (rtx new_reg);
 
     // The effective address expression the reg is expected to have.
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
@@ -1017,7 +1023,7 @@ NOTE:
     void gen_address_mod (delegate& dlg, int base_lookahead);
 
     // Update the original insn stream with the changes in this sequence.
-    void update_insn_stream (bool allow_mem_addr_change_new_insns);
+    void update_insn_stream (void);
 
     // Fill the m_inc/dec_chain fields of the sequence elements.
     void calculate_adjacency_info (void);

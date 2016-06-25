@@ -414,6 +414,64 @@ remove_incdec_notes (rtx_insn* i)
   return found;
 }
 
+// FIXME: Is it OK to use Pmode for the index reg and signed ops?
+rtx
+expand_mult (rtx a, rtx b)
+{
+  log_msg ("\nexpand_mult ");
+  log_rtx (a);
+  log_msg (" * ");
+  log_rtx (b);
+  log_msg ("\n");
+
+  return expand_mult (Pmode, a, b, NULL, false);
+}
+
+rtx
+expand_mult (rtx a, HOST_WIDE_INT b)
+{
+  return expand_mult (a, GEN_INT (b));
+}
+
+rtx
+expand_plus (rtx a, rtx b)
+{
+  log_msg ("\nexpand_plus ");
+  log_rtx (a);
+  log_msg (" + ");
+  log_rtx (b);
+  log_msg ("\n");
+
+  if (b == const0_rtx)
+    return a;
+
+  return expand_binop (Pmode, add_optab, a, b, NULL, false, OPTAB_LIB_WIDEN);
+}
+
+rtx
+expand_plus (rtx a, HOST_WIDE_INT b)
+{
+  if (b == 0)
+    return a;
+
+  return expand_plus (a, GEN_INT (b));
+}
+
+rtx
+expand_minus (rtx a, rtx b)
+{
+  log_msg ("\nexpand_minus ");
+  log_rtx (a);
+  log_msg (" - ");
+  log_rtx (b);
+  log_msg ("\n");
+
+  if (b == const0_rtx)
+    return a;
+
+  return expand_binop (Pmode, sub_optab, a, b, NULL, false, OPTAB_LIB_WIDEN);
+}
+
 } // anonymous namespace
 
 // borrowed from C++11
@@ -499,7 +557,6 @@ sh_ams2::options::options (void)
   cse = false;
   cse2 = false;
   gcse = false;
-  allow_mem_addr_change_new_insns = true;
   base_lookahead_count = 1;
 }
 
@@ -545,7 +602,6 @@ sh_ams2::options::options (const std::string& str)
   get_int_opt (cse);
   get_int_opt (cse2);
   get_int_opt (gcse);
-  get_int_opt (allow_mem_addr_change_new_insns);
 
 #undef get_int_opt
 
@@ -2192,6 +2248,167 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
   return found_addr;
 }
 
+// Update the original insn stream with the changes in this sequence.
+void
+sh_ams2::sequence::update_insn_stream (void)
+{
+  bool insn_sequence_started = false;
+  rtx_insn* last_insn = NULL;
+
+  for (sequence_iterator els = elements ().begin ();
+       els != elements ().end (); ++els)
+    {
+      if ((*els)->insn ())
+        {
+          last_insn = (*els)->insn ();
+
+          if (insn_sequence_started)
+            {
+              rtx_insn* new_insns = get_insns ();
+              end_sequence ();
+              insn_sequence_started = false;
+
+              log_msg ("emitting new insns = \n");
+              log_rtx (new_insns);
+              log_msg ("\nbefore insn\n");
+              log_insn ((*els)->insn ());
+              log_msg ("\n");
+              emit_insn_before (new_insns, (*els)->insn ());
+            }
+
+          if ((*els)->is_mem_access ())
+            {
+              mem_access* m = (mem_access*)*els;
+              if (m->optimization_enabled ())
+                {
+                  log_msg ("mem access didn't get optimized, skipping\n");
+                  continue;
+                }
+              if (m->current_addr ().is_invalid ())
+                {
+                  log_msg ("current address not valid\n");
+                  continue;
+                }
+
+              // Update the mem access rtx with the element's current_addr.
+
+              // If the original access used an auto-mod addressing mode,
+              // remove the original REG_INC note.
+              // FIXME: Maybe remove only the notes for the particular regs
+              // instead of removing them all?  Might be interesting for
+              // multi-mem insns.
+              remove_incdec_notes (m->insn ());
+
+              if (!m->replace_addr (m->current_addr ()))
+                {
+                  log_msg ("failed to replace mem rtx with new address\n");
+                  log_addr_expr (m->current_addr ());
+                  log_msg ("\nin insn\n");
+                  log_insn (m->insn ());
+                  log_msg ("\n");
+                  abort ();
+                }
+
+              sh_check_add_incdec_notes (m->insn ());
+            }
+          else if ((*els)->type () == type_reg_use)
+            {
+              reg_use* ru = (reg_use*)*els;
+              if (ru->optimization_enabled ())
+                {
+                  log_msg ("reg-use didn't get optimized, skipping\n");
+                  continue;
+                }
+              if (ru->reg_ref () == NULL)
+                {
+                  log_msg ("reg-use is unspecified, skipping\n");
+                  continue;
+                }
+
+              bool r = ru->set_reg_ref (ru->reg ());
+              gcc_assert (r);
+            }
+        }
+      else
+        {
+          if ((*els)->type () == type_reg_mod)
+            {
+              // Generate an address modifying insn from the reg-mod.
+
+              if (!insn_sequence_started)
+                {
+                  start_sequence ();
+                  insn_sequence_started = true;
+                }
+
+              reg_mod* rm = (reg_mod*)*els;
+              const addr_expr& addr = rm->current_addr ();
+              rtx new_val;
+              if (addr.has_no_base_reg () && addr.has_no_index_reg ())
+                {
+                  new_val = GEN_INT (addr.disp ());
+                  log_msg ("reg mod new val (1) = ");
+                  log_rtx (new_val);
+                  log_msg ("\n");
+                }
+              else
+                {
+                  if (addr.has_index_reg ())
+                    {
+                      bool subtract = addr.has_base_reg ()
+                        && addr.scale () == -1;
+                      rtx index = subtract ? addr.index_reg ()
+                        : expand_mult (addr.index_reg (), addr.scale ());
+
+                      if (addr.has_no_base_reg ())
+                        new_val = index;
+                      else if (subtract)
+                        new_val = expand_minus (addr.base_reg (), index);
+                      else
+                        new_val = expand_plus (addr.base_reg (), index);
+                      log_msg ("reg mod new val (2) = ");
+                      log_rtx (new_val);
+                      log_msg ("\n");
+                    }
+                  else
+                    {
+                      new_val = addr.base_reg ();
+                      log_msg ("reg mod new val (3) = ");
+                      log_rtx (new_val);
+                      log_msg ("\n");
+                    }
+
+                  new_val = expand_plus (new_val, addr.disp ());
+                }
+
+              rm->set_insn (emit_move_insn (rm->reg (), new_val));
+            }
+        }
+    }
+
+  // Emit remaining address modifying insns after the last insn in the access.
+  if (insn_sequence_started)
+    {
+      bool emit_after = (GET_CODE (last_insn) == INSN);
+
+      rtx_insn* new_insns = get_insns ();
+      end_sequence ();
+
+      log_msg ("emitting new insns = \n");
+      log_rtx (new_insns);
+      if (emit_after)
+        log_msg ("\nafter insn\n");
+      else
+        log_msg ("\nbefore insn\n");
+      log_insn (last_insn);
+      log_msg ("\n");
+      if (emit_after)
+        emit_insn_after (new_insns, last_insn);
+      else
+        emit_insn_before (new_insns, last_insn);
+    }
+}
+
 // The recursive part of find_addr_reg_uses. Find all references to REG
 // in X and add them to OUT.
 template <typename OutputIterator> void
@@ -2901,6 +3118,14 @@ sh_ams2::mem_access::displacement_fits_alternative (disp_t disp) const
   return false;
 }
 
+// Update the reg-use expression to NEW_REG.  Return false if the update
+// was unsuccessful.
+bool
+sh_ams2::reg_use::set_reg_ref (rtx new_reg)
+{
+  return validate_change (insn (), m_reg_ref, new_reg, false);
+}
+
 // Find the value that REG was last set to, starting the search from
 // START_INSN.  Return that value along with the insn in which REG gets
 // modified.  If the value of REG cannot be determined, return NULL.
@@ -3521,7 +3746,6 @@ sh_ams2::execute (function* fun)
 
   std::list<sequence> sequences;
   std::vector<mem_access*> mems;
-  std::vector<reg_mod*> original_reg_mods;
 
   log_msg ("extracting access sequences\n");
   basic_block bb;
@@ -3557,6 +3781,7 @@ sh_ams2::execute (function* fun)
          }
     }
 
+  std::vector<reg_mod*> original_reg_mods;
   log_msg ("\nprocessing extracted sequences\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
        it != sequences.end ();)
@@ -3603,6 +3828,7 @@ sh_ams2::execute (function* fun)
         ++it;
     }
 
+  std::vector<sequence*> updated_seqs;
   log_msg ("\nprocessing split sequences\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
        it != sequences.end (); ++it)
@@ -3644,6 +3870,7 @@ sh_ams2::execute (function* fun)
 
       log_msg ("updating sequence cost\n");
       seq.update_cost (m_delegate);
+      int original_cost = seq.cost ();
 
       log_sequence (seq, true);
       log_msg ("\n\n");
@@ -3662,9 +3889,23 @@ sh_ams2::execute (function* fun)
       seq.gen_address_mod (m_delegate, m_options.base_lookahead_count);
 
       seq.update_cost (m_delegate);
+      int new_cost = seq.cost ();
 
       log_sequence (seq, false, true);
       log_msg ("\n");
+
+      if (new_cost >= original_cost)
+	{
+	  log_msg ("new_cost (%d) >= original_cost (%d)",
+		   new_cost, original_cost);
+
+	  if (m_options.check_original_cost)
+            log_msg ("  not modifying\n");
+	  else
+	    log_msg ("  modifying anyway\n");
+	}
+      if (new_cost < original_cost || !m_options.check_original_cost)
+        updated_seqs.push_back (&seq);
     }
 
   // Free all unused reg-mods.
@@ -3673,6 +3914,17 @@ sh_ams2::execute (function* fun)
     {
       if ((*it)->insn () != NULL && (*it)->dependent_els ().empty ())
         delete *it;
+    }
+
+  log_msg ("\nupdating sequence insns\n");
+  for (std::vector<sequence*>::iterator it = updated_seqs.begin ();
+       it != updated_seqs.end (); ++it)
+    {
+      sequence& seq = **it;
+      log_sequence (seq, false);
+      log_msg ("\nupdating insns\n");
+      seq.update_insn_stream ();
+      log_msg ("\n\n");
     }
 
 
