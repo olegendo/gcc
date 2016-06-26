@@ -610,6 +610,9 @@ NOTE:
     void add_dependent_el (sequence_element* dep);
     void remove_dependent_el (sequence_element* dep);
 
+    // The sequences that use or have previously used this element.
+    std::set<sequence*>& sequences (void) { return m_sequences; }
+
     // Return true if the element is used (directly or indirectly) by
     // another element that cannot be optimized.
     bool used_by_unoptimizable_el (void) const;
@@ -646,6 +649,8 @@ NOTE:
 
     std::list<sequence_element*> m_dependencies;
     std::list<sequence_element*> m_dependent_els;
+
+    std::set<sequence*> m_sequences;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1010,6 +1015,8 @@ NOTE:
     static std::list<sequence>::iterator
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences);
+
+    ~sequence (void);
 
     // Add a reg mod for every insn that modifies an address register.
     void find_addr_reg_mods (void);
