@@ -255,6 +255,18 @@ public:
 
     addr_type_t type (void) const { return m_type; }
 
+
+// FIXME: has_base_reg and has_index reg are checked in several places
+// and essentially the same stuff is done on both, e.g. in
+//   start_addr_list::get_relevant_addresses
+//   start_addr_list::add
+//   start_addr_list::remove
+//   sequence::split_2
+//
+// it'd be easer if we could iterate over the registers in the addr_expr.
+// e.g. put m_base_reg and m_index_reg in an 2-element array and use
+// raw-pointers as base iterators, then decorate it with a filter_iterator
+// that checks for != invalid_regno to skip over invalid regs.
     rtx base_reg (void) const
     {
       gcc_assert (!is_invalid ());
@@ -707,6 +719,9 @@ NOTE:
 
     // The effective address expression.
     // Might be invalid if AMS was not able to understand it.
+
+    // FIXME: effective address is used pretty much everywhere.
+    // move it into the base class to avoid if-else on the element type.
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
     void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
 
@@ -724,6 +739,8 @@ NOTE:
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
 
     // If false, AMS skips this access when optimizing.
+    // FIXME: move this field into the base class to avoid if-else on the
+    // element type.
     bool optimization_enabled (void) const { return m_optimization_enabled; }
     void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
 
