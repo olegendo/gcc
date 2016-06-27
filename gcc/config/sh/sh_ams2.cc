@@ -1800,27 +1800,27 @@ gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
   return min_cost;
 }
 
-// The return type of try_insert_address_mods. Stores the register that contains
+// The return type of try_insert_address_mods. Stores the reg-mod that contains
 // the final address, the costs of the address modifications and the constant
 // displacement that the mem access needs to use.
 class sh_ams2::mod_addr_result
 {
 public:
   int cost;
-  rtx addr_reg;
+  reg_mod* final_addr;
   disp_t addr_disp;
 
   mod_addr_result (int c)
-    : cost (c), addr_reg (invalid_regno), addr_disp (0) { }
+    : cost (c), final_addr (NULL), addr_disp (0) { }
 
-  mod_addr_result (rtx regno)
-    : cost (infinite_costs), addr_reg (regno), addr_disp (0) { }
+  mod_addr_result (reg_mod* addr)
+    : cost (infinite_costs), final_addr (addr), addr_disp (0) { }
 
-  mod_addr_result (rtx regno, disp_t disp)
-    : cost (infinite_costs), addr_reg (regno), addr_disp (disp) { }
+  mod_addr_result (reg_mod* addr, disp_t disp)
+    : cost (infinite_costs), final_addr (addr), addr_disp (disp) { }
 
-  mod_addr_result (int c, rtx regno, disp_t disp)
-    : cost (c), addr_reg (regno), addr_disp (disp) { }
+  mod_addr_result (int c, reg_mod* addr, disp_t disp)
+    : cost (c), final_addr (addr), addr_disp (disp) { }
 };
 
 // Find the cheapest starting address that can be used to arrive at END_ADDR.
@@ -1883,9 +1883,13 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
         {
           min_cost = cost;
           min_start_addr = const_load;
+
+          // If the costs are reduced, this const reg might be used in the
+          // final sequence, so we can't remove it.  However, it shouldn't
+          // be visible when trying other alternatives.
+          m_start_addr_list.remove ((reg_mod*)elements ().front ());
         }
-      // If this doesn't reduce the costs, remove the newly added
-      // (reg <- const) copy.
+      // If this doesn't reduce the costs, we can safely remove the new reg-mod.
       else
         {
           remove_element (elements ().begin ());
@@ -1934,11 +1938,14 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
                              acc_mode, el, tracker,
                              used_reg_mods, visited_reg_mods, dlg);
 
+  (*el)->add_dependency (base_insert_result.final_addr);
+  base_insert_result.final_addr->add_dependent_el (*el);
+
   addr_expr new_addr;
   if (alt.address ().has_no_index_reg ())
     {
       disp_t disp = ae.disp () - base_insert_result.addr_disp;
-      new_addr = non_mod_addr (base_insert_result.addr_reg,
+      new_addr = non_mod_addr (base_insert_result.final_addr->reg (),
                                invalid_regno, 1, disp);
     }
   else
@@ -1951,8 +1958,12 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
                                  alt.address ().type (),
                                  acc_mode, el, tracker,
                                  used_reg_mods, visited_reg_mods, dlg);
-      new_addr = non_mod_addr (base_insert_result.addr_reg,
-                               index_insert_result.addr_reg, 1, 0);
+
+      (*el)->add_dependency (index_insert_result.final_addr);
+      index_insert_result.final_addr->add_dependent_el (*el);
+
+      new_addr = non_mod_addr (base_insert_result.final_addr->reg (),
+                               index_insert_result.final_addr->reg (), 1, 0);
     }
 
   if (alt.address ().type () == pre_mod)
@@ -2014,7 +2025,6 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
              ? dlg.addr_reg_clone_cost (start_addr->reg (), *this, el)
              : 0;
   int prev_cost = 0;
-  rtx final_addr_reg = start_addr->reg ();
 
   // Canonicalize the start and end addresses by converting
   // addresses of the form base+disp into index*1+disp.
@@ -2086,7 +2096,13 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                      c_start_addr); \
     sequence_iterator inserted_el = insert_element (new_addr, el); \
     visited_reg_mods.insert (new_addr); \
-    final_addr_reg = new_reg; \
+    new_addr->add_dependency (used_rm); \
+    used_rm->add_dependent_el (new_addr); \
+    if (used_rm != start_addr) \
+      { \
+        new_addr->add_dependency (start_addr); \
+        start_addr->add_dependent_el (new_addr); \
+      } \
     tracker.inserted_reg_mods ().push_back (inserted_el); \
     if (!REG_P (addr_rtx)) \
       cost += dlg.addr_reg_mod_cost (new_reg, addr_rtx, *this, el); \
@@ -2236,7 +2252,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                      c_start_addr.disp () + auto_mod_disp));
     }
 
-  return mod_addr_result (cost, final_addr_reg, c_start_addr.disp ());
+  return mod_addr_result (cost, start_addr, c_start_addr.disp ());
 }
 
 // Find a starting address whose effective address is the single base reg REG.
@@ -2359,6 +2375,14 @@ sh_ams2::sequence::update_insn_stream (void)
         {
           if ((*els)->type () == type_reg_mod)
             {
+              reg_mod* rm = (reg_mod*)*els;
+              const addr_expr& addr = rm->current_addr ();
+
+              // Reg-mods that set the reg to itself don't need insns.
+              if (addr.has_base_reg () && addr.has_no_index_reg ()
+                  && regs_equal (addr.base_reg (), rm->reg ()))
+                continue;
+
               // Generate an address modifying insn from the reg-mod.
 
               if (!insn_sequence_started)
@@ -2367,8 +2391,6 @@ sh_ams2::sequence::update_insn_stream (void)
                   insn_sequence_started = true;
                 }
 
-              reg_mod* rm = (reg_mod*)*els;
-              const addr_expr& addr = rm->current_addr ();
               rtx new_val;
               if (addr.has_no_base_reg () && addr.has_no_index_reg ())
                 {
