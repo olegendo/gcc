@@ -642,6 +642,12 @@ NOTE:
     virtual bool uses_reg (rtx r ATTRIBUTE_UNUSED) const { return false; }
 
     // Return true if the effective address of FIRST and SECOND only differs in
+    // the constant displacement and the difference is DIFF.
+    static bool distance_equals (const sequence_element* first,
+                                 const sequence_element* second,
+                                 disp_t diff);
+
+    // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
     static bool adjacent_inc (const sequence_element* first,
                               const sequence_element* second);

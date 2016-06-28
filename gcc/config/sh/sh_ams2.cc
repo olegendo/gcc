@@ -843,16 +843,12 @@ sh_ams2::sequence_element::used_by_unoptimizable_el (void) const
 }
 
 // Return true if the effective address of FIRST and SECOND only differs in
-// the constant displacement and the difference is the access size of FIRST.
+// the constant displacement and the difference is DIFF.
 bool
-sh_ams2::sequence_element::adjacent_inc (const sequence_element* first,
-                                         const sequence_element* second)
+sh_ams2::sequence_element::distance_equals (const sequence_element* first,
+                                            const sequence_element* second,
+                                            disp_t diff)
 {
-  // FIXME: this is the same as adjacent_dec.
-  // extract function: e.g. adjacent_distance.
-  // use it in adjacent_inc and adjacent_dec
-  addr_expr first_addr, second_addr;
-
   if (!first->is_mem_access () || (!second->is_mem_access ()
                                    && second->type () != type_reg_use))
     return false;
@@ -862,8 +858,20 @@ sh_ams2::sequence_element::adjacent_inc (const sequence_element* first,
 
   std::pair<disp_t, bool> distance
     = second->effective_addr () - first->effective_addr ();
-  return distance.second
-    && distance.first == ((const mem_access*)first)->access_size ();
+  return distance.second && distance.first == diff;
+}
+
+// Return true if the effective address of FIRST and SECOND only differs in
+// the constant displacement and the difference is the access size of FIRST.
+bool
+sh_ams2::sequence_element::adjacent_inc (const sequence_element* first,
+                                         const sequence_element* second)
+{
+  if (!first->is_mem_access ())
+    return false;
+
+  return distance_equals (first, second,
+                          ((const mem_access*)first)->access_size ());
 }
 
 bool
@@ -879,22 +887,11 @@ bool
 sh_ams2::sequence_element::adjacent_dec (const sequence_element* first,
                                          const sequence_element* second)
 {
-  // FIXME: this is the same as adjacent_inc.
-  // extract function: e.g. adjacent_distance.
-  // use it in adjacent_inc and adjacent_dec
-  addr_expr first_addr, second_addr;
-
-  if (!first->is_mem_access () || (!second->is_mem_access ()
-                                   && second->type () == type_reg_use))
-    return false;
-  if (first->effective_addr ().is_invalid ()
-      || second->effective_addr ().is_invalid ())
+  if (!first->is_mem_access ())
     return false;
 
-  std::pair<disp_t, bool> distance
-    = first->effective_addr () - second->effective_addr ();
-  return distance.second
-    && distance.first == ((const mem_access*)first)->access_size ();
+  return distance_equals (first, second,
+                          -((constmem_access*)first)->access_size ());
 }
 
 bool
