@@ -697,10 +697,8 @@ struct sh_ams2::element_to_optimize
 {
   bool operator () (const sequence_element* el) const
   {
-    return ((el->is_mem_access ()
-             && ((const mem_access*)el)->optimization_enabled ())
-            || (el->type () == type_reg_use
-                && ((const reg_use*)el)->optimization_enabled ()));
+    return ((el->is_mem_access () || el->type () == type_reg_use)
+            && el->optimization_enabled ());
   }
 };
 
@@ -836,22 +834,9 @@ sh_ams2::sequence_element::used_by_unoptimizable_el (void) const
   for (std::list<sequence_element*>::const_iterator it
          = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
     {
-      if ((*it)->used_by_unoptimizable_el ())
-        return true;
-
-// FIXME: both if conditions are essentially the same.  if effective_addr and
-// optimization_enabled are moved into the base class there's no need to
-// check the type at all.
-      if ((*it)->is_mem_access () &&
-          (!((mem_access*)*it)->optimization_enabled ()
-           || ((mem_access*)*it)->effective_addr ().is_invalid ()))
-        return true;
-      if ((*it)->type () == type_reg_use &&
-          (!((reg_use*)*it)->optimization_enabled ()
-           || ((reg_use*)*it)->effective_addr ().is_invalid ()))
-        return true;
-      if ((*it)->type () == type_reg_mod &&
-          ((reg_mod*)*it)->effective_addr ().is_invalid ())
+      if (!(*it)->optimization_enabled ()
+          || (*it)->effective_addr ().is_invalid ()
+          || (*it)->used_by_unoptimizable_el ())
         return true;
     }
   return false;
@@ -868,25 +853,17 @@ sh_ams2::sequence_element::adjacent_inc (const sequence_element* first,
   // use it in adjacent_inc and adjacent_dec
   addr_expr first_addr, second_addr;
 
-  if (!first->is_mem_access ())
+  if (!first->is_mem_access () || (!second->is_mem_access ()
+                                   && second->type () != type_reg_use))
+    return false;
+  if (first->effective_addr ().is_invalid ()
+      || second->effective_addr ().is_invalid ())
     return false;
 
-  const mem_access* first_acc = (const mem_access*)first;
-  first_addr = first_acc->effective_addr ();
-
-// FIXME: no need to check the type if effective_addr is in base class.
-  if (second->is_mem_access ())
-    second_addr = ((const mem_access*)second)->effective_addr ();
-  else if (second->type () == type_reg_use)
-    second_addr = ((const reg_use*)second)->effective_addr ();
-  else
-    return false;
-
-  if (first_addr.is_invalid () || second_addr.is_invalid ())
-    return false;
-
-  std::pair<disp_t, bool> distance = second_addr - first_addr;
-  return distance.second && distance.first == first_acc->access_size ();
+  std::pair<disp_t, bool> distance
+    = second->effective_addr () - first->effective_addr ();
+  return distance.second
+    && distance.first == ((const mem_access*)first)->access_size ();
 }
 
 bool
@@ -907,25 +884,17 @@ sh_ams2::sequence_element::adjacent_dec (const sequence_element* first,
   // use it in adjacent_inc and adjacent_dec
   addr_expr first_addr, second_addr;
 
-  if (!first->is_mem_access ())
+  if (!first->is_mem_access () || (!second->is_mem_access ()
+                                   && second->type () == type_reg_use))
+    return false;
+  if (first->effective_addr ().is_invalid ()
+      || second->effective_addr ().is_invalid ())
     return false;
 
-  const mem_access* first_acc = (const mem_access*)first;
-  first_addr = first_acc->effective_addr ();
-
-// FIXME: no need to check the type if effective_addr is in base class.
-  if (second->is_mem_access ())
-    second_addr = ((const mem_access*)second)->effective_addr ();
-  else if (second->type () == type_reg_use)
-    second_addr = ((const reg_use*)second)->effective_addr ();
-  else
-    return false;
-
-  if (first_addr.is_invalid () || second_addr.is_invalid ())
-    return false;
-
-  std::pair<disp_t, bool> distance = first_addr - second_addr;
-  return distance.second && distance.first == first_acc->access_size ();
+  std::pair<disp_t, bool> distance
+    = first->effective_addr () - second->effective_addr ();
+  return distance.second
+    && distance.first == ((const mem_access*)first)->access_size ();
 }
 
 bool
@@ -1138,18 +1107,11 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
   for (sequence_iterator el = seq.elements ().begin ();
        el != seq.elements ().end (); ++el)
     {
+      if (!(*el)->is_mem_access () && (*el)->type () != type_reg_use)
+        continue;
 
-// FIXME: move effective addr into base class and just do
-//    addr_expr addr = (*el)->effective_addr ();
-//    if (!addr.valid ())
-//      continue;
-
-      addr_expr addr;
-      if ((*el)->is_mem_access ())
-        addr = ((mem_access*)*el)->effective_addr ();
-      else if ((*el)->type () == type_reg_use)
-        addr = ((reg_use*)*el)->effective_addr ();
-      else
+      addr_expr addr = (*el)->effective_addr ();
+      if (addr.is_invalid ())
         continue;
 
       terms.clear ();
@@ -1384,7 +1346,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                                            reg_current_addr));
           addr_expr reg_effective_addr = rtx_to_addr_expr (value, Pmode,
                                                            this, *new_reg_mod);
-          ((reg_mod*)*new_reg_mod)->set_effective_addr (reg_effective_addr);
+          (*new_reg_mod)->set_effective_addr (reg_effective_addr);
 
           last_insn = prev_nonnote_insn_bb (mod_insn);
         }
@@ -1591,7 +1553,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
        els_end = end<reg_mod_match> (); els != els_end; )
     {
       if ((*els)->insn () == NULL || (*els)->used_by_unoptimizable_el ()
-          || ((reg_mod*)*els)->effective_addr ().is_invalid ())
+          || (*els)->effective_addr ().is_invalid ())
         {
           ++els;
           continue;
@@ -1652,13 +1614,7 @@ gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
                    std::set<reg_mod*>& visited_reg_mods,
                    int lookahead_num, bool record_in_sequence)
 {
-  addr_expr ae;
-  if ((*el)->is_mem_access ())
-    ae = ((mem_access*)*el)->effective_addr ();
-  else if ((*el)->type () == type_reg_use)
-    ae = ((reg_use*)*el)->effective_addr ();
-  else
-    gcc_unreachable ();
+  const addr_expr& ae = (*el)->effective_addr ();
 
   if (ae.is_invalid ())
     return 0;
@@ -1927,18 +1883,12 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
                      std::set<reg_mod*>& visited_reg_mods, delegate& dlg)
 {
   machine_mode acc_mode;
-  addr_expr ae;
+  const addr_expr& ae = (*el)->effective_addr ();
+
   if ((*el)->is_mem_access ())
-    {
-      acc_mode = Pmode;
-      ae = ((mem_access*)*el)->effective_addr ();
-    }
+    acc_mode = Pmode;
   else if ((*el)->type () == type_reg_use)
-    {
-      reg_use* ru = (reg_use*)*el;
-      acc_mode = GET_MODE (ru->reg ());
-      ae = ru->effective_addr ();
-    }
+    acc_mode = GET_MODE (((reg_use*)*el)->reg ());
   else
     gcc_unreachable ();
 
@@ -2329,17 +2279,18 @@ sh_ams2::sequence::update_insn_stream (void)
               emit_insn_before (new_insns, (*els)->insn ());
             }
 
+          if (!(*els)->optimization_enabled ())
+            {
+              log_msg ("element didn't get optimized, skipping\n");
+              continue;
+            }
+
 // FIXME: exctract virtual function 'update_insn_stream' (or similar name)
 //        into sequence element base class.  this will eliminate the need
 //        for the type if-else here.
           if ((*els)->is_mem_access ())
             {
               mem_access* m = (mem_access*)*els;
-              if (!m->optimization_enabled ())
-                {
-                  log_msg ("mem access didn't get optimized, skipping\n");
-                  continue;
-                }
               if (m->current_addr ().is_invalid ())
                 {
                   log_msg ("current address not valid\n");
@@ -2370,11 +2321,6 @@ sh_ams2::sequence::update_insn_stream (void)
           else if ((*els)->type () == type_reg_use)
             {
               reg_use* ru = (reg_use*)*els;
-              if (!ru->optimization_enabled ())
-                {
-                  log_msg ("reg-use didn't get optimized, skipping\n");
-                  continue;
-                }
               if (ru->reg_ref () == NULL)
                 {
                   log_msg ("reg-use is unspecified, skipping\n");
@@ -3592,7 +3538,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
           addr_expr reg_effective_addr = rtx_to_addr_expr (
             value, mem_mach_mode, seq, *new_reg_mod);
 
-          ((reg_mod*)*new_reg_mod)->set_effective_addr (reg_effective_addr);
+          (*new_reg_mod)->set_effective_addr (reg_effective_addr);
 
           // If the expression is something AMS can't handle, use the original
           // reg instead.
@@ -3948,7 +3894,7 @@ sh_ams2::execute (function* fun)
           typedef filter_iterator<sequence_iterator, reg_use_match> reg_use_iter;
           for (reg_use_iter ru = seq.begin<reg_use_match> (),
                  ru_end = seq.end<reg_use_match> (); ru != ru_end; ++ru)
-            ((reg_use*)*ru)->set_optimization_enabled (false);
+            (*ru)->set_optimization_enabled (false);
 
           continue;
         }

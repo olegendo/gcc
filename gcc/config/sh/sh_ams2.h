@@ -578,6 +578,15 @@ public:
     rtx_insn* insn (void) const { return m_insn; }
     void set_insn (rtx_insn* i) { m_insn = i; }
 
+    // The effective address expression.
+    // Might be invalid if AMS was not able to understand it.
+    const addr_expr& effective_addr (void) const { return m_effective_addr; }
+    void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
+
+    // If false, AMS skips this access when optimizing.
+    bool optimization_enabled (void) const { return m_optimization_enabled; }
+    void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
+
     // An increasing/decreasing chain of adjacent accesses that this access
     // is part of.
     virtual const adjacent_chain_info&
@@ -648,7 +657,12 @@ NOTE:
 
   protected:
     sequence_element (element_type t, rtx_insn* i)
-    : m_type (t), m_cost (0), m_insn (i) { }
+      : m_type (t), m_cost (0), m_insn (i),
+      m_effective_addr (make_invalid_addr ()), m_optimization_enabled (true) { }
+
+    sequence_element (element_type t, rtx_insn* i, addr_expr ea)
+      : m_type (t), m_cost (0), m_insn (i), m_effective_addr (ea),
+      m_optimization_enabled (true) { }
 
   private:
     static const adjacent_chain_info g_no_incdec_chain;
@@ -658,6 +672,8 @@ NOTE:
 
     int m_cost;
     rtx_insn* m_insn;
+    addr_expr m_effective_addr;
+    bool m_optimization_enabled;
 
     std::list<sequence_element*> m_dependencies;
     std::list<sequence_element*> m_dependent_els;
@@ -717,14 +733,6 @@ NOTE:
     // important for multiple AMS sub-passes.
     virtual bool replace_addr (const addr_expr& new_addr) = 0;
 
-    // The effective address expression.
-    // Might be invalid if AMS was not able to understand it.
-
-    // FIXME: effective address is used pretty much everywhere.
-    // move it into the base class to avoid if-else on the element type.
-    const addr_expr& effective_addr (void) const { return m_effective_addr; }
-    void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
-
     // The address expression rtx as it is currently being used in the mem
     // rtx in the insn.
     rtx current_addr_rtx (void) const { return m_current_addr_rtx; }
@@ -738,12 +746,6 @@ NOTE:
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
 
-    // If false, AMS skips this access when optimizing.
-    // FIXME: move this field into the base class to avoid if-else on the
-    // element type.
-    bool optimization_enabled (void) const { return m_optimization_enabled; }
-    void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
-
     virtual bool uses_reg (rtx r) const
     {
       return (current_addr ().is_invalid ()
@@ -753,18 +755,15 @@ NOTE:
 
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m)
-    : sequence_element (t, i), m_effective_addr (make_invalid_addr ()),
-      m_current_addr (make_invalid_addr ()), m_current_addr_rtx (NULL),
-      m_optimization_enabled (true), m_machine_mode (m) { }
+    : sequence_element (t, i), m_current_addr (make_invalid_addr ()),
+      m_current_addr_rtx (NULL), m_machine_mode (m) { }
 
-    // The address expressions are usually set/updated by the sub-class.
-    addr_expr m_effective_addr;
+    // The current address expressions are usually set/updated by the sub-class.
     addr_expr m_current_addr;
     rtx m_current_addr_rtx;
 
   private:
     bool m_validate_alts;
-    bool m_optimization_enabled;
     alternative_set m_alternatives;
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
@@ -835,16 +834,15 @@ NOTE:
   public:
     reg_mod (rtx_insn* i, rtx r, rtx v)
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_current_addr (make_invalid_addr ()),
-    m_effective_addr (make_invalid_addr ()) { };
+    m_current_addr (make_invalid_addr ()) { };
 
     reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a, addr_expr ea)
-    : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_current_addr (a), m_effective_addr (ea) { };
+      : sequence_element (type_reg_mod, i, ea), m_reg (r), m_value (v),
+    m_current_addr (a) { };
 
     reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a)
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_current_addr (a), m_effective_addr (make_invalid_addr ()) { };
+    m_current_addr (a) { };
 
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
@@ -857,11 +855,6 @@ NOTE:
     const addr_expr& current_addr (void) const { return m_current_addr; }
     void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
-    // The effective address expression the reg is being set to.
-    // Might be invalid if AMS was not able to understand it (-> barrier)
-    const addr_expr& effective_addr (void) const { return m_effective_addr; }
-    void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
-
     virtual bool uses_reg (rtx r) const
     {
       return (!current_addr ().is_invalid ()
@@ -873,7 +866,6 @@ NOTE:
     rtx m_reg;
     rtx m_value;
     addr_expr m_current_addr;
-    addr_expr m_effective_addr;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -916,15 +908,13 @@ NOTE:
   {
   public:
     reg_use (rtx_insn* i)
-    : sequence_element (type_reg_use, i), m_optimization_enabled (true) { };
+    : sequence_element (type_reg_use, i) { };
 
     reg_use (rtx_insn* i, rtx reg, rtx* ref)
-    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
-      m_effective_addr (make_invalid_addr ()), m_optimization_enabled (true) { }
+    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref) { }
 
-    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& effective_addr)
-    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
-      m_effective_addr (effective_addr), m_optimization_enabled (true) { }
+    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& ea)
+    : sequence_element (type_reg_use, i, ea), m_reg (reg), m_reg_ref (ref) { }
 
     // construct a reg-use from an existing element.  this is usually used
     // when replacing an non-optimizable element into a reg-use.
@@ -951,14 +941,6 @@ NOTE:
     const rtx* reg_ref (void) const { return m_reg_ref; }
     bool set_reg_ref (rtx new_reg);
 
-    // The effective address expression the reg is expected to have.
-    const addr_expr& effective_addr (void) const { return m_effective_addr; }
-    void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
-
-    // If false, AMS skips this reg-use when optimizing.
-    bool optimization_enabled (void) const { return m_optimization_enabled; }
-    void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
-
     virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
 
   private:
@@ -970,9 +952,6 @@ NOTE:
 
     rtx m_reg;
     rtx* m_reg_ref;
-
-    addr_expr m_effective_addr;
-    bool m_optimization_enabled;
 
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
