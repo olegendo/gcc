@@ -297,21 +297,18 @@ log_sequence_element (const sh_ams2::sequence_element& e,
     {
       const sh_ams2::reg_use& ru = (const sh_ams2::reg_use&)e;
       log_msg ("\n  use ");
+      log_rtx (ru.reg ());
       if (ru.reg_ref ())
-        log_rtx (*ru.reg_ref ());
-      else
-        log_rtx (ru.reg ());
-      log_msg ("\n  effective addr:   ");
+        {
+          log_msg ("in expr\n");
+          log_rtx (*ru.reg_ref ());
+        }
 
+      log_msg ("\n  effective addr:   ");
       if (ru.effective_addr ().is_invalid ())
         log_msg ("unknown");
       else
         log_addr_expr (ru.effective_addr ());
-      if (ru.reg_ref ())
-        {
-          log_msg ("\n  in insn\n");
-          log_insn (ru.insn ());
-        }
       if (!ru.optimization_enabled ())
         log_msg ("\n  (won't be optimized)");
     }
@@ -470,6 +467,13 @@ expand_minus (rtx a, rtx b)
     return a;
 
   return expand_binop (Pmode, sub_optab, a, b, NULL, false, OPTAB_LIB_WIDEN);
+}
+
+template <typename T>
+bool
+set_contains (std::set<T> s, T el)
+{
+  return s.find (el) != s.end ();
 }
 
 } // anonymous namespace
@@ -845,6 +849,9 @@ sh_ams2::sequence_element::used_by_unoptimizable_el (void) const
       if ((*it)->type () == type_reg_use &&
           (!((reg_use*)*it)->optimization_enabled ()
            || ((reg_use*)*it)->effective_addr ().is_invalid ()))
+        return true;
+      if ((*it)->type () == type_reg_mod &&
+          ((reg_mod*)*it)->effective_addr ().is_invalid ())
         return true;
     }
   return false;
@@ -1340,6 +1347,13 @@ sh_ams2::sequence::split_2 (split_sequence_info& seq_info,
             seq_info.add_reg (x);
         }
     }
+}
+
+sh_ams2::sequence::~sequence (void)
+{
+  for (sequence_iterator els = elements ().begin ();
+       els != elements ().end (); ++els)
+      (*els)->sequences ().erase (this);
 }
 
 // Add a reg mod for every insn that modifies an address register.
@@ -2321,7 +2335,7 @@ sh_ams2::sequence::update_insn_stream (void)
           if ((*els)->is_mem_access ())
             {
               mem_access* m = (mem_access*)*els;
-              if (m->optimization_enabled ())
+              if (!m->optimization_enabled ())
                 {
                   log_msg ("mem access didn't get optimized, skipping\n");
                   continue;
@@ -2356,7 +2370,7 @@ sh_ams2::sequence::update_insn_stream (void)
           else if ((*els)->type () == type_reg_use)
             {
               reg_use* ru = (reg_use*)*els;
-              if (ru->optimization_enabled ())
+              if (!ru->optimization_enabled ())
                 {
                   log_msg ("reg-use didn't get optimized, skipping\n");
                   continue;
@@ -2532,6 +2546,8 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el,
                                    sh_ams2::sequence_iterator insert_before)
 {
   sequence_iterator iter = elements ().insert (insert_before, el);
+
+  el->sequences ().insert (this);
 
   // Update the insn -> element map.
   if (el->insn ())
@@ -3298,7 +3314,10 @@ sh_ams2::mem_load::replace_addr (const sh_ams2::addr_expr& new_addr)
   // validate_change might invoke the backend's 'legitimize_address' which
   // can produce additional insns before the changed insn.  must capture those
   // insns, too.  see also sh_ams::access::set_insn_mem_rtx
-  return validate_change (insn (), m_mem_ref, new_addr.to_rtx (), false);
+  return validate_change (insn (), m_mem_ref,
+                          replace_equiv_address (*m_mem_ref,
+                                                 new_addr.to_rtx ()),
+                          false);
 }
 
 bool
@@ -3322,7 +3341,10 @@ sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr)
   // validate_change might invoke the backend's 'legitimize_address' which
   // can produce additional insns before the changed insn.  must capture those
   // insns, too.  see also sh_ams::access::set_insn_mem_rtx
-  return validate_change (insn (), m_mem_ref, new_addr.to_rtx (), false);
+  return validate_change (insn (), m_mem_ref,
+                          replace_equiv_address (*m_mem_ref,
+                                                 new_addr.to_rtx ()),
+                          false);
 }
 
 bool
@@ -3360,8 +3382,11 @@ sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
   rtx new_rtx = new_addr.to_rtx ();
   for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
        it != m_mem_refs.end (); ++it)
-    if (!validate_change (insn (), *it, new_rtx, false))
-      return false;
+    {
+      if (!validate_change (insn (), *it, replace_equiv_address (**it, new_rtx),
+                            false))
+        return false;
+    }
   return true;
 }
 
@@ -3896,7 +3921,7 @@ sh_ams2::execute (function* fun)
         ++it;
     }
 
-  std::vector<sequence*> updated_seqs;
+  std::set<sequence*> seqs_to_skip;
   log_msg ("\nprocessing split sequences\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
        it != sequences.end (); ++it)
@@ -3968,27 +3993,90 @@ sh_ams2::execute (function* fun)
 		   new_cost, original_cost);
 
 	  if (m_options.check_original_cost)
-            log_msg ("  not modifying\n");
+            {
+              log_msg ("  not modifying\n");
+              seqs_to_skip.insert (&seq);
+            }
 	  else
 	    log_msg ("  modifying anyway\n");
 	}
-      if (new_cost < original_cost || !m_options.check_original_cost)
-        updated_seqs.push_back (&seq);
     }
 
-  // Free all unused reg-mods.
+  log_msg ("\nremoving unused reg-mods\n");
   for (std::vector<reg_mod*>::iterator it = original_reg_mods.begin ();
        it != original_reg_mods.end (); ++it)
     {
-      if ((*it)->insn () != NULL && (*it)->dependent_els ().empty ())
-        delete *it;
+      if ((*it)->insn () == NULL || !(*it)->dependent_els ().empty ())
+        continue;
+
+      log_sequence_element (**it);
+      log_msg ("\n");
+
+      // Keep the reg-mod's insn if there's a sequence that doesn't get updated.
+      if (std::find_if ((*it)->sequences ().begin (),
+                        (*it)->sequences ().end (),
+                        std::bind1st (
+                          std::pointer_to_binary_function<std::set<sequence*>,
+                                                          sequence*, bool> (
+                            set_contains),
+                          seqs_to_skip))
+          != (*it)->sequences ().end ())
+        {
+          log_msg ("reg-mod is used by a sequence that won't be updated\n");
+          log_msg ("keeping insn\n");
+
+          // In this case, all other sequences that used this reg-mod
+          // can't be updated either.
+          for (std::set<sequence*>::iterator el_seqs
+                 = (*it)->sequences ().begin ();
+               el_seqs != (*it)->sequences ().end (); ++el_seqs)
+            {
+              if (seqs_to_skip.find (*el_seqs) == seqs_to_skip.end ())
+                {
+                  log_msg ("sequence %p won't be modified either\n",
+                           (const void*)*el_seqs);
+                  seqs_to_skip.insert (*el_seqs);
+                }
+            }
+        }
+      else if ((*it)->insn ())
+        {
+          // Also keep the insn if it has other sequence elements in it.
+          for (std::set<sequence*>::iterator seqs
+                 = (*it)->sequences ().begin ();
+               seqs != (*it)->sequences ().end (); ++seqs)
+            {
+              std::pair<insn_map::iterator, insn_map::iterator>
+                els_in_insn = (*seqs)->elements_in_insn ((*it)->insn ());
+              for (insn_map::iterator els = els_in_insn.first;
+                   els != els_in_insn.second; ++els)
+                {
+                  if (*els->second != *it
+                      // For unspecified reg-uses it doesn't matter
+                      // whether the insn exists, so we can remove it.
+                      && ((*els->second)->type () != type_reg_use
+                          || ((reg_use*)*els->second)->reg_ref () != NULL))
+                    {
+                      log_msg ("reg-mod's insn has other elements\n");
+                      log_msg ("keeping insn\n");
+                      goto next;
+                    }
+                }
+            }
+          set_insn_deleted ((*it)->insn ());
+        }
+    next:
+      continue;
     }
 
   log_msg ("\nupdating sequence insns\n");
-  for (std::vector<sequence*>::iterator it = updated_seqs.begin ();
-       it != updated_seqs.end (); ++it)
+  for (std::list<sequence>::iterator it = sequences.begin ();
+       it != sequences.end (); ++it)
     {
-      sequence& seq = **it;
+      sequence& seq = *it;
+      if (seqs_to_skip.find (&seq) != seqs_to_skip.end ())
+        continue;
+
       log_sequence (seq, false);
       log_msg ("\nupdating insns\n");
       seq.update_insn_stream ();
