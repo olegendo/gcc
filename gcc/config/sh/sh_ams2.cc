@@ -782,7 +782,7 @@ sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
   for (std::list<sequence_element*>::iterator it
          = m_dependencies.begin (); it != m_dependencies.end (); ++it)
     {
-      if (elements_equal (dep, *it))
+      if (*dep == **it)
         return;
     }
   m_dependencies.push_back (dep);
@@ -793,7 +793,7 @@ sh_ams2::sequence_element::remove_dependency (sh_ams2::sequence_element* dep)
   for (std::list<sequence_element*>::iterator it
          = m_dependencies.begin (); it != m_dependencies.end (); ++it)
     {
-      if (elements_equal (dep, *it))
+      if (*dep == **it)
         {
           m_dependencies.erase (it);
           return;
@@ -807,7 +807,7 @@ sh_ams2::sequence_element::add_dependent_el (sh_ams2::sequence_element* dep)
   for (std::list<sequence_element*>::iterator it
          = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
     {
-      if (elements_equal (dep, *it))
+      if (*dep == **it)
         return;
     }
   m_dependent_els.push_back (dep);
@@ -818,7 +818,7 @@ sh_ams2::sequence_element::remove_dependent_el (sh_ams2::sequence_element* dep)
   for (std::list<sequence_element*>::iterator it
          = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
     {
-      if (elements_equal (dep, *it))
+      if (*dep == **it)
         {
           m_dependent_els.erase (it);
           return;
@@ -1138,8 +1138,8 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
     }
 
   // Sort the shared terms by their score.
-  // FIXME: use vector::reserve
   std::vector<shared_term*> sorted_terms;
+  sorted_terms.reserve (shared_terms.size ());
   for (shared_term_map::iterator it = shared_terms.begin ();
        it != shared_terms.end (); ++it)
       sorted_terms.push_back (&(it->second));
@@ -1171,11 +1171,6 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
           element_new_seqs[*el] = term.new_seq ();
         }
     }
-
-// FIXME: is that needed?  it's not in a loop and the variables are not used
-// anymore after the .clear.
-  shared_terms.clear ();
-  sorted_terms.clear ();
 
   // Add each mem access and reg use from the original sequence to the
   // appropriate new sequence based on ELEMENT_NEW_SEQS.  Also add the
@@ -2521,7 +2516,7 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
       for (sequence_iterator els = elements ().begin ();
            els != elements ().end () && !(*els)->insn (); ++els)
         {
-          if (elements_equal (el, *els))
+          if (*el == **els)
             {
               delete el;
               return els;
@@ -2545,7 +2540,7 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
       for (insn_map::iterator els = els_in_insn.first;
            els != els_in_insn.second; ++els)
         {
-          if (elements_equal (el, *els->second))
+          if (*el == **els->second)
             {
               delete el;
               return els->second;
@@ -3331,42 +3326,39 @@ sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
   return true;
 }
 
-// Check whether two sequence elements are duplicates.
-// FIXME: maybe specialize std::equal_to instead of this function...
-bool
-sh_ams2::elements_equal (const sequence_element* el1,
-                         const sequence_element* el2)
+bool sh_ams2::sequence_element::
+operator == (const sequence_element& other) const
 {
-  if (el1->type () != el2->type ())
+  if (type () != other.type ())
     return false;
 
-  if (el1->is_mem_access ())
+  if (is_mem_access ())
     {
-      const mem_access* m1 = (const mem_access*)el1;
-      const mem_access* m2 = (const mem_access*)el2;
-      return m1->effective_addr () == m2->effective_addr ()
-        && m1->current_addr_rtx () == m2->current_addr_rtx ()
-        && m1->current_addr () == m2->current_addr ();
+      const sh_ams2::mem_access& m1 = (const sh_ams2::mem_access&)*this;
+      const sh_ams2::mem_access& m2 = (const sh_ams2::mem_access&)other;
+      return m1.effective_addr () == m2.effective_addr ()
+        && m1.current_addr_rtx () == m2.current_addr_rtx ()
+        && m1.current_addr () == m2.current_addr ();
     }
 
-  if (el1->type () == type_reg_mod)
+  if (type () == sh_ams2::type_reg_mod)
     {
-      const reg_mod* rm1 = (const reg_mod*)el1;
-      const reg_mod* rm2 = (const reg_mod*)el2;
-      return regs_equal (rm1->reg (), rm2->reg ())
-        && rm1->value () == rm2->value ()
-        && rm1->current_addr () == rm2->current_addr ();
+      const sh_ams2::reg_mod& rm1 = (const sh_ams2::reg_mod&)*this;
+      const sh_ams2::reg_mod& rm2 = (const sh_ams2::reg_mod&)other;
+      return sh_ams2::regs_equal (rm1.reg (), rm2.reg ())
+        && rm1.value () == rm2.value ()
+        && rm1.current_addr () == rm2.current_addr ();
     }
 
-  if (el1->type () == type_reg_barrier)
-    return regs_equal (((const reg_barrier*)el1)->reg (),
-                       ((const reg_barrier*)el2)->reg ());
+  if (type () == sh_ams2::type_reg_barrier)
+    return sh_ams2::regs_equal (((const sh_ams2::reg_barrier&)(*this)).reg (),
+                                ((const sh_ams2::reg_barrier&)other).reg ());
 
-  if (el1->type () == type_reg_use)
+  if (type () == sh_ams2::type_reg_use)
     {
-      const reg_use* ru1 = (const reg_use*)el1;
-      const reg_use* ru2 = (const reg_use*)el2;
-      return regs_equal (ru1->reg (), ru2->reg ());
+      const sh_ams2::reg_use& ru1 = (const sh_ams2::reg_use&)*this;
+      const sh_ams2::reg_use& ru2 = (const sh_ams2::reg_use&)other;
+      return sh_ams2::regs_equal (ru1.reg (), ru2.reg ());
     }
 
   gcc_unreachable ();

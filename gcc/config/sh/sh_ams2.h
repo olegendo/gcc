@@ -559,6 +559,8 @@ public:
   public:
     virtual ~sequence_element (void) { }
 
+    bool operator == (const sequence_element& other) const;
+
     // Returns the type of the element.  Could also use RTTI for this.
     element_type type (void) const { return m_type; }
 
