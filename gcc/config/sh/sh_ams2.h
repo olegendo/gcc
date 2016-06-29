@@ -986,7 +986,8 @@ NOTE:
 
     typedef std::list<reg_mod*>::iterator iterator;
     typedef std::multimap<rtx, reg_mod*, cmp_by_regno> reg_map;
-    std::list<reg_mod*> get_relevant_addresses (const addr_expr& end_addr);
+    template <typename OutputIterator> void
+    get_relevant_addresses (const addr_expr& end_addr, OutputIterator out);
 
     void add (reg_mod* start_addr);
     void remove (reg_mod* start_addr);

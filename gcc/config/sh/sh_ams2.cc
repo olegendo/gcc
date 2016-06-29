@@ -891,7 +891,7 @@ sh_ams2::sequence_element::adjacent_dec (const sequence_element* first,
     return false;
 
   return distance_equals (first, second,
-                          -((constmem_access*)first)->access_size ());
+                          -((const mem_access*)first)->access_size ());
 }
 
 bool
@@ -991,16 +991,14 @@ private:
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
 // FIXME: Avoid copying the list elements over and over.
-// FIXME: use output iterator.
-std::list<sh_ams2::reg_mod*>
-sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr)
+template <typename OutputIterator> void
+sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr,
+                                                  OutputIterator out)
 {
-  std::list<reg_mod*> start_addrs;
-
   // Constant displacements can always be used as start addresses.
-  start_addrs.insert (start_addrs.end (),
-                      m_const_addresses.begin (),
-                      m_const_addresses.end ());
+  for (std::list<reg_mod*>::iterator it = m_const_addresses.begin ();
+       it != m_const_addresses.end (); ++it)
+    *out++ = *it;
 
   // Addresses containing registers might be used if they have a
   // register in common with the end address.
@@ -1009,16 +1007,14 @@ sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr)
     {
       matching_range_t r = m_reg_addresses.equal_range (end_addr.base_reg ());
       for (matching_range_t::first_type it = r.first; it != r.second; ++it)
-        start_addrs.push_back (it->second);
+        *out++ = it->second;
     }
   if (end_addr.has_index_reg ())
     {
       matching_range_t r = m_reg_addresses.equal_range (end_addr.index_reg ());
       for (matching_range_t::first_type it = r.first; it != r.second; ++it)
-        start_addrs.push_back (it->second);
+        *out++ = it->second;
     }
-
-  return start_addrs;
 }
 
 // Add START_ADDR to the list of available start addresses.
@@ -1806,8 +1802,9 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
   if ((*el)->type () == type_reg_use)
     acc_mode = GET_MODE (((reg_use*)*el)->reg ());
 
-  std::list<reg_mod*> start_addrs =
-    start_addresses ().get_relevant_addresses (end_addr);
+  std::list<reg_mod*> start_addrs;
+  start_addresses ().get_relevant_addresses (end_addr,
+                                             std::back_inserter (start_addrs));
   for (start_addr_list::iterator addrs = start_addrs.begin ();
        addrs != start_addrs.end (); ++addrs)
     {
@@ -2223,8 +2220,9 @@ sh_ams2::reg_mod* sh_ams2::sequence::
 find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
                          std::set<reg_mod*>& visited_reg_mods)
 {
-  std::list<reg_mod*> start_addrs =
-    start_addresses ().get_relevant_addresses (make_reg_addr (reg));
+  std::list<reg_mod*> start_addrs;
+  start_addresses ().get_relevant_addresses (make_reg_addr (reg),
+                                             std::back_inserter (start_addrs));
   reg_mod* found_addr = NULL;
 
   for (start_addr_list::iterator addrs = start_addrs.begin ();
