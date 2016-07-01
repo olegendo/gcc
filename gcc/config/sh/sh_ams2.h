@@ -1161,6 +1161,15 @@ NOTE:
                              std::set<reg_mod*>& used_reg_mods,
                              std::set<reg_mod*>& visited_reg_mods,
                              delegate& dlg);
+
+    reg_mod*
+    insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
+                     rtx curr_addr_rtx, const addr_expr& curr_addr,
+                     const addr_expr& effective_addr,
+                     sequence_iterator el, mod_tracker& tracker,
+                     std::set<reg_mod*>& used_reg_mods,
+                     std::set<reg_mod*>& visited_reg_mods, delegate& dlg);
+
     reg_mod* find_start_addr_for_reg (rtx reg,
                                       std::set<reg_mod*>& used_reg_mods,
                                       std::set<reg_mod*>& visited_reg_mods);

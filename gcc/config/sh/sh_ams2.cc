@@ -1973,11 +1973,10 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                          std::set<reg_mod*>& used_reg_mods,
                          std::set<reg_mod*>& visited_reg_mods, delegate& dlg)
 {
-  rtx new_reg = start_addr->reg ();
-  int cost = used_reg_mods.find (start_addr) != used_reg_mods.end ()
-             ? dlg.addr_reg_clone_cost (start_addr->reg (), *this, el)
-             : 0;
-  int prev_cost = 0;
+  int total_cost = 0;
+  int clone_cost = used_reg_mods.find (start_addr) != used_reg_mods.end ()
+                   ? dlg.addr_reg_clone_cost (start_addr->reg (), *this, el)
+                   : 0;
 
   // Canonicalize the start and end addresses by converting
   // addresses of the form base+disp into index*1+disp.
@@ -2033,36 +2032,6 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
       && GET_MODE (c_start_addr.index_reg ()) != acc_mode)
     return mod_addr_result (infinite_costs);
 
-// FIXME: get rid of this macro somehow.
-  #define insert_addr_mod(used_rm, curr_addr_rtx, \
-                          curr_addr, effective_addr) do \
-  { \
-    rtx addr_rtx = (curr_addr_rtx); \
-    c_start_addr = (effective_addr); \
-    if (used_reg_mods.find (used_rm) == used_reg_mods.end ()) \
-      { \
-        used_reg_mods.insert (used_rm); \
-        tracker.use_changed_reg_mods ().push_back (used_rm); \
-      } \
-    new_reg = gen_reg_rtx (acc_mode); \
-    reg_mod* new_addr = new reg_mod (NULL, new_reg, NULL, curr_addr, \
-                                     c_start_addr); \
-    sequence_iterator inserted_el = insert_element (new_addr, el); \
-    visited_reg_mods.insert (new_addr); \
-    new_addr->add_dependency (used_rm); \
-    used_rm->add_dependent_el (new_addr); \
-    if (used_rm != start_addr) \
-      { \
-        new_addr->add_dependency (start_addr); \
-        start_addr->add_dependent_el (new_addr); \
-      } \
-    tracker.inserted_reg_mods ().push_back (inserted_el); \
-    if (!REG_P (addr_rtx)) \
-      cost += dlg.addr_reg_mod_cost (new_reg, addr_rtx, *this, el); \
-    new_addr->set_cost (cost - prev_cost); \
-    prev_cost = cost; \
-    start_addr = new_addr; \
-  } while (0)
 
   // Add scaling.
   if (c_start_addr.has_index_reg ()
@@ -2082,13 +2051,21 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
 
       scale_t scale = sr.quot;
 
-      insert_addr_mod (start_addr,
-                       gen_rtx_MULT (acc_mode, start_addr->reg (),
-                                     GEN_INT (scale)),
-                       non_mod_addr (invalid_regno,
-                                     start_addr->reg (), scale, 0),
-                       non_mod_addr (invalid_regno, c_start_addr.index_reg (),
-                                     c_end_addr.scale (), 0));
+      start_addr = insert_addr_mod (start_addr, acc_mode,
+                                    gen_rtx_MULT (acc_mode, start_addr->reg (),
+                                                  GEN_INT (scale)),
+                                    non_mod_addr (invalid_regno,
+                                                  start_addr->reg (),
+                                                  scale, 0),
+                                    non_mod_addr (invalid_regno,
+                                                  c_start_addr.index_reg (),
+                                                  c_end_addr.scale (), 0),
+                                    el, tracker,
+                                    used_reg_mods, visited_reg_mods, dlg);
+      c_start_addr = start_addr->effective_addr ();
+      start_addr->adjust_cost (clone_cost);
+      clone_cost = 0;
+      total_cost += start_addr->cost ();
     }
 
   // Try subtracting regs.
@@ -2103,24 +2080,34 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                    used_reg_mods, visited_reg_mods);
       bool index_reg_used
         = used_reg_mods.find (index_reg_addr) != used_reg_mods.end ();
-      insert_addr_mod (index_reg_addr,
-                       gen_rtx_PLUS (acc_mode,
-                                     start_addr->reg (),
-                                     index_reg_addr->reg ()),
-                       non_mod_addr (start_addr->reg (),
-                                     index_reg_addr->reg (), -1, 0),
-                       non_mod_addr (c_start_addr.index_reg (),
-                                     c_end_addr.index_reg (),
-                                     -1, c_start_addr.disp ()));
+
+      reg_mod* new_addr
+        = insert_addr_mod (index_reg_addr, acc_mode,
+                           gen_rtx_PLUS (acc_mode, start_addr->reg (),
+                                         index_reg_addr->reg ()),
+                           non_mod_addr (start_addr->reg (),
+                                         index_reg_addr->reg (),
+                                         -1, 0),
+                           non_mod_addr (c_start_addr.index_reg (),
+                                         c_end_addr.index_reg (),
+                                         -1, c_start_addr.disp ()),
+                           el, tracker, used_reg_mods, visited_reg_mods, dlg);
+      new_addr->add_dependency (start_addr);
+      start_addr->add_dependent_el (new_addr);
+      start_addr = new_addr;
+      c_start_addr = start_addr->effective_addr ();
+      start_addr->adjust_cost (clone_cost);
+      clone_cost = 0;
+
       if (index_reg_used)
         {
           // Take into account the cloning costs of the index reg.
           int extra_cost = dlg.addr_reg_clone_cost (index_reg_addr->reg (),
                                                     *this, el);
-          start_addr->set_cost (start_addr->cost () + extra_cost);
-          cost += extra_cost;
-          prev_cost = cost;
+          start_addr->adjust_cost (extra_cost);
         }
+
+      total_cost += start_addr->cost ();
     }
 
   // Add missing base reg.
@@ -2131,25 +2118,34 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                    used_reg_mods, visited_reg_mods);
       bool base_reg_used
         = used_reg_mods.find (base_reg_addr) != used_reg_mods.end ();
-      insert_addr_mod (base_reg_addr,
-                       gen_rtx_PLUS (acc_mode, base_reg_addr->reg (),
-                                     start_addr->reg ()),
-                       non_mod_addr (base_reg_addr->reg (),
-                                     start_addr->reg (), 1, 0),
-                       non_mod_addr (c_end_addr.base_reg (),
-                                     c_start_addr.index_reg (),
-                                     c_start_addr.scale (),
-                                     c_start_addr.disp ()));
+
+      reg_mod* new_addr
+        = insert_addr_mod (base_reg_addr, acc_mode,
+                           gen_rtx_PLUS (acc_mode, base_reg_addr->reg (),
+                                         start_addr->reg ()),
+                           non_mod_addr (base_reg_addr->reg (),
+                                         start_addr->reg (), 1, 0),
+                           non_mod_addr (c_end_addr.base_reg (),
+                                         c_start_addr.index_reg (),
+                                         c_start_addr.scale (),
+                                         c_start_addr.disp ()),
+                           el, tracker, used_reg_mods, visited_reg_mods, dlg);
+      new_addr->add_dependency (start_addr);
+      start_addr->add_dependent_el (new_addr);
+      start_addr = new_addr;
+      c_start_addr = start_addr->effective_addr ();
+      start_addr->adjust_cost (clone_cost);
+      clone_cost = 0;
 
       if (base_reg_used)
         {
           // Take into account the cloning costs of the base reg.
           int extra_cost = dlg.addr_reg_clone_cost (base_reg_addr->reg (),
                                                     *this, el);
-          start_addr->set_cost (start_addr->cost () + extra_cost);
-          cost += extra_cost;
-          prev_cost = cost;
+          start_addr->adjust_cost (extra_cost);
         }
+
+      total_cost += start_addr->cost ();
     }
 
   // Set auto-inc/dec displacement that's added to the base reg.
@@ -2176,15 +2172,21 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
       if (std::abs (alt_disp) < std::abs (disp))
         disp = alt_disp;
 
-      insert_addr_mod (start_addr,
-                       gen_rtx_PLUS (acc_mode, start_addr->reg (),
-                                     GEN_INT (disp)),
-                       non_mod_addr (start_addr->reg (),
-                                     invalid_regno, 1, disp),
-                       non_mod_addr (c_end_addr.base_reg (),
-                                     c_start_addr.index_reg (),
-                                     c_start_addr.scale (),
-                                     c_start_addr.disp () + disp));
+      start_addr = insert_addr_mod (start_addr, acc_mode,
+                                    gen_rtx_PLUS (acc_mode, start_addr->reg (),
+                                                  GEN_INT (disp)),
+                                    non_mod_addr (start_addr->reg (),
+                                                  invalid_regno, 1, disp),
+                                    non_mod_addr (c_end_addr.base_reg (),
+                                                  c_start_addr.index_reg (),
+                                                  c_start_addr.scale (),
+                                                  c_start_addr.disp () + disp),
+                                    el, tracker,
+                                    used_reg_mods, visited_reg_mods, dlg);
+      c_start_addr = start_addr->effective_addr ();
+      start_addr->adjust_cost (clone_cost);
+      clone_cost = 0;
+      total_cost += start_addr->cost ();
     }
 
   // For auto-mod accesses, copy the base reg into a new pseudo that will
@@ -2195,17 +2197,57 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
   if (addr_type != non_mod
       || (c_end_addr.has_no_base_reg () && c_end_addr.has_no_index_reg ()))
     {
-      rtx pre_mod_reg = new_reg;
-      insert_addr_mod (start_addr,
-                       pre_mod_reg,
-                       make_reg_addr (pre_mod_reg),
-                       non_mod_addr (c_end_addr.base_reg (),
-                                     c_start_addr.index_reg (),
-                                     c_start_addr.scale (),
-                                     c_start_addr.disp () + auto_mod_disp));
+      rtx pre_mod_reg = start_addr->reg ();
+      start_addr
+        = insert_addr_mod (start_addr, acc_mode,
+                           pre_mod_reg,
+                           make_reg_addr (pre_mod_reg),
+                           non_mod_addr (c_end_addr.base_reg (),
+                                         c_start_addr.index_reg (),
+                                         c_start_addr.scale (),
+                                         c_start_addr.disp () + auto_mod_disp),
+                           el, tracker, used_reg_mods, visited_reg_mods, dlg);
+      c_start_addr = start_addr->effective_addr ();
+      start_addr->adjust_cost (clone_cost);
+      clone_cost = 0;
+      total_cost += start_addr->cost ();
+      log_msg ("\nnew reg-mod:\n");
+      log_sequence_element (*start_addr);
     }
 
-  return mod_addr_result (cost, start_addr, c_start_addr.disp ());
+  return mod_addr_result (total_cost, start_addr, c_start_addr.disp ());
+}
+
+// Internal function of try_insert_address_mods.  Inserts a reg-mod with
+// mode and addresses specified by ACC_MODE, CURR_ADDR_RTX, CURR_ADDR and
+// EFFECTIVE_ADDR before EL in the sequence.  This reg-mod will depend
+// on USED_RM.
+sh_ams2::reg_mod* sh_ams2::sequence::
+insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
+                 rtx curr_addr_rtx, const addr_expr& curr_addr,
+                 const addr_expr& effective_addr,
+                 sequence_iterator el, mod_tracker& tracker,
+                 std::set<reg_mod*>& used_reg_mods,
+                 std::set<reg_mod*>& visited_reg_mods, delegate& dlg)
+{
+  if (used_reg_mods.find (used_rm) == used_reg_mods.end ())
+    {
+      used_reg_mods.insert (used_rm);
+      if (REGNO (used_rm->reg ()) == 222)
+        log_msg ("using r222\n");
+      tracker.use_changed_reg_mods ().push_back (used_rm);
+    }
+  rtx new_reg = gen_reg_rtx (acc_mode);
+  reg_mod* new_addr = new reg_mod (NULL, new_reg, NULL, curr_addr,
+                                   effective_addr);
+  sequence_iterator inserted_el = insert_element (new_addr, el);
+  visited_reg_mods.insert (new_addr);
+  new_addr->add_dependency (used_rm);
+  used_rm->add_dependent_el (new_addr);
+  tracker.inserted_reg_mods ().push_back (inserted_el);
+  new_addr->set_cost (dlg.addr_reg_mod_cost (new_reg, curr_addr_rtx,
+                                             *this, el));
+  return new_addr;
 }
 
 // Find a starting address whose effective address is the single base reg REG.
