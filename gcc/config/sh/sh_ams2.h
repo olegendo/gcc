@@ -663,6 +663,15 @@ NOTE:
     static bool not_adjacent_dec (const sequence_element* first,
                                   const sequence_element* second);
 
+    // Update the insn that holds this element or generate a new insn
+    // that corresponds to this element.  INSN_SEQUENCE_STARTED indicates
+    // whether we're in the middle of an insn sequence.
+    // Return the updated value of INSN_SEQUENCE_STARTED.
+    virtual bool generate_new_insns (bool insn_sequence_started)
+    {
+      return insn_sequence_started;
+    }
+
   protected:
     sequence_element (element_type t, rtx_insn* i)
       : m_type (t), m_cost (0), m_insn (i),
@@ -753,6 +762,8 @@ NOTE:
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
+
+    virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const
     {
@@ -863,6 +874,8 @@ NOTE:
     const addr_expr& current_addr (void) const { return m_current_addr; }
     void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
+    virtual bool generate_new_insns (bool insn_sequence_started);
+
     virtual bool uses_reg (rtx r) const
     {
       return (!current_addr ().is_invalid ()
@@ -948,6 +961,8 @@ NOTE:
     // expression. If NULL, the reg use is unspecified.
     const rtx* reg_ref (void) const { return m_reg_ref; }
     bool set_reg_ref (rtx new_reg);
+
+    virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
 
