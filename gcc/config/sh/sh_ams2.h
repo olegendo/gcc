@@ -705,6 +705,8 @@ NOTE:
   public:
     virtual ~mem_access (void) { }
 
+    static bool allow_new_insns;
+
     virtual const adjacent_chain_info&
     inc_chain (void) const { return m_inc_chain; }
 

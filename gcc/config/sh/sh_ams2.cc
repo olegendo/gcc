@@ -561,6 +561,7 @@ sh_ams2::options::options (void)
   cse = false;
   cse2 = false;
   gcse = false;
+  allow_mem_addr_change_new_insns = true;
   base_lookahead_count = 1;
 }
 
@@ -605,6 +606,7 @@ sh_ams2::options::options (const std::string& str)
   get_int_opt (disable_alt_validation);
   get_int_opt (cse);
   get_int_opt (cse2);
+  get_int_opt (allow_mem_addr_change_new_insns);
   get_int_opt (gcse);
 
 #undef get_int_opt
@@ -902,6 +904,7 @@ sh_ams2::sequence_element::not_adjacent_dec (const sequence_element* first,
 }
 
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
+bool sh_ams2::mem_access::allow_new_insns = true;
 
 // Used to store information about newly created sequences during
 // sequence splitting.
@@ -3083,6 +3086,7 @@ sh_ams2::mem_access::generate_new_insns (bool insn_sequence_started)
   // multi-mem insns.
   remove_incdec_notes (insn ());
 
+  gcc_assert (!insn_sequence_started);
   if (!replace_addr (current_addr ()))
     {
       log_msg ("failed to replace mem rtx with new address\n");
@@ -3293,14 +3297,26 @@ sh_ams2::mem_load::try_replace_addr (const sh_ams2::addr_expr& new_addr)
 bool
 sh_ams2::mem_load::replace_addr (const sh_ams2::addr_expr& new_addr)
 {
-  // FIXME:
-  // validate_change might invoke the backend's 'legitimize_address' which
-  // can produce additional insns before the changed insn.  must capture those
-  // insns, too.  see also sh_ams::access::set_insn_mem_rtx
-  return validate_change (insn (), m_mem_ref,
-                          replace_equiv_address (*m_mem_ref,
-                                                 new_addr.to_rtx ()),
-                          false);
+  start_sequence ();
+  bool r = validate_change (insn (), m_mem_ref,
+                            replace_equiv_address (*m_mem_ref,
+                                                   new_addr.to_rtx ()),
+                            false);
+
+  rtx_insn* new_insns = get_insns ();
+  end_sequence ();
+
+  if (r && !mem_access::allow_new_insns && new_insns != NULL)
+    {
+      log_msg ("validate_change produced new insns: \n");
+      log_rtx (new_insns);
+      abort ();
+    }
+
+  if (r && new_insns != NULL)
+    emit_insn_before (new_insns, insn ());
+
+  return r;
 }
 
 bool
@@ -3320,14 +3336,26 @@ sh_ams2::mem_store::try_replace_addr (const sh_ams2::addr_expr& new_addr)
 bool
 sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr)
 {
-  // FIXME:
-  // validate_change might invoke the backend's 'legitimize_address' which
-  // can produce additional insns before the changed insn.  must capture those
-  // insns, too.  see also sh_ams::access::set_insn_mem_rtx
-  return validate_change (insn (), m_mem_ref,
-                          replace_equiv_address (*m_mem_ref,
-                                                 new_addr.to_rtx ()),
-                          false);
+  start_sequence ();
+  bool r = validate_change (insn (), m_mem_ref,
+                            replace_equiv_address (*m_mem_ref,
+                                                   new_addr.to_rtx ()),
+                            false);
+
+  rtx_insn* new_insns = get_insns ();
+  end_sequence ();
+
+  if (r && !mem_access::allow_new_insns && new_insns != NULL)
+    {
+      log_msg ("validate_change produced new insns: \n");
+      log_rtx (new_insns);
+      abort ();
+    }
+
+  if (r && new_insns != NULL)
+    emit_insn_before (new_insns, insn ());
+
+  return r;
 }
 
 bool
@@ -3354,11 +3382,6 @@ bool
 sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
 {
   // FIXME:
-  // validate_change might invoke the backend's 'legitimize_address' which
-  // can produce additional insns before the changed insn.  must capture those
-  // insns, too.  see also sh_ams::access::set_insn_mem_rtx
-
-  // FIXME:
   // this might leave the insn in some intermediate state if e.g. the first
   // validate_change works but the second fails.  should use a change group
   // or something like that and rollback all changes if one fails.
@@ -3366,8 +3389,24 @@ sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
   for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
        it != m_mem_refs.end (); ++it)
     {
-      if (!validate_change (insn (), *it, replace_equiv_address (**it, new_rtx),
-                            false))
+      start_sequence ();
+      bool r = !validate_change (insn (),
+                                 *it, replace_equiv_address (**it, new_rtx),
+                                 false);
+      rtx_insn* new_insns = get_insns ();
+      end_sequence ();
+
+      if (r && !mem_access::allow_new_insns && new_insns != NULL)
+        {
+          log_msg ("validate_change produced new insns: \n");
+          log_rtx (new_insns);
+          abort ();
+        }
+
+      if (r && new_insns != NULL)
+        emit_insn_before (new_insns, insn ());
+
+      if (!r)
         return false;
     }
   return true;
@@ -3811,6 +3850,7 @@ sh_ams2::execute (function* fun)
   log_msg ("sh-ams pass (WIP)\n");
   log_options (m_options);
   log_msg ("\n\n");
+  mem_access::allow_new_insns = m_options.allow_mem_addr_change_new_insns;
 
 //  df_set_flags (DF_DEFER_INSN_RESCAN); // needed?
 
