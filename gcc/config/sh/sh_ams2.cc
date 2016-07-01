@@ -1461,6 +1461,7 @@ public:
     : m_seq (seq), m_used_reg_mods (used_reg_mods),
       m_visited_reg_mods (visited_reg_mods)
   {
+    m_dependent_els.reserve (8);
     m_inserted_reg_mods.reserve (8);
     m_use_changed_reg_mods.reserve (4);
     m_visited_changed_reg_mods.reserve (4);
@@ -1479,6 +1480,15 @@ public:
         delete **it;
       }
     m_inserted_reg_mods.clear ();
+
+    for (std::vector<std::pair<sequence_element*, sequence_element*> >::
+         reverse_iterator it = m_dependent_els.rbegin ();
+         it != m_dependent_els.rend (); ++it)
+      {
+        it->second->remove_dependency (it->first);
+        it->first->remove_dependent_el (it->second);
+      }
+    m_dependent_els.clear ();
 
     for (std::vector<reg_mod*>::iterator
            it = m_use_changed_reg_mods.begin ();
@@ -1506,6 +1516,10 @@ public:
     m_addr_changed_els.clear ();
   }
 
+  // List of sequence elements that got new dependencies.
+  std::vector<std::pair<sequence_element*, sequence_element*> >&
+  dependent_els (void) { return m_dependent_els; }
+
   // List of reg-mods that were inserted into the sequence.
   std::vector<sequence_iterator>&
   inserted_reg_mods (void) { return m_inserted_reg_mods; }
@@ -1525,6 +1539,7 @@ public:
 
 private:
   sequence& m_seq;
+  std::vector<std::pair<sequence_element*, sequence_element*> > m_dependent_els;
   std::vector<sequence_iterator> m_inserted_reg_mods;
   std::vector<reg_mod*> m_use_changed_reg_mods, m_visited_changed_reg_mods;
   std::vector<std::pair <sequence_element*, addr_expr> > m_addr_changed_els;
@@ -1896,6 +1911,8 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
 
   (*el)->add_dependency (base_insert_result.final_addr);
   base_insert_result.final_addr->add_dependent_el (*el);
+  tracker.dependent_els ()
+    .push_back (std::make_pair (base_insert_result.final_addr, *el));
 
   addr_expr new_addr;
   if (alt.address ().has_no_index_reg ())
@@ -1917,6 +1934,8 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
 
       (*el)->add_dependency (index_insert_result.final_addr);
       index_insert_result.final_addr->add_dependent_el (*el);
+      tracker.dependent_els ()
+        .push_back (std::make_pair (index_insert_result.final_addr, *el));
 
       new_addr = non_mod_addr (base_insert_result.final_addr->reg (),
                                index_insert_result.final_addr->reg (), 1, 0);
@@ -2097,6 +2116,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                            el, tracker, used_reg_mods, visited_reg_mods, dlg);
       new_addr->add_dependency (start_addr);
       start_addr->add_dependent_el (new_addr);
+      tracker.dependent_els ().push_back (std::make_pair (start_addr,
+                                                          new_addr));
       start_addr = new_addr;
       c_start_addr = start_addr->effective_addr ();
       start_addr->adjust_cost (clone_cost);
@@ -2135,6 +2156,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                            el, tracker, used_reg_mods, visited_reg_mods, dlg);
       new_addr->add_dependency (start_addr);
       start_addr->add_dependent_el (new_addr);
+      tracker.dependent_els ().push_back (std::make_pair (start_addr,
+                                                          new_addr));
       start_addr = new_addr;
       c_start_addr = start_addr->effective_addr ();
       start_addr->adjust_cost (clone_cost);
@@ -2248,6 +2271,7 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
   new_addr->add_dependency (used_rm);
   used_rm->add_dependent_el (new_addr);
   tracker.inserted_reg_mods ().push_back (inserted_el);
+  tracker.dependent_els ().push_back (std::make_pair (used_rm, new_addr));
   new_addr->set_cost (dlg.addr_reg_mod_cost (new_reg, curr_addr_rtx,
                                              *this, el));
   return new_addr;
