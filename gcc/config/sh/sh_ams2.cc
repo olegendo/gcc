@@ -1309,6 +1309,64 @@ sh_ams2::sequence::~sequence (void)
       (*els)->sequences ().erase (this);
 }
 
+// Find all mem accesses in the rtx X of the insn I and add them to the
+// sequence.  TYPE indicates the type of the next mem that we find
+// (i.e. mem_load, mem_store or mem_operand).
+// FIXME: Handle mem_operands properly.
+void
+sh_ams2::sequence::find_mem_accesses (rtx_insn* i, rtx& x, element_type type)
+{
+  static_vector<rtx*, 16> v;
+  switch (GET_CODE (x))
+    {
+    case MEM:
+      mem_access* acc;
+
+      switch (type)
+        {
+        case type_mem_load:
+          acc = new mem_load (i, GET_MODE (x), &x);
+          break;
+        case type_mem_store:
+          acc = new mem_store (i, GET_MODE (x), &x);
+          break;
+        case type_mem_operand:
+          v.push_back (&x);
+          acc = new mem_operand (i, GET_MODE (x), v);
+          break;
+        default:
+          gcc_unreachable ();
+        }
+      acc->set_current_addr_rtx (XEXP (x, 0));
+      rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x));
+      acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
+      insert_element (acc, elements ().end ());
+      break;
+
+    case PARALLEL:
+      for (int j = 0; j < XVECLEN (x, 0); j++)
+        find_mem_accesses (i, XVECEXP (x, 0, j), type);
+      break;
+
+    case SET:
+      find_mem_accesses (i, SET_DEST (x), type_mem_store);
+      find_mem_accesses (i, SET_SRC (x), type_mem_load);
+      break;
+
+    case CALL:
+      find_mem_accesses (i, XEXP (x, 0), type_mem_load);
+      break;
+
+    default:
+      if (UNARY_P (x) || ARITHMETIC_P (x))
+        {
+          for (int j = 0; j < GET_RTX_LENGTH (GET_CODE (x)); j++)
+            find_mem_accesses (i, XEXP (x, j), type);
+        }
+      break;
+    }
+}
+
 // Add a reg mod for every insn that modifies an address register.
 void
 sh_ams2::sequence::find_addr_reg_mods (void)
@@ -3809,65 +3867,6 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
   return make_invalid_addr ();
 }
 
-// Find the memory accesses in the rtx X of the insn I and add them to OUT.
-// TYPE indicates the type of the next mem that we find (i.e. mem_load,
-// mem_store or mem_operand).
-// FIXME: Handle mem_operands properly.
-template <typename OutputIterator> void
-sh_ams2::find_mem_accesses (rtx_insn* i, rtx& x, OutputIterator out,
-                            sh_ams2::element_type type)
-{
-  static_vector<rtx*, 16> v;
-  switch (GET_CODE (x))
-    {
-    case MEM:
-      mem_access* acc;
-
-      switch (type)
-        {
-        case type_mem_load:
-          acc = new mem_load (i, GET_MODE (x), &x);
-          break;
-        case type_mem_store:
-          acc = new mem_store (i, GET_MODE (x), &x);
-          break;
-        case type_mem_operand:
-          v.push_back (&x);
-          acc = new mem_operand (i, GET_MODE (x), v);
-          break;
-        default:
-          gcc_unreachable ();
-        }
-      acc->set_current_addr_rtx (XEXP (x, 0));
-      rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x));
-      acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
-      *out++ = acc;
-      break;
-
-    case PARALLEL:
-      for (int j = 0; j < XVECLEN (x, 0); j++)
-        find_mem_accesses (i, XVECEXP (x, 0, j), out, type);
-      break;
-
-    case SET:
-      find_mem_accesses (i, SET_DEST (x), out, type_mem_store);
-      find_mem_accesses (i, SET_SRC (x), out, type_mem_load);
-      break;
-
-    case CALL:
-      find_mem_accesses (i, XEXP (x, 0), out, type_mem_load);
-      break;
-
-    default:
-      if (UNARY_P (x) || ARITHMETIC_P (x))
-        {
-          for (int j = 0; j < GET_RTX_LENGTH (GET_CODE (x)); j++)
-            find_mem_accesses (i, XEXP (x, j), out, type);
-        }
-      break;
-    }
-}
-
 unsigned int
 sh_ams2::execute (function* fun)
 {
@@ -3876,13 +3875,20 @@ sh_ams2::execute (function* fun)
   log_msg ("\n\n");
   mem_access::allow_new_insns = m_options.allow_mem_addr_change_new_insns;
 
+  typedef element_type_matches<type_mem_load, type_mem_store,
+                               type_mem_operand> mem_match;
+  typedef filter_iterator<sequence_iterator, mem_match> mem_acc_iter;
+  typedef element_type_matches<type_reg_mod> reg_mod_match;
+  typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
+  typedef element_type_matches<type_reg_use> reg_use_match;
+  typedef filter_iterator<sequence_iterator, reg_use_match> reg_use_iter;
+
 //  df_set_flags (DF_DEFER_INSN_RESCAN); // needed?
 
   df_note_add_problem ();
   df_analyze ();
 
   std::list<sequence> sequences;
-  std::vector<mem_access*> mems;
 
   log_msg ("extracting access sequences\n");
   basic_block bb;
@@ -3902,20 +3908,17 @@ sh_ams2::execute (function* fun)
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
             continue;
 
-          // Search for memory accesses inside the current insn
-          // and add them to the address sequence.
-          mems.clear ();
-          find_mem_accesses (i, PATTERN (i), std::back_inserter (mems));
-
-          for (std::vector<mem_access*>::iterator m = mems.begin ();
-               m != mems.end (); ++m)
-            {
-              seq.insert_element (*m, seq.elements ().end ());
-              (*m)->set_effective_addr (rtx_to_addr_expr (
-                                        (*m)->current_addr_rtx (),
-                                        (*m)->mach_mode (), &seq, (*m)));
-            }
+          seq.find_mem_accesses (i, PATTERN (i));
          }
+
+      for (mem_acc_iter m = seq.begin<mem_match> (),
+             m_end = seq.end<mem_match> (); m != m_end; ++m)
+        {
+          (*m)->set_effective_addr (rtx_to_addr_expr (
+                                      ((mem_access*)*m)->current_addr_rtx (),
+                                      ((mem_access*)*m)->mach_mode (),
+                                      &seq, *m));
+        }
     }
 
   std::vector<reg_mod*> original_reg_mods;
@@ -3935,8 +3938,6 @@ sh_ams2::execute (function* fun)
       seq.find_addr_reg_mods ();
 
       // Add the sequence's reg-mods to the original reg-mod list.
-      typedef element_type_matches<type_reg_mod> reg_mod_match;
-      typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
       for (reg_mod_iter rm = seq.begin<reg_mod_match> (),
              rm_end = seq.end<reg_mod_match> (); rm != rm_end; ++rm)
         original_reg_mods.push_back ((reg_mod*)*rm);
@@ -3981,15 +3982,11 @@ sh_ams2::execute (function* fun)
           continue;
         }
 
-      typedef element_type_matches<type_mem_load, type_mem_store,
-                                   type_mem_operand> mem_match;
       if (seq.begin<mem_match> () == seq.end<mem_match> ())
         {
           log_msg ("skipping sequence as it contains no memory accesses\n");
 
           // Mark all reg-uses of this sequence unoptimizable.
-          typedef element_type_matches<type_reg_use> reg_use_match;
-          typedef filter_iterator<sequence_iterator, reg_use_match> reg_use_iter;
           for (reg_use_iter ru = seq.begin<reg_use_match> (),
                  ru_end = seq.end<reg_use_match> (); ru != ru_end; ++ru)
             (*ru)->set_optimization_enabled (false);

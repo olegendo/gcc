@@ -1040,6 +1040,12 @@ NOTE:
 
     ~sequence (void);
 
+    // Find all mem accesses in the rtx X of the insn I and add them to the
+    // sequence.  TYPE indicates the type of the next mem that we find
+    // (i.e. mem_load, mem_store or mem_operand).
+    void find_mem_accesses (rtx_insn* i, rtx& x,
+                            element_type type = type_mem_load);
+
     // Add a reg mod for every insn that modifies an address register.
     void find_addr_reg_mods (void);
 
@@ -1277,13 +1283,6 @@ NOTE:
   {
     return rtx_to_addr_expr(x, Pmode, NULL, NULL);
   }
-
-  // Find the memory accesses in the rtx X of the insn I and add them to OUT.
-  // TYPE indicates the type of the next mem that we find (i.e. mem_load,
-  // mem_store or mem_operand).
-  template <typename OutputIterator>
-  static void find_mem_accesses (rtx_insn* i, rtx& x, OutputIterator out,
-                                 element_type type = type_mem_load);
 
   void set_options (const options& opt);
 
