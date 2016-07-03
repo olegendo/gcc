@@ -1337,8 +1337,13 @@ sh_ams2::sequence::find_mem_accesses (rtx_insn* i, rtx& x, element_type type)
         default:
           gcc_unreachable ();
         }
+
+      // FIXME: set_current_addr_rtx is used only once, which is here.
+      // it should go into the constructors.  either by explicitly passing
+      // XEXP (x, 0) as an argument to the constructor, or by using XEXP (x, 0)
+      // on x inside the constructor.
       acc->set_current_addr_rtx (XEXP (x, 0));
-      rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x));
+      rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)); // FIXME: looks like not needed..
       acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
       insert_element (acc, elements ().end ());
       break;
@@ -2525,6 +2530,10 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el,
 // is determined by its insn and no duplicates are allowed.
 // If the element has a duplicate already in the sequence, return an
 // iterator to the duplicate and delete the original one.
+
+// FIXME: this function name is very much misleading and makes it difficult
+// to comprehend the code that uses it.  it should be something like
+// "insert_or_replace" or "insert_unique" or something like that.
 sh_ams2::sequence_iterator
 sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
 {
@@ -2540,6 +2549,15 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
         {
           if (*el == **els)
             {
+		// FIXME: can't really do that.. what if the element has been
+		// added to another sequence?  that's will result in
+		// use-after-free bugs.
+		// use std::tr1::shared_ptr or ref_counting_ptr for the main
+		// element list container in class sequence to fix this problem.
+		// (preferrably use ref_counting_ptr).
+		// other than the main element lists, what about all the other
+		// places that might have (weak) references to the deleted
+		// object?
               delete el;
               return els;
             }
@@ -2612,6 +2630,7 @@ sh_ams2::sequence::insert_element (sh_ams2::sequence_element* el)
 
 // Remove an element from the sequence.  Return an iterator pointing
 // to the next element.
+// FIXME: who deletes the element?
 sh_ams2::sequence_iterator
 sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el)
 {
@@ -3412,6 +3431,9 @@ sh_ams2::mem_load::replace_addr (const sh_ams2::addr_expr& new_addr)
 bool
 sh_ams2::mem_store::try_replace_addr (const sh_ams2::addr_expr& new_addr)
 {
+  // FIXME: same as mem_load::replace_addr.
+  // move to base class? (see mem_store::replace_addr)
+
   rtx prev_rtx = XEXP (*m_mem_ref, 0);
   rtx new_rtx = new_addr.to_rtx ();
 
