@@ -3379,6 +3379,14 @@ sh_ams2::mem_load::try_replace_addr (const sh_ams2::addr_expr& new_addr)
 bool
 sh_ams2::mem_load::replace_addr (const sh_ams2::addr_expr& new_addr)
 {
+  // In some cases we might actually end up with 'new_addr' being not
+  // really a valid address.  validate_change will then use the
+  // target's 'legitimize_address' function to make a valid address out of
+  // it.  While doing so the target might emit new insns which we must
+  // capture and re-emit before the actual insn.
+  // If this happens it means that something with the alternatives or
+  // mem insn matching is not working as intended.
+
   start_sequence ();
   bool r = validate_change (insn (), m_mem_ref,
                             replace_equiv_address (*m_mem_ref,
@@ -3418,6 +3426,18 @@ sh_ams2::mem_store::try_replace_addr (const sh_ams2::addr_expr& new_addr)
 bool
 sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr)
 {
+  // FIXME: same as mem_load::replace_addr.
+
+  // this should be implemented in the base class mem_access.  for that,
+  // the base class has to get access to the sub-class's addr rtx locations.
+  // idea: add a new function
+  //    virtual std::pair<const rtx*, const rtx*> mem_access::mem_refs (void) const;
+  //
+  // -> override that function accordingly in mem_load, mem_store and mem_operand.
+  // -> use 'validate_change' with in_group argument = true, for each occurrence
+  //    of the addr rtx to be changed.  then use 'apply_change_group' to change
+  //    them all at once.
+
   start_sequence ();
   bool r = validate_change (insn (), m_mem_ref,
                             replace_equiv_address (*m_mem_ref,
@@ -3443,6 +3463,10 @@ sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr)
 bool
 sh_ams2::mem_operand::try_replace_addr (const sh_ams2::addr_expr& new_addr)
 {
+  // FIXME: this doesn't look like it's going to work.  it changes each
+  // occurrence of the address rtx one by one, then does recog and rolls back
+  // the change.  instead if should change all occurences, do recog and roll
+  // back the change.
   rtx new_rtx = new_addr.to_rtx ();
   for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
        it != m_mem_refs.end (); ++it)
@@ -3497,8 +3521,17 @@ sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
 bool sh_ams2::sequence_element::
 operator == (const sequence_element& other) const
 {
+  // FIXME: make operator == virtual to avoid if-else on the type.
+  //
+  // the first ↓↓↓↓   basic type check ...
   if (type () != other.type ())
     return false;
+
+  // ... could go into the base class sequence_element.  the overriding
+  // functions would then first check sequence_element::operator == and only
+  // proceed if it returns true.  e.g.
+  //    return sequence_element::operator == (other)
+  //           && ..
 
   if (is_mem_access ())
     {
@@ -3556,7 +3589,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
                            sh_ams2::sequence* seq,
                            sh_ams2::sequence_element* el)
 {
-  const bool trace_back_addr = (seq != NULL && el != NULL);
+  const bool trace_back_addr = seq != NULL && el != NULL;
 
   addr_expr op0 = make_invalid_addr ();
   addr_expr op1 = make_invalid_addr ();
@@ -3566,7 +3599,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
   if (x == NULL_RTX)
     return make_invalid_addr ();
 
-  enum rtx_code code = GET_CODE (x);
+  rtx_code code = GET_CODE (x);
 
   // If X is an arithmetic operation, first create ADDR_EXPR structs
   // from its operands. These will later be combined into a single ADDR_EXPR.

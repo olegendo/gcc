@@ -228,10 +228,6 @@ public:
     return REGNO (r1) == REGNO (r2);
   }
 
-  // Check whether two sequence elements are duplicates.
-  static bool
-  elements_equal (const sequence_element* el1, const sequence_element* el2);
-
   // the most complex non modifying address is of the form
   // 'base_reg + index_reg*scale + disp'.
 
@@ -554,6 +550,8 @@ public:
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // Base class of an (access) sequence element.
+
+  // FIXME: remove ref_counted if there are no plans of using it.
   class sequence_element : public ref_counted
   {
   public:
@@ -585,7 +583,7 @@ public:
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
     void set_effective_addr (const addr_expr& addr) { m_effective_addr = addr; }
 
-    // If false, AMS skips this access when optimizing.
+    // If false, AMS skips this element when optimizing.
     bool optimization_enabled (void) const { return m_optimization_enabled; }
     void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
 
@@ -939,10 +937,6 @@ NOTE:
     reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& ea)
     : sequence_element (type_reg_use, i, ea), m_reg (reg), m_reg_ref (ref) { }
 
-    // construct a reg-use from an existing element.  this is usually used
-    // when replacing an non-optimizable element into a reg-use.
-    reg_use (const ref_counting_ptr<sequence_element>& e);
-
     virtual const adjacent_chain_info&
     inc_chain (void) const { return m_inc_chain; }
 
@@ -1204,6 +1198,10 @@ NOTE:
     template <typename OutputIterator> void
     find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out);
 
+    // FIXME: m_els is the primary container for the sequence_elements.
+    // use std::auto_ptr for that instead of raw pointers.  actually it should
+    // be std::unique_ptr, but we don't have that (yet).  std::auto_ptr is OK
+    // with node based containers like std::list.
     std::list<sequence_element*> m_els;
     addr_reg_map m_addr_regs;
     insn_map m_insn_el_map;
