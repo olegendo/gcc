@@ -1202,6 +1202,11 @@ NOTE:
     // use std::auto_ptr for that instead of raw pointers.  actually it should
     // be std::unique_ptr, but we don't have that (yet).  std::auto_ptr is OK
     // with node based containers like std::list.
+    // when transferring auto_ptr'ed sequence elements from one sequence list
+    // to another, use std::list::splice to move elements without having to
+    // copy auto_ptr.
+    // if multiple sequence lists need to share the same sequence_element,
+    // need to use ref_counted_ptr (or std::tr1::shared_ptr).
     std::list<sequence_element*> m_els;
     addr_reg_map m_addr_regs;
     insn_map m_insn_el_map;
