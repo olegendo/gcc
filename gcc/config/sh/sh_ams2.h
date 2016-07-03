@@ -663,16 +663,6 @@ NOTE:
     static bool not_adjacent_dec (const sequence_element* first,
                                   const sequence_element* second);
 
-    static void clear_el_lists (void)
-    {
-      mem_load::g_els.clear ();
-      mem_store::g_els.clear ();
-      mem_operand::g_els.clear ();
-      reg_mod::g_els.clear ();
-      reg_barrier::g_els.clear ();
-      reg_use::g_els.clear ();
-    }
-
     // Update the insn that holds this element or generate a new insn
     // that corresponds to this element.  INSN_SEQUENCE_STARTED indicates
     // whether we're in the middle of an insn sequence.
@@ -809,18 +799,10 @@ NOTE:
     mem_load (rtx_insn* i, machine_mode m, rtx* mem_ref)
     : mem_access (type_mem_load, i, m), m_mem_ref (mem_ref) { };
 
-    mem_load* add_to_list (void)
-    {
-      g_els.push_back (*this);
-      return &g_els.back ();
-    }
-
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
 
     rtx* mem_ref (void) const { return m_mem_ref; }
-
-    static std::list<mem_load> g_els;
 
   private:
     // Reference into the rtx_insn where the mem rtx resides.
@@ -835,18 +817,10 @@ NOTE:
     mem_store (rtx_insn* i, machine_mode m, rtx* mem_ref)
     : mem_access (type_mem_store, i, m), m_mem_ref (mem_ref) { };
 
-    mem_store* add_to_list (void)
-    {
-      g_els.push_back (*this);
-      return &g_els.back ();
-    }
-
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
 
     rtx* mem_ref (void) const { return m_mem_ref; }
-
-    static std::list<mem_store> g_els;
 
   private:
     // Reference into the rtx_insn where the mem rtx resides.
@@ -864,16 +838,8 @@ NOTE:
     mem_operand (rtx_insn* i, machine_mode m, static_vector<rtx*, 16> mem_refs)
     : mem_access (type_mem_operand, i, m), m_mem_refs (mem_refs) { };
 
-    mem_operand* add_to_list (void)
-    {
-      g_els.push_back (*this);
-      return &g_els.back ();
-    }
-
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
-
-    static std::list<mem_operand> g_els;
 
   private:
     // References into the rtx_insn where the mem rtx'es reside.
@@ -899,12 +865,6 @@ NOTE:
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
     m_current_addr (a) { };
 
-    reg_mod* add_to_list (void)
-    {
-      g_els.push_back (*this);
-      return &g_els.back ();
-    }
-
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
 
@@ -925,8 +885,6 @@ NOTE:
                   || regs_equal (current_addr ().index_reg (), r)));
     }
 
-    static std::list<reg_mod> g_els;
-
   private:
     rtx m_reg;
     rtx m_value;
@@ -942,16 +900,8 @@ NOTE:
   public:
     reg_barrier (rtx_insn* i) : sequence_element (type_reg_barrier, i) { };
 
-    reg_barrier* add_to_list (void)
-    {
-      g_els.push_back (*this);
-      return &g_els.back ();
-    }
-
     // The address reg which is being referenced by this barrier.
     rtx reg (void) const { return m_reg; }
-
-    static std::list<reg_barrier> g_els;
 
   private:
     rtx m_reg;
@@ -993,12 +943,6 @@ NOTE:
     // when replacing an non-optimizable element into a reg-use.
     reg_use (const ref_counting_ptr<sequence_element>& e);
 
-    reg_use* add_to_list (void)
-    {
-      g_els.push_back (*this);
-      return &g_els.back ();
-    }
-
     virtual const adjacent_chain_info&
     inc_chain (void) const { return m_inc_chain; }
 
@@ -1023,8 +967,6 @@ NOTE:
     virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
-
-    static std::list<reg_use> g_els;
 
   private:
     // if a mem access is not to be optimized, it is converted into a
