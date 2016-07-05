@@ -14049,7 +14049,7 @@ mem_access_alternatives (sh_ams2::alternative_set& alt,
   std::back_insert_iterator <sh_ams2::alternative_set> alts (alt);
 
   gcc_assert ((*acc)->is_mem_access ());
-  sh_ams2::mem_access* mem_acc = (sh_ams2::mem_access*)*acc;
+  sh_ams2::mem_access* mem_acc = (sh_ams2::mem_access*)acc->get();
 
   const machine_mode acc_mode = mem_acc->mach_mode ();
   const int acc_size = mem_acc->access_size ();
@@ -14235,11 +14235,11 @@ ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
 {
   sh_ams2::addr_expr ea;
   if ((*el)->is_mem_access ())
-    ea = ((const sh_ams2::mem_access*)*el)->effective_addr ();
+    ea = ((const sh_ams2::mem_access*)el->get ())->effective_addr ();
   else if ((*el)->type () == sh_ams2::type_reg_mod)
-    ea = ((const sh_ams2::reg_mod*)*el)->effective_addr ();
+    ea = ((const sh_ams2::reg_mod*)el->get ())->effective_addr ();
   else if ((*el)->type () == sh_ams2::type_reg_use)
-    ea = ((const sh_ams2::reg_use*)*el)->effective_addr ();
+    ea = ((const sh_ams2::reg_use*)el->get ())->effective_addr ();
   else
     gcc_unreachable ();
 
@@ -14249,7 +14249,7 @@ ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
   sh_ams2::mem_access* next_acc = NULL;
   ++next_el;
   if (next_el != seq.elements ().end () && (*next_el)->is_mem_access ())
-    next_acc = (sh_ams2::mem_access*)*next_el;
+    next_acc = (sh_ams2::mem_access*)next_el->get ();
   if (next_acc != NULL
       && next_acc->effective_addr () == ea
       )

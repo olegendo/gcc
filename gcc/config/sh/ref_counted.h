@@ -107,7 +107,7 @@ public:
   }
 
   T* get (void) const { return m_obj; }
-  T& operator * (void) const { return &m_obj; }
+  T& operator * (void) const { return *m_obj; }
   T* operator -> (void) const { return m_obj; }
 
   long use_count (void) const

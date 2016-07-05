@@ -157,10 +157,14 @@ public:
 
  public:
 
-  typedef std::list<sequence_element*>::iterator sequence_iterator;
-  typedef std::list<sequence_element*>::const_iterator sequence_const_iterator;
-  typedef std::list<sequence_element*>::reverse_iterator sequence_reverse_iterator;
-  typedef std::list<sequence_element*>::const_reverse_iterator sequence_const_reverse_iterator;
+  typedef std::list<ref_counting_ptr<sequence_element> >::iterator
+    sequence_iterator;
+  typedef std::list<ref_counting_ptr<sequence_element> >::const_iterator
+    sequence_const_iterator;
+  typedef std::list<ref_counting_ptr<sequence_element> >::reverse_iterator
+    sequence_reverse_iterator;
+  typedef std::list<ref_counting_ptr<sequence_element> >::const_reverse_iterator
+    sequence_const_reverse_iterator;
 
   static regno_t get_regno (const_rtx x);
 
@@ -551,11 +555,13 @@ public:
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // Base class of an (access) sequence element.
 
-  // FIXME: remove ref_counted if there are no plans of using it.
   class sequence_element : public ref_counted
   {
   public:
-    virtual ~sequence_element (void) { }
+    virtual ~sequence_element (void)
+      {
+        m_sequences.clear ();
+      }
 
     bool operator == (const sequence_element& other) const;
 
@@ -643,23 +649,28 @@ NOTE:
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is DIFF.
-    static bool distance_equals (const sequence_element* first,
-                                 const sequence_element* second,
-                                 disp_t diff);
+    static bool distance_equals (
+      const ref_counting_ptr<sequence_element>& first,
+      const ref_counting_ptr<sequence_element>& second,
+      disp_t diff);
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
-    static bool adjacent_inc (const sequence_element* first,
-                              const sequence_element* second);
-    static bool not_adjacent_inc (const sequence_element* first,
-                                  const sequence_element* second);
+    static bool adjacent_inc (
+      const ref_counting_ptr<sequence_element>& first,
+      const ref_counting_ptr<sequence_element>& second);
+    static bool not_adjacent_inc (
+      const ref_counting_ptr<sequence_element>& first,
+      const ref_counting_ptr<sequence_element>& second);
 
     // Same as adjacent_inc, except that the displacement of SECOND should
     // be the smaller one.
-    static bool adjacent_dec (const sequence_element* first,
-                              const sequence_element* second);
-    static bool not_adjacent_dec (const sequence_element* first,
-                                  const sequence_element* second);
+    static bool adjacent_dec (
+      const ref_counting_ptr<sequence_element>& first,
+      const ref_counting_ptr<sequence_element>& second);
+    static bool not_adjacent_dec (
+      const ref_counting_ptr<sequence_element>& first,
+      const ref_counting_ptr<sequence_element>& second);
 
     // Update the insn that holds this element or generate a new insn
     // that corresponds to this element.  INSN_SEQUENCE_STARTED indicates
@@ -979,7 +990,7 @@ NOTE:
   template <element_type T1, element_type T2 = T1, element_type T3 = T1>
   struct element_type_matches
   {
-    bool operator () (const sequence_element* e) const
+    bool operator () (const ref_counting_ptr<sequence_element>& e) const
     {
       return e->type () == T1 || e->type () == T2
 	     || e->type () == T3;
@@ -1080,13 +1091,23 @@ NOTE:
 
     // Insert a new element into the sequence.  Return an iterator pointing
     // to the newly inserted element.
+    sequence_iterator insert_element (ref_counting_ptr<sequence_element>& el,
+                                      sequence_iterator insert_before);
     sequence_iterator insert_element (sequence_element* el,
                                       sequence_iterator insert_before);
-    sequence_iterator insert_element (sequence_element* el);
+
+    // If the EL is unique, insert it into the sequence and return an iterator
+    // pointing to it.  If it already has a duplicate in the sequence, don't
+    // insert it and return an iterator to the already inserted duplicate
+    // instead.
+    // The place of the element is determined by its insn.
+    sequence_iterator insert_unique (ref_counting_ptr<sequence_element>& el);
+    sequence_iterator insert_unique (sequence_element* el);
 
     // Remove an element from the sequence.  Return an iterator pointing
     // to the next element.
-    sequence_iterator remove_element (sequence_iterator el);
+    sequence_iterator remove_element (sequence_iterator el,
+                                      bool clear_deps = true);
 
     // Find the value that REG was last set to, starting the search from
     // START_INSN.
@@ -1108,8 +1129,15 @@ NOTE:
     // used to arrive at a given destination address.
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
 
-    std::list<sequence_element*>& elements (void) { return m_els; }
-    const std::list<sequence_element*>& elements (void) const { return m_els; }
+    std::list<ref_counting_ptr<sequence_element> >& elements (void)
+      {
+        return m_els;
+      }
+
+    const std::list<ref_counting_ptr<sequence_element> >& elements (void) const
+      {
+        return m_els;
+      }
 
     // iterator decorator for iterating over different types of elements
     // in the access sequence.
@@ -1207,7 +1235,7 @@ NOTE:
     // copy auto_ptr.
     // if multiple sequence lists need to share the same sequence_element,
     // need to use ref_counted_ptr (or std::tr1::shared_ptr).
-    std::list<sequence_element*> m_els;
+    std::list<ref_counting_ptr<sequence_element> > m_els;
     addr_reg_map m_addr_regs;
     insn_map m_insn_el_map;
     start_addr_list m_start_addr_list;
