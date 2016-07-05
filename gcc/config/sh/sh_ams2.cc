@@ -1331,24 +1331,33 @@ sh_ams2::sequence::find_mem_accesses (rtx_insn* i, rtx& x, element_type type)
   switch (GET_CODE (x))
     {
     case MEM:
+// FIXME: ref_counting_ptr<mem_access> acc
       mem_access* acc;
 
       switch (type)
         {
         case type_mem_load:
-          acc = new mem_load (i, GET_MODE (x), &x, XEXP (x, 0));
+// FIXME: use make_ref_counted<mem_load>
+          acc = new mem_load (i, GET_MODE (x), &x);
           break;
         case type_mem_store:
-          acc = new mem_store (i, GET_MODE (x), &x, XEXP (x, 0));
+// FIXME: use make_ref_counted<mem_store>
+          acc = new mem_store (i, GET_MODE (x), &x);
           break;
         case type_mem_operand:
           v.push_back (&x);
-          acc = new mem_operand (i, GET_MODE (x), v, XEXP (x, 0));
+// FIXME: use make_ref_counted<mem_operand>
+          acc = new mem_operand (i, GET_MODE (x), v);
           break;
         default:
           gcc_unreachable ();
         }
 
+      // FIXME: set_current_addr_rtx is used only once, which is here.
+      // it should go into the constructors.  either by explicitly passing
+      // XEXP (x, 0) as an argument to the constructor, or by using XEXP (x, 0)
+      // on x inside the constructor.
+      acc->set_current_addr_rtx (XEXP (x, 0));
       acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
       insert_element (acc, elements ().end ());
       break;
@@ -1400,6 +1409,8 @@ sh_ams2::sequence::find_addr_reg_mods (void)
           addr_expr reg_current_addr
             = find_reg_note (mod_insn, REG_INC, NULL_RTX)
             ? make_reg_addr (reg) : rtx_to_addr_expr (value);
+
+// FIXME: use make_ref_counted<reg_mod>
           reg_mod* new_reg_mod
             = new reg_mod (mod_insn, reg, value, reg_current_addr);
           new_reg_mod = (reg_mod*)insert_unique (new_reg_mod)->get ();
@@ -1457,6 +1468,7 @@ sh_ams2::sequence::find_addr_reg_uses (void)
                        it != reg_use_refs.end (); ++it)
                     {
                       rtx* use_ref = *it;
+// FIXME: use make_ref_counted<reg_use>
                       reg_use* new_reg_use = new reg_use (i, *regs, use_ref);
                       new_reg_use
                         = (reg_use*)insert_unique (new_reg_use)->get ();
@@ -1513,6 +1525,7 @@ sh_ams2::sequence::find_addr_reg_uses (void)
     {
       rtx reg = it->first;
       reg_mod* rm = it->second;
+// FIXME: use make_ref_counted<reg_use>
       reg_use* new_reg_use = new reg_use (last_el_insn, reg, NULL);
       new_reg_use = (reg_use*)insert_unique (new_reg_use)->get ();
       new_reg_use->set_effective_addr (rm->effective_addr ());
@@ -1540,6 +1553,16 @@ public:
 
   void reset_changes (void)
   {
+    for (std::vector<sequence_iterator>::reverse_iterator it
+           = m_inserted_reg_mods.rbegin ();
+         it != m_inserted_reg_mods.rend (); ++it)
+      {
+        m_seq.remove_element (*it);
+        m_visited_reg_mods.erase ((reg_mod*)(*it)->get ());
+        m_used_reg_mods.erase ((reg_mod*)(*it)->get ());
+      }
+    m_inserted_reg_mods.clear ();
+
     for (std::vector<std::pair<sequence_element*, sequence_element*> >::
          reverse_iterator it = m_dependent_els.rbegin ();
          it != m_dependent_els.rend (); ++it)
@@ -1573,16 +1596,6 @@ public:
           gcc_unreachable ();
       }
     m_addr_changed_els.clear ();
-
-    for (std::vector<sequence_iterator>::reverse_iterator it
-           = m_inserted_reg_mods.rbegin ();
-         it != m_inserted_reg_mods.rend (); ++it)
-      {
-        m_seq.remove_element (*it);
-        m_visited_reg_mods.erase ((reg_mod*)(*it)->get ());
-        m_used_reg_mods.erase ((reg_mod*)(*it)->get ());
-      }
-    m_inserted_reg_mods.clear ();
   }
 
   // List of sequence elements that got new dependencies.
@@ -1912,6 +1925,8 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
   if (end_addr.has_no_base_reg () && end_addr.has_no_index_reg ())
     {
       rtx const_reg = gen_reg_rtx (acc_mode);
+
+// FIXME: use make_ref_counted<reg_mod>
       reg_mod* const_load
         = new reg_mod (NULL, const_reg, NULL,
                        make_const_addr (end_addr.disp ()),
@@ -2039,6 +2054,8 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
         {
           // Otherwise, insert a reg-mod that sets the used reg to
           // the correct value.
+
+// FIXME: use make_ref_counted<reg_mod>
           reg_mod* reg_copy = new reg_mod (NULL, ru->reg (), NULL, new_addr,
                                            ru->effective_addr ());
           sequence_iterator inserted_el = insert_element (reg_copy, el);
@@ -2328,6 +2345,7 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
       tracker.use_changed_reg_mods ().push_back (used_rm);
     }
   rtx new_reg = gen_reg_rtx (acc_mode);
+// FIXME: use make_ref_counted<reg_mod>
   reg_mod* new_addr = new reg_mod (NULL, new_reg, NULL,
                                    curr_addr, effective_addr);
   sequence_iterator inserted_el = insert_element (new_addr, el);
@@ -2506,6 +2524,8 @@ sh_ams2::sequence::start_insn (void) const
 // Insert a new element into the sequence.  Return an iterator pointing
 // to the newly inserted element.
 sh_ams2::sequence_iterator
+
+//		FIXME: pass const ref  ↓ ↓ ↓
 sh_ams2::sequence::insert_element (ref_counting_ptr<sequence_element>& el,
                                    sequence_iterator insert_before)
 {
@@ -2528,6 +2548,24 @@ sh_ams2::sequence::insert_element (ref_counting_ptr<sequence_element>& el,
   return iter;
 }
 
+
+// FIXME: this overload could turn into a trap, because it constructs
+// a ref counting ptr which can potentially delete the passed sequence_element,
+// if insert_element fails for some reason (which it doesn't now, but ...).
+//
+// the ref_counting_ptr<sequence_element> should be constructed outside and
+// passed to the overload below.
+// to reduce the amount of code, in ref_counted.h introduce a new set of
+// templated overloads:
+//    template<typename T> ref_counting_ptr<T> make_ref_counted (void)
+//    template<typename T, typename A0> ref_counting_ptr<T> make_ref_counted (const A0& a0)
+//    template<typename T, typename A0, typename A1> ref_counting_ptr<T> make_ref_counted (const A0& a0, const A1& a1)
+//    template<typename T, typename A0, typename A1, typename A2> ref_counting_ptr<T> make_ref_counted (const A0& a0, const A1& a1, const A2& a2)
+//    ...
+//
+// see also std::make_shared and std::make_unique
+// then use as
+//     container.insert_element (make_ref_counted<reg_mod> (NULL, new_reg, NULL, curr_addr, effective_addr));
 sh_ams2::sequence_iterator
 sh_ams2::sequence::insert_element (sequence_element* el,
                                    sequence_iterator insert_before)
@@ -2541,6 +2579,8 @@ sh_ams2::sequence::insert_element (sequence_element* el,
 // insert it and return an iterator to the already inserted duplicate instead.
 // The place of the element is determined by its insn.
 sh_ams2::sequence_iterator
+
+//		FIXME: pass const ref  ↓ ↓ ↓
 sh_ams2::sequence::insert_unique (ref_counting_ptr<sequence_element>& el)
 {
   if (elements ().empty ())
@@ -3541,38 +3581,51 @@ sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
   return true;
 }
 
-bool sh_ams2::mem_access::
+bool sh_ams2::sequence_element::
 operator == (const sequence_element& other) const
 {
-  return sequence_element::operator == (other)
-    && effective_addr () == effective_addr ()
-    && current_addr_rtx () == ((const mem_access&)other).current_addr_rtx ()
-    && current_addr () == ((const mem_access&)other).current_addr ();
-}
+  // FIXME: make operator == virtual to avoid if-else on the type.
+  //
+  // the first ↓↓↓↓   basic type check ...
+  if (type () != other.type ())
+    return false;
 
-bool sh_ams2::reg_mod::
-operator == (const sequence_element& other) const
-{
-  return sequence_element::operator == (other)
-    && sh_ams2::regs_equal (reg (), ((const reg_mod&)other).reg ())
-    && value () == ((const reg_mod&)other).value ()
-    && current_addr () == ((const reg_mod&)other).current_addr ();
-}
+  // ... could go into the base class sequence_element.  the overriding
+  // functions would then first check sequence_element::operator == and only
+  // proceed if it returns true.  e.g.
+  //    return sequence_element::operator == (other)
+  //           && ..
 
-bool sh_ams2::reg_barrier::
-operator == (const sequence_element& other) const
-{
-  return sequence_element::operator == (other)
-    && sh_ams2::regs_equal (
-         reg (), ((const sh_ams2::reg_barrier&)other).reg ());
-}
+  if (is_mem_access ())
+    {
+      const sh_ams2::mem_access& m1 = (const sh_ams2::mem_access&)*this;
+      const sh_ams2::mem_access& m2 = (const sh_ams2::mem_access&)other;
+      return m1.effective_addr () == m2.effective_addr ()
+        && m1.current_addr_rtx () == m2.current_addr_rtx ()
+        && m1.current_addr () == m2.current_addr ();
+    }
 
+  if (type () == sh_ams2::type_reg_mod)
+    {
+      const sh_ams2::reg_mod& rm1 = (const sh_ams2::reg_mod&)*this;
+      const sh_ams2::reg_mod& rm2 = (const sh_ams2::reg_mod&)other;
+      return sh_ams2::regs_equal (rm1.reg (), rm2.reg ())
+        && rm1.value () == rm2.value ()
+        && rm1.current_addr () == rm2.current_addr ();
+    }
 
-bool sh_ams2::reg_use::
-operator == (const sequence_element& other) const
-{
-  return sequence_element::operator == (other)
-    && sh_ams2::regs_equal (reg (), ((const reg_use&)other).reg ());
+  if (type () == sh_ams2::type_reg_barrier)
+    return sh_ams2::regs_equal (((const sh_ams2::reg_barrier&)(*this)).reg (),
+                                ((const sh_ams2::reg_barrier&)other).reg ());
+
+  if (type () == sh_ams2::type_reg_use)
+    {
+      const sh_ams2::reg_use& ru1 = (const sh_ams2::reg_use&)*this;
+      const sh_ams2::reg_use& ru2 = (const sh_ams2::reg_use&)other;
+      return sh_ams2::regs_equal (ru1.reg (), ru2.reg ());
+    }
+
+  gcc_unreachable ();
 }
 
 // Return a non_mod_addr if it can be created with the given scale and
@@ -3710,6 +3763,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
               // Add to the sequence's start a reg mod that sets the reg
               // to itself. This will be used by the address modification
               // generator as a starting address.
+// FIXME: use make_ref_counted<reg_mod>
               sequence_iterator new_reg_mod
                 = seq->insert_unique (new reg_mod (NULL, x, x,
                                                    make_reg_addr (x),
@@ -3726,6 +3780,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
             : rtx_to_addr_expr (value, mem_mach_mode);
 
           // Insert the modifying insn into the sequence as a reg mod.
+// FIXME: use make_ref_counted<reg_mod>
           sequence_iterator new_reg_mod
             = seq->insert_unique (new reg_mod (mod_insn, x, value,
                                                reg_current_addr));
