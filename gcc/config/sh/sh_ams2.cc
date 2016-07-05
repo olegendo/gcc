@@ -1336,24 +1336,19 @@ sh_ams2::sequence::find_mem_accesses (rtx_insn* i, rtx& x, element_type type)
       switch (type)
         {
         case type_mem_load:
-          acc = new mem_load (i, GET_MODE (x), &x);
+          acc = new mem_load (i, GET_MODE (x), &x, XEXP (x, 0));
           break;
         case type_mem_store:
-          acc = new mem_store (i, GET_MODE (x), &x);
+          acc = new mem_store (i, GET_MODE (x), &x, XEXP (x, 0));
           break;
         case type_mem_operand:
           v.push_back (&x);
-          acc = new mem_operand (i, GET_MODE (x), v);
+          acc = new mem_operand (i, GET_MODE (x), v, XEXP (x, 0));
           break;
         default:
           gcc_unreachable ();
         }
 
-      // FIXME: set_current_addr_rtx is used only once, which is here.
-      // it should go into the constructors.  either by explicitly passing
-      // XEXP (x, 0) as an argument to the constructor, or by using XEXP (x, 0)
-      // on x inside the constructor.
-      acc->set_current_addr_rtx (XEXP (x, 0));
       acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
       insert_element (acc, elements ().end ());
       break;
