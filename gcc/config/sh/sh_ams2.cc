@@ -1540,16 +1540,6 @@ public:
 
   void reset_changes (void)
   {
-    for (std::vector<sequence_iterator>::reverse_iterator it
-           = m_inserted_reg_mods.rbegin ();
-         it != m_inserted_reg_mods.rend (); ++it)
-      {
-        m_seq.remove_element (*it);
-        m_visited_reg_mods.erase ((reg_mod*)(*it)->get ());
-        m_used_reg_mods.erase ((reg_mod*)(*it)->get ());
-      }
-    m_inserted_reg_mods.clear ();
-
     for (std::vector<std::pair<sequence_element*, sequence_element*> >::
          reverse_iterator it = m_dependent_els.rbegin ();
          it != m_dependent_els.rend (); ++it)
@@ -1583,6 +1573,16 @@ public:
           gcc_unreachable ();
       }
     m_addr_changed_els.clear ();
+
+    for (std::vector<sequence_iterator>::reverse_iterator it
+           = m_inserted_reg_mods.rbegin ();
+         it != m_inserted_reg_mods.rend (); ++it)
+      {
+        m_seq.remove_element (*it);
+        m_visited_reg_mods.erase ((reg_mod*)(*it)->get ());
+        m_used_reg_mods.erase ((reg_mod*)(*it)->get ());
+      }
+    m_inserted_reg_mods.clear ();
   }
 
   // List of sequence elements that got new dependencies.
@@ -3541,51 +3541,38 @@ sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
   return true;
 }
 
-bool sh_ams2::sequence_element::
+bool sh_ams2::mem_access::
 operator == (const sequence_element& other) const
 {
-  // FIXME: make operator == virtual to avoid if-else on the type.
-  //
-  // the first ↓↓↓↓   basic type check ...
-  if (type () != other.type ())
-    return false;
+  return sequence_element::operator == (other)
+    && effective_addr () == effective_addr ()
+    && current_addr_rtx () == ((const mem_access&)other).current_addr_rtx ()
+    && current_addr () == ((const mem_access&)other).current_addr ();
+}
 
-  // ... could go into the base class sequence_element.  the overriding
-  // functions would then first check sequence_element::operator == and only
-  // proceed if it returns true.  e.g.
-  //    return sequence_element::operator == (other)
-  //           && ..
+bool sh_ams2::reg_mod::
+operator == (const sequence_element& other) const
+{
+  return sequence_element::operator == (other)
+    && sh_ams2::regs_equal (reg (), ((const reg_mod&)other).reg ())
+    && value () == ((const reg_mod&)other).value ()
+    && current_addr () == ((const reg_mod&)other).current_addr ();
+}
 
-  if (is_mem_access ())
-    {
-      const sh_ams2::mem_access& m1 = (const sh_ams2::mem_access&)*this;
-      const sh_ams2::mem_access& m2 = (const sh_ams2::mem_access&)other;
-      return m1.effective_addr () == m2.effective_addr ()
-        && m1.current_addr_rtx () == m2.current_addr_rtx ()
-        && m1.current_addr () == m2.current_addr ();
-    }
+bool sh_ams2::reg_barrier::
+operator == (const sequence_element& other) const
+{
+  return sequence_element::operator == (other)
+    && sh_ams2::regs_equal (
+         reg (), ((const sh_ams2::reg_barrier&)other).reg ());
+}
 
-  if (type () == sh_ams2::type_reg_mod)
-    {
-      const sh_ams2::reg_mod& rm1 = (const sh_ams2::reg_mod&)*this;
-      const sh_ams2::reg_mod& rm2 = (const sh_ams2::reg_mod&)other;
-      return sh_ams2::regs_equal (rm1.reg (), rm2.reg ())
-        && rm1.value () == rm2.value ()
-        && rm1.current_addr () == rm2.current_addr ();
-    }
 
-  if (type () == sh_ams2::type_reg_barrier)
-    return sh_ams2::regs_equal (((const sh_ams2::reg_barrier&)(*this)).reg (),
-                                ((const sh_ams2::reg_barrier&)other).reg ());
-
-  if (type () == sh_ams2::type_reg_use)
-    {
-      const sh_ams2::reg_use& ru1 = (const sh_ams2::reg_use&)*this;
-      const sh_ams2::reg_use& ru2 = (const sh_ams2::reg_use&)other;
-      return sh_ams2::regs_equal (ru1.reg (), ru2.reg ());
-    }
-
-  gcc_unreachable ();
+bool sh_ams2::reg_use::
+operator == (const sequence_element& other) const
+{
+  return sequence_element::operator == (other)
+    && sh_ams2::regs_equal (reg (), ((const reg_use&)other).reg ());
 }
 
 // Return a non_mod_addr if it can be created with the given scale and

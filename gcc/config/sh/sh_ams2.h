@@ -563,7 +563,10 @@ public:
         m_sequences.clear ();
       }
 
-    bool operator == (const sequence_element& other) const;
+    virtual bool operator == (const sequence_element& other) const
+    {
+      return type () == other.type ();
+    }
 
     // Returns the type of the element.  Could also use RTTI for this.
     element_type type (void) const { return m_type; }
@@ -713,6 +716,8 @@ NOTE:
   {
   public:
     virtual ~mem_access (void) { }
+
+    virtual bool operator == (const sequence_element& other) const;
 
     static bool allow_new_insns;
 
@@ -875,6 +880,8 @@ NOTE:
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
     m_current_addr (a) { };
 
+    virtual bool operator == (const sequence_element& other) const;
+
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
 
@@ -909,6 +916,8 @@ NOTE:
   {
   public:
     reg_barrier (rtx_insn* i) : sequence_element (type_reg_barrier, i) { };
+
+    virtual bool operator == (const sequence_element& other) const;
 
     // The address reg which is being referenced by this barrier.
     rtx reg (void) const { return m_reg; }
@@ -948,6 +957,8 @@ NOTE:
 
     reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& ea)
     : sequence_element (type_reg_use, i, ea), m_reg (reg), m_reg_ref (ref) { }
+
+    virtual bool operator == (const sequence_element& other) const;
 
     virtual const adjacent_chain_info&
     inc_chain (void) const { return m_inc_chain; }
