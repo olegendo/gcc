@@ -1103,18 +1103,17 @@ NOTE:
 
     // Insert a new element into the sequence.  Return an iterator pointing
     // to the newly inserted element.
-    sequence_iterator insert_element (ref_counting_ptr<sequence_element>& el,
-                                      sequence_iterator insert_before);
-    sequence_iterator insert_element (sequence_element* el,
-                                      sequence_iterator insert_before);
+    sequence_iterator insert_element (
+                        const ref_counting_ptr<sequence_element>& el,
+                        sequence_iterator insert_before);
 
     // If the EL is unique, insert it into the sequence and return an iterator
     // pointing to it.  If it already has a duplicate in the sequence, don't
     // insert it and return an iterator to the already inserted duplicate
     // instead.
     // The place of the element is determined by its insn.
-    sequence_iterator insert_unique (ref_counting_ptr<sequence_element>& el);
-    sequence_iterator insert_unique (sequence_element* el);
+    sequence_iterator insert_unique (
+                        const ref_counting_ptr<sequence_element>& el);
 
     // Remove an element from the sequence.  Return an iterator pointing
     // to the next element.
