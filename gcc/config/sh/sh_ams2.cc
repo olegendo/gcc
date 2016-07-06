@@ -1386,6 +1386,7 @@ void
 sh_ams2::sequence::find_addr_reg_mods (void)
 {
   rtx_insn* last_insn = BB_END (start_bb ());
+  reg_mod* last_reg_mod = NULL;
 
   for (addr_reg_map::iterator it = m_addr_regs.begin ();
        it != m_addr_regs.end (); ++it)
@@ -1413,7 +1414,14 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                                                            this, new_reg_mod);
           new_reg_mod->set_effective_addr (reg_effective_addr);
 
+          if (last_reg_mod != NULL)
+            {
+              last_reg_mod->add_dependency (new_reg_mod);
+              new_reg_mod->add_dependent_el (last_reg_mod);
+            }
+
           last_insn = prev_nonnote_insn_bb (mod_insn);
+          last_reg_mod = new_reg_mod;
         }
     }
 }
@@ -2056,6 +2064,27 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
               make_ref_counted<reg_mod> ((rtx_insn*)NULL, ru->reg (), NULL_RTX,
                                          new_addr, ru->effective_addr ()), el);
           tracker.inserted_reg_mods ().push_back (inserted_el);
+
+          // Find and add the dependency for the new reg-mod
+          for (sequence_iterator it = stdx::prev (inserted_el); ; --it)
+            {
+              if ((*it)->type () == type_reg_mod)
+                {
+                  reg_mod* rm = (reg_mod*)it->get ();
+                  if (regs_equal (rm->reg (), new_addr.base_reg ())
+                      || regs_equal (rm->reg (), new_addr.index_reg ()))
+                    {
+                      (*inserted_el)->add_dependency (rm);
+                      rm->add_dependent_el (inserted_el->get ());
+                      tracker.dependent_els ()
+                        .push_back (std::make_pair (rm, inserted_el->get ()));
+                      break;
+                    }
+                }
+
+              if (it == elements ().begin ())
+                gcc_unreachable ();
+            }
         }
     }
 }
@@ -2773,7 +2802,6 @@ sh_ams2::sequence::calculate_adjacency_info (void)
 void
 sh_ams2::sequence::update_cost (delegate& d)
 {
-  std::set<reg_mod*> used_reg_mods;
   for (sequence_iterator els = elements ().begin ();
        els != elements ().end (); ++els)
     {
@@ -2862,7 +2890,7 @@ sh_ams2::sequence::update_cost (delegate& d)
             }
 
           // Cloning costs
-          cost += update_cost_1 (els, d, used_reg_mods);
+          cost += update_cost_1 (els, d);
 
           rm->set_cost (cost);
         }
@@ -2872,8 +2900,7 @@ sh_ams2::sequence::update_cost (delegate& d)
 // Internal function of sequence::update_cost. Get the cloning costs
 // associated with the reg-mod, if any.
 int
-sh_ams2::sequence::update_cost_1 (sequence_iterator& rm_it, delegate& d,
-                                  std::set<reg_mod*>& used_reg_mods)
+sh_ams2::sequence::update_cost_1 (sequence_iterator& rm_it, delegate& d)
 {
   reg_mod* rm = (reg_mod*)rm_it->get ();
   rtx reused_reg = NULL;
@@ -2889,28 +2916,50 @@ sh_ams2::sequence::update_cost_1 (sequence_iterator& rm_it, delegate& d,
   if (regs_equal (reused_reg, rm->reg ()))
     return 0;
 
-  // There might be cloning costs if the register of the
-  // reg-mod that sets REUSED_REG is already used elsewhere.
-  for (sequence_iterator prev_els = elements ().begin ();
-       prev_els != rm_it; ++prev_els)
+  // Find the reg-mod of the reused register.
+  reg_mod* reused_rm = NULL;
+  for (std::list<sh_ams2::sequence_element*>::iterator it =
+         rm->dependencies ().begin (); it != rm->dependencies ().end (); ++it)
     {
-      if ((*prev_els)->type () == type_reg_mod)
-        {
-          reg_mod* prev_rm = (reg_mod*)prev_els->get ();
-          if (regs_equal (prev_rm->reg (), reused_reg))
-            {
-              // If the reused reg is already used by another access,
-              // we'll have to clone it.
-              if (used_reg_mods.find (prev_rm) != used_reg_mods.end ())
-                return  d.addr_reg_clone_cost (reused_reg, *this, rm_it);
+      if ((*it)->type () != type_reg_mod)
+        continue;
 
-              // Otherwise, we can use it without any cloning penalty.
-              used_reg_mods.insert (prev_rm);
-              return 0;
-            }
+      if (regs_equal (((reg_mod*)(*it))->reg (), reused_reg))
+        {
+          reused_rm = (reg_mod*)*it;
+          break;
         }
     }
-  return 0;
+  gcc_assert (reused_rm != NULL);
+
+  // Find the first element that also uses the reused register.
+  for (std::list<sh_ams2::sequence_element*>::iterator it =
+         reused_rm->dependent_els ().begin ();
+       it != reused_rm->dependent_els ().end (); ++it)
+    {
+      if ((*it)->type () != type_reg_mod)
+        continue;
+
+      rtx dep_reused_reg;
+      if (((reg_mod*)(*it))->current_addr ().has_base_reg ())
+        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().base_reg ();
+      else if (((reg_mod*)(*it))->current_addr ().has_index_reg ())
+        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().index_reg ();
+      else
+        continue;
+
+      if (regs_equal (reused_reg, dep_reused_reg))
+        {
+          // If this reg-mod is the first to use the reg, there's
+          // no need to clone it.
+          if (*it == rm)
+              return 0;
+
+          // Otherwise, we'll have to apply cloning costs.
+          return d.addr_reg_clone_cost (reused_reg, *this, rm_it);
+        }
+    }
+  gcc_unreachable ();
 }
 
 // Check whether the cost of the sequence is already minimal and
@@ -4052,7 +4101,6 @@ sh_ams2::execute (function* fun)
 
       log_msg ("updating sequence cost\n");
       seq.update_cost (m_delegate);
-      int original_cost = seq.cost ();
 
       log_sequence (seq, true);
       log_msg ("\n\n");
@@ -4066,8 +4114,19 @@ sh_ams2::execute (function* fun)
 
 	  log_msg ("continuing anyway\n");
         }
+    }
 
-      log_msg ("generating new address modifications\n");
+  log_msg ("generating new address modifications\n");
+  for (std::list<sequence>::iterator it = sequences.begin ();
+       it != sequences.end (); ++it)
+    {
+      sequence& seq = *it;
+      int original_cost = seq.cost ();
+
+      log_sequence (seq, true);
+      log_msg ("\n\n");
+
+      log_msg ("gen_address_mod\n");
       seq.gen_address_mod (m_delegate, m_options.base_lookahead_count);
 
       seq.update_cost (m_delegate);

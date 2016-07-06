@@ -1230,8 +1230,7 @@ NOTE:
                                       std::set<reg_mod*>& used_reg_mods,
                                       std::set<reg_mod*>& visited_reg_mods);
 
-    int update_cost_1 (sequence_iterator& rm_it, delegate& d,
-                       std::set<reg_mod*>& used_reg_mods);
+    int update_cost_1 (sequence_iterator& rm_it, delegate& d);
 
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void
