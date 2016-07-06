@@ -3515,29 +3515,34 @@ sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
   // validate_change works but the second fails.  should use a change group
   // or something like that and rollback all changes if one fails.
   rtx new_rtx = new_addr.to_rtx ();
+  bool r = true;
   for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
        it != m_mem_refs.end (); ++it)
     {
       start_sequence ();
-      bool r = !validate_change (insn (),
-                                 *it, replace_equiv_address (**it, new_rtx),
-                                 false);
-      rtx_insn* new_insns = get_insns ();
-      end_sequence ();
-
-      if (r && !mem_access::allow_new_insns && new_insns != NULL)
-        {
-          log_msg ("validate_change produced new insns: \n");
-          log_rtx (new_insns);
-          abort ();
-        }
-
-      if (r && new_insns != NULL)
-        emit_insn_before (new_insns, insn ());
-
+      r &= !validate_change (insn (),
+                             *it, replace_equiv_address (**it, new_rtx), true);
       if (!r)
-        return false;
+        break;
     }
+
+  if (!r)
+    return false;
+
+  apply_change_group ();
+  rtx_insn* new_insns = get_insns ();
+  end_sequence ();
+
+  if (r && !mem_access::allow_new_insns && new_insns != NULL)
+    {
+      log_msg ("validate_change produced new insns: \n");
+      log_rtx (new_insns);
+      abort ();
+    }
+
+  if (r && new_insns != NULL)
+    emit_insn_before (new_insns, insn ());
+
   return true;
 }
 
