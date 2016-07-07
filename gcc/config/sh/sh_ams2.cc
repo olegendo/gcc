@@ -908,6 +908,151 @@ sh_ams2::sequence_element::not_adjacent_dec (
   return !adjacent_dec (first, second);
 }
 
+void
+sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
+                                  sequence& seq ATTRIBUTE_UNUSED,
+                                  sequence_iterator el_it ATTRIBUTE_UNUSED)
+{
+  if (!optimization_enabled () || effective_addr ().is_invalid ())
+    {
+      set_cost (0);
+      return;
+    }
+
+  // Find the alternative that the access uses and update
+  // its cost accordingly.
+  // FIXME: When selecting an alternative, remember the alternative
+  // iterator as the "currently selected alternative".  Then we don't
+  // need to find it over and over again.
+  for (alternative_set::const_iterator alt = alternatives ().begin (); ; ++alt)
+    {
+      if (matches_alternative (*alt))
+        {
+          set_cost (alt->cost ());
+          return;
+        }
+    }
+  gcc_unreachable ();
+}
+
+void
+sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
+                               sequence_iterator el_it)
+{
+  if (current_addr ().is_invalid ())
+    {
+      set_cost (0);
+      return;
+    }
+
+  int cost = 0;
+  const addr_expr &ae = current_addr ();
+
+  // Scaling costs
+  if (ae.has_no_base_reg () && ae.has_index_reg () && ae.scale () != 1)
+    cost += d.addr_reg_mod_cost (reg (),
+                                 gen_rtx_MULT (Pmode,
+                                               ae.index_reg (),
+                                               GEN_INT (ae.scale ())),
+                                 seq, el_it);
+
+  // Costs for adding or subtracting another reg
+  else if (ae.has_no_disp () && std::abs (ae.scale ()) == 1
+           && ae.has_base_reg () && ae.has_index_reg ())
+    cost += d.addr_reg_mod_cost (reg (),
+                                 gen_rtx_PLUS (Pmode,
+                                               ae.index_reg (),
+                                               ae.base_reg ()),
+                                 seq, el_it);
+
+  // Constant displacement costs
+  else if (ae.has_base_reg () && ae.has_no_index_reg ()
+           && ae.has_disp ())
+    cost += d.addr_reg_mod_cost (reg (),
+                                 gen_rtx_PLUS (Pmode,
+                                               ae.base_reg (),
+                                               GEN_INT (ae.disp ())),
+                                 seq, el_it);
+
+  // Constant loading costs
+  else if (ae.has_no_base_reg () && ae.has_no_index_reg ())
+    cost += d.addr_reg_mod_cost (reg (),
+                                 GEN_INT (ae.disp ()),
+                                 seq, el_it);
+
+  // If none of the previous branches were taken, the reg-mod
+  // is a (reg <- reg) copy, and doesn't have any modification cost.
+  else
+    {
+      gcc_assert (ae.has_base_reg () && ae.has_no_index_reg ()
+                  && ae.has_no_disp ());
+      cost = 0;
+    }
+
+  set_cost (cost);
+
+  // Cloning costs:
+
+  rtx reused_reg = NULL;
+
+  if (current_addr ().has_base_reg ())
+    reused_reg = current_addr ().base_reg ();
+  else if (current_addr ().has_index_reg ())
+    reused_reg = current_addr ().index_reg ();
+  else
+    return;
+
+  // There's no cloning cost for reg-mods that set the reg to itself.
+  if (regs_equal (reused_reg, reg ()))
+    return;
+
+  // Find the reg-mod of the reused register.
+  reg_mod* reused_rm = NULL;
+  for (std::list<sh_ams2::sequence_element*>::iterator it =
+         dependencies ().begin (); it != dependencies ().end (); ++it)
+    {
+      if ((*it)->type () != type_reg_mod)
+        continue;
+
+      if (regs_equal (((reg_mod*)(*it))->reg (), reused_reg))
+        {
+          reused_rm = (reg_mod*)*it;
+          break;
+        }
+    }
+  gcc_assert (reused_rm != NULL);
+
+  // Find the first element that also uses the reused register.
+  for (std::list<sh_ams2::sequence_element*>::iterator it =
+         reused_rm->dependent_els ().begin ();
+       it != reused_rm->dependent_els ().end (); ++it)
+    {
+      if ((*it)->type () != type_reg_mod)
+        continue;
+
+      rtx dep_reused_reg;
+      if (((reg_mod*)(*it))->current_addr ().has_base_reg ())
+        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().base_reg ();
+      else if (((reg_mod*)(*it))->current_addr ().has_index_reg ())
+        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().index_reg ();
+      else
+        continue;
+
+      if (regs_equal (reused_reg, dep_reused_reg))
+        {
+          // If this reg-mod is the first to use the reg, there's
+          // no need to clone it.
+          if (*it == this)
+              return;
+
+          // Otherwise, we'll have to apply cloning costs.
+          adjust_cost (d.addr_reg_clone_cost (reused_reg, seq, el_it));
+          return;
+        }
+    }
+  gcc_unreachable ();
+}
+
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 bool sh_ams2::mem_access::allow_new_insns = true;
 
@@ -2804,162 +2949,7 @@ sh_ams2::sequence::update_cost (delegate& d)
 {
   for (sequence_iterator els = elements ().begin ();
        els != elements ().end (); ++els)
-    {
-// FIXME: extract virtual function 'update_cost' (or similar name) into
-//        base class to avoid the if-else on the element type.
-      if ((*els)->is_mem_access ())
-        {
-          mem_access* m = (mem_access*)els->get ();
-          // Skip this access if it won't be optimized.
-          if (!m->optimization_enabled () || m->effective_addr ().is_invalid ())
-            {
-              m->set_cost (0);
-              continue;
-            }
-
-          // Find the alternative that the access uses and update
-          // its cost accordingly.
-          // FIXME: When selecting an alternative, remember the alternative
-          // iterator as the "currently selected alternative".  Then we don't
-          // need to find it over and over again.
-          for (alternative_set::const_iterator alt
-                 = m->alternatives ().begin (); ; ++alt)
-            {
-              if (m->matches_alternative (*alt))
-                {
-                  m->set_cost (alt->cost ());
-                  break;
-                }
-              if (alt == m->alternatives ().end ())
-                gcc_unreachable ();
-            }
-        }
-      else if ((*els)->type () == type_reg_mod)
-        {
-          reg_mod* rm = (reg_mod*)els->get ();
-
-          // Skip this reg-mod if the address doesn't fit into an addr_expr.
-          if (rm->current_addr ().is_invalid ())
-            {
-              rm->set_cost (0);
-              continue;
-            }
-
-          int cost = 0;
-          const addr_expr &ae = rm->current_addr ();
-
-          // Scaling costs
-          if (ae.has_no_base_reg () && ae.has_index_reg () && ae.scale () != 1)
-            cost += d.addr_reg_mod_cost (rm->reg (),
-                                         gen_rtx_MULT (Pmode,
-                                                       ae.index_reg (),
-                                                       GEN_INT (ae.scale ())),
-                                         *this, els);
-
-          // Costs for adding or subtracting another reg
-          else if (ae.has_no_disp () && std::abs (ae.scale ()) == 1
-                   && ae.has_base_reg () && ae.has_index_reg ())
-            cost += d.addr_reg_mod_cost (rm->reg (),
-                                         gen_rtx_PLUS (Pmode,
-                                                       ae.index_reg (),
-                                                       ae.base_reg ()),
-                                         *this, els);
-
-          // Constant displacement costs
-          else if (ae.has_base_reg () && ae.has_no_index_reg ()
-                   && ae.has_disp ())
-            cost += d.addr_reg_mod_cost (rm->reg (),
-                                         gen_rtx_PLUS (Pmode,
-                                                       ae.base_reg (),
-                                                       GEN_INT (ae.disp ())),
-                                         *this, els);
-
-          // Constant loading costs
-          else if (ae.has_no_base_reg () && ae.has_no_index_reg ())
-            cost += d.addr_reg_mod_cost (rm->reg (),
-                                         GEN_INT (ae.disp ()),
-                                         *this, els);
-
-          // If none of the previous branches were taken, the reg-mod
-          // is a (reg <- reg) copy, and doesn't have any modification cost.
-          else
-            {
-              gcc_assert (ae.has_base_reg () && ae.has_no_index_reg ()
-                          && ae.has_no_disp ());
-              cost = 0;
-            }
-
-          // Cloning costs
-          cost += update_cost_1 (els, d);
-
-          rm->set_cost (cost);
-        }
-    }
-}
-
-// Internal function of sequence::update_cost. Get the cloning costs
-// associated with the reg-mod, if any.
-int
-sh_ams2::sequence::update_cost_1 (sequence_iterator& rm_it, delegate& d)
-{
-  reg_mod* rm = (reg_mod*)rm_it->get ();
-  rtx reused_reg = NULL;
-
-  if (rm->current_addr ().has_base_reg ())
-    reused_reg = rm->current_addr ().base_reg ();
-  else if (rm->current_addr ().has_index_reg ())
-    reused_reg = rm->current_addr ().index_reg ();
-  else
-    return 0;
-
-  // There's no cloning cost for reg-mods that set the reg to itself.
-  if (regs_equal (reused_reg, rm->reg ()))
-    return 0;
-
-  // Find the reg-mod of the reused register.
-  reg_mod* reused_rm = NULL;
-  for (std::list<sh_ams2::sequence_element*>::iterator it =
-         rm->dependencies ().begin (); it != rm->dependencies ().end (); ++it)
-    {
-      if ((*it)->type () != type_reg_mod)
-        continue;
-
-      if (regs_equal (((reg_mod*)(*it))->reg (), reused_reg))
-        {
-          reused_rm = (reg_mod*)*it;
-          break;
-        }
-    }
-  gcc_assert (reused_rm != NULL);
-
-  // Find the first element that also uses the reused register.
-  for (std::list<sh_ams2::sequence_element*>::iterator it =
-         reused_rm->dependent_els ().begin ();
-       it != reused_rm->dependent_els ().end (); ++it)
-    {
-      if ((*it)->type () != type_reg_mod)
-        continue;
-
-      rtx dep_reused_reg;
-      if (((reg_mod*)(*it))->current_addr ().has_base_reg ())
-        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().base_reg ();
-      else if (((reg_mod*)(*it))->current_addr ().has_index_reg ())
-        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().index_reg ();
-      else
-        continue;
-
-      if (regs_equal (reused_reg, dep_reused_reg))
-        {
-          // If this reg-mod is the first to use the reg, there's
-          // no need to clone it.
-          if (*it == rm)
-              return 0;
-
-          // Otherwise, we'll have to apply cloning costs.
-          return d.addr_reg_clone_cost (reused_reg, *this, rm_it);
-        }
-    }
-  gcc_unreachable ();
+    (*els)->update_cost (d, *this, els);
 }
 
 // Check whether the cost of the sequence is already minimal and

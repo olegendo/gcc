@@ -581,6 +581,9 @@ public:
     int cost (void) const { return m_cost; }
     void set_cost (int new_cost) { m_cost = new_cost; }
     void adjust_cost (int d) { m_cost += d; }
+    virtual void
+    update_cost (delegate& d ATTRIBUTE_UNUSED, sequence& seq ATTRIBUTE_UNUSED,
+                 sequence_iterator el_it ATTRIBUTE_UNUSED) { }
 
     // The insn rtx of this element.  Maybe null if it has been inserted
     // by AMS into the sequence and is not present in the original insn list.
@@ -778,6 +781,8 @@ NOTE:
     machine_mode mach_mode (void) const { return m_machine_mode; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
 
+    virtual void update_cost (delegate& d, sequence& seq,
+                              sequence_iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const
@@ -893,6 +898,8 @@ NOTE:
     const addr_expr& current_addr (void) const { return m_current_addr; }
     void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
+    virtual void update_cost (delegate& d, sequence& seq,
+                              sequence_iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const
@@ -1229,8 +1236,6 @@ NOTE:
     reg_mod* find_start_addr_for_reg (rtx reg,
                                       std::set<reg_mod*>& used_reg_mods,
                                       std::set<reg_mod*>& visited_reg_mods);
-
-    int update_cost_1 (sequence_iterator& rm_it, delegate& d);
 
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void
