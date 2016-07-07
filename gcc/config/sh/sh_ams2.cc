@@ -3525,34 +3525,29 @@ sh_ams2::mem_store::replace_addr (const sh_ams2::addr_expr& new_addr)
 bool
 sh_ams2::mem_operand::try_replace_addr (const sh_ams2::addr_expr& new_addr)
 {
-  // FIXME: this doesn't look like it's going to work.  it changes each
-  // occurrence of the address rtx one by one, then does recog and rolls back
-  // the change.  instead if should change all occurences, do recog and roll
-  // back the change.
   rtx new_rtx = new_addr.to_rtx ();
-  for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
-       it != m_mem_refs.end (); ++it)
+  static_vector<rtx, 16> prev_rtx;
+  static_vector<rtx*, 16>::iterator it;
+  static_vector<rtx, 16>::iterator prev_it;
+
+  for (it = m_mem_refs.begin (); it != m_mem_refs.end (); ++it)
     {
-      rtx prev_rtx = XEXP (**it, 0);
-
+      prev_rtx.push_back (XEXP (**it, 0));
       XEXP (**it, 0) = new_rtx;
-
-      int new_insn_code = recog (PATTERN (insn ()), insn (), NULL);
-
-      XEXP (**it, 0) = prev_rtx;
-      if (new_insn_code < 0)
-        return false;
     }
-  return true;
+
+  int new_insn_code = recog (PATTERN (insn ()), insn (), NULL);
+
+  for (it = m_mem_refs.begin (), prev_it = prev_rtx.begin ();
+       it != m_mem_refs.end (); ++it, ++prev_it)
+    XEXP (**it, 0) = *prev_it;
+
+  return new_insn_code >= 0;
 }
 
 bool
 sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
 {
-  // FIXME:
-  // this might leave the insn in some intermediate state if e.g. the first
-  // validate_change works but the second fails.  should use a change group
-  // or something like that and rollback all changes if one fails.
   rtx new_rtx = new_addr.to_rtx ();
   bool r = true;
   for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
