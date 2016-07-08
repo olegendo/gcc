@@ -1014,7 +1014,7 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
       if ((*it)->type () != type_reg_mod)
         continue;
 
-      if (regs_equal (((reg_mod*)(*it))->reg (), reused_reg))
+      if (regs_equal (((reg_mod*)*it)->reg (), reused_reg))
         {
           reused_rm = (reg_mod*)*it;
           break;
@@ -1030,11 +1030,14 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
       if ((*it)->type () != type_reg_mod)
         continue;
 
+      if (((reg_mod*)*it)->current_addr ().is_invalid ())
+        continue;
+
       rtx dep_reused_reg;
-      if (((reg_mod*)(*it))->current_addr ().has_base_reg ())
-        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().base_reg ();
-      else if (((reg_mod*)(*it))->current_addr ().has_index_reg ())
-        dep_reused_reg = ((reg_mod*)(*it))->current_addr ().index_reg ();
+      if (((reg_mod*)*it)->current_addr ().has_base_reg ())
+        dep_reused_reg = ((reg_mod*)*it)->current_addr ().base_reg ();
+      else if (((reg_mod*)*it)->current_addr ().has_index_reg ())
+        dep_reused_reg = ((reg_mod*)*it)->current_addr ().index_reg ();
       else
         continue;
 
