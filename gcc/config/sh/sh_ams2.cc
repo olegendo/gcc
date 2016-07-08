@@ -1257,8 +1257,11 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
         continue;
 
       addr_expr addr = (*el)->effective_addr ();
-      if (addr.is_invalid ())
-        continue;
+
+      // If a reg-use's effective address isn't known, group it
+      // together with other elements that use its register.
+      if (addr.is_invalid () && (*el)->type () == type_reg_use)
+        addr = make_reg_addr (((reg_use*)el->get ())->reg ());
 
       terms.clear ();
       addr.get_all_subterms (std::back_inserter (terms));
