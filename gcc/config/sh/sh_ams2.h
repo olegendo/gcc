@@ -563,6 +563,18 @@ public:
         m_sequences.clear ();
       }
 
+    struct equals
+    {
+      const sequence_element* e;
+
+      equals (const sequence_element* se) : e (se) { }
+      equals (const sequence_element& se) : e (&se) { }
+
+      // assume that T is some kind of pointer or iterator to sequence_element
+      // that can be dereferenced.
+      template <typename T> bool operator () (const T& a) { return *a == *e; }
+    };
+
     virtual bool operator == (const sequence_element& other) const
     {
       return type () == other.type ();
@@ -1088,7 +1100,14 @@ NOTE:
     void calculate_adjacency_info (void);
 
     // Check whether REG is used in any element after START.
-    bool reg_used_in_sequence (rtx reg, sequence_iterator start);
+    bool reg_used_in_sequence (rtx reg, sequence_const_iterator start) const;
+
+    // Check whether REG is used in any of the sequence's accesses.
+    bool
+    reg_used_in_sequence (rtx reg) const
+    {
+      return reg_used_in_sequence (reg, elements ().begin ());
+    }
 
     // The total cost of the accesses in the sequence.
     int cost (void) const;
@@ -1099,9 +1118,6 @@ NOTE:
     // Check whether the cost of the sequence is already minimal and
     // can't be improved further.
     bool cost_already_minimal (void) const;
-
-    // Check whether REG is used in any of the sequence's accesses.
-    bool reg_used_in_sequence (rtx reg);
 
     // Update the alternatives of the sequence's accesses.
     void update_access_alternatives (delegate& d, bool force_validation,
@@ -1132,6 +1148,8 @@ NOTE:
     std::pair<rtx, rtx_insn*> find_reg_value (rtx reg, rtx_insn* start_insn);
 
     // The first insn and basic block in the sequence.
+    sequence_const_iterator start_insn_element (void) const;
+
     rtx_insn* start_insn (void) const;
     basic_block start_bb (void) const;
 

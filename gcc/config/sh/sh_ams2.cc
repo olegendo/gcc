@@ -469,11 +469,35 @@ expand_minus (rtx a, rtx b)
   return expand_binop (Pmode, sub_optab, a, b, NULL, false, OPTAB_LIB_WIDEN);
 }
 
-template <typename T>
-bool
-set_contains (std::set<T> s, T el)
+template <typename Container> struct element_is_in_func
 {
-  return s.find (el) != s.end ();
+  const Container& container;
+
+  element_is_in_func (const Container& c) : container (c) { }
+
+  bool operator () (typename Container::const_reference val) const
+  {
+    return std::find (container.begin (), container.end (), val)
+	   != container.end ();
+  }
+};
+
+template <typename T> struct element_is_in_func<std::set<T> >
+{
+  const std::set<T>& container;
+
+  element_is_in_func (const std::set<T>& c) : container (c) { }
+
+  bool operator () (typename std::set<T>::const_reference val) const
+  {
+    return container.find (val) != container.end ();
+  }
+};
+
+template <typename Container> element_is_in_func<Container>
+element_is_in (const Container& c)
+{
+  return element_is_in_func<Container> (c);
 }
 
 } // anonymous namespace
@@ -781,51 +805,27 @@ sh_ams2::addr_expr::get_all_subterms (OutputIterator out) const
 void
 sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
 {
-  for (std::list<sequence_element*>::iterator it = m_dependencies.begin ();
-       it != m_dependencies.end (); ++it)
-    {
-      if (*dep == **it)
-        return;
-    }
-  m_dependencies.push_back (dep);
+  if (std::find_if (m_dependencies.begin (), m_dependencies.end (),
+		    sequence_element::equals (dep)) == m_dependencies.end ())
+    m_dependencies.push_back (dep);
 }
 void
 sh_ams2::sequence_element::remove_dependency (sh_ams2::sequence_element* dep)
 {
-  for (std::list<sequence_element*>::iterator it = m_dependencies.begin ();
-       it != m_dependencies.end (); ++it)
-    {
-      if (*dep == **it)
-        {
-          m_dependencies.erase (it);
-          return;
-        }
-    }
+  m_dependencies.remove_if (sequence_element::equals (dep));
 }
 
 void
 sh_ams2::sequence_element::add_dependent_el (sh_ams2::sequence_element* dep)
 {
-  for (std::list<sequence_element*>::iterator it = m_dependent_els.begin ();
-       it != m_dependent_els.end (); ++it)
-    {
-      if (*dep == **it)
-        return;
-    }
-  m_dependent_els.push_back (dep);
+  if (std::find_if (m_dependent_els.begin (), m_dependent_els.end (),
+		    sequence_element::equals (dep)) == m_dependent_els.end ())
+    m_dependent_els.push_back (dep);
 }
 void
 sh_ams2::sequence_element::remove_dependent_el (sh_ams2::sequence_element* dep)
 {
-  for (std::list<sequence_element*>::iterator it = m_dependent_els.begin ();
-       it != m_dependent_els.end (); ++it)
-    {
-      if (*dep == **it)
-        {
-          m_dependent_els.erase (it);
-          return;
-        }
-    }
+  m_dependencies.remove_if (sequence_element::equals (dep));
 }
 
 // Return true if the element is used (directly or indirectly) by
@@ -2679,6 +2679,8 @@ sh_ams2::sequence::start_bb (void) const
   for (sequence_const_iterator e = elements ().begin ();
        e != elements ().end (); ++e)
     {
+// FIXME: in which cases can an insn in the sequence NOT belong to a basic block?
+// either this check is unnecessary, or add a comment.
       if ((*e)->insn () && BLOCK_FOR_INSN ((*e)->insn ()))
         return BLOCK_FOR_INSN ((*e)->insn ());
     }
@@ -2696,6 +2698,20 @@ sh_ams2::sequence::start_insn (void) const
         return (*e)->insn ();
     }
   gcc_unreachable ();
+}
+
+// FIXME:
+// start_bb and start_insn should use this.
+sh_ams2::sequence_const_iterator
+sh_ams2::sequence::start_insn_element (void) const
+{
+  for (sequence_const_iterator e = elements ().begin ();
+       e != elements ().end (); ++e)
+    if ((*e)->insn ())
+      return e;
+
+//  gcc_unreachable ();   FIXME: sure?  always?
+  return elements ().end ();
 }
 
 // Insert a new element into the sequence.  Return an iterator pointing
@@ -2744,6 +2760,16 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
             return els;
         }
 
+/*
+      // FIXME: this should be the same as above, shouldn't it?
+      // start_insn_element returns the first element that's got an insn,
+      // so we can use that as an end iterator.  It's a bit easier to grasp.
+      sequence_const_iterator first_insn_i = start_insn_element ();
+      sequence_iterator els = std::find_if (elements ().begin (), first_insn_i,
+					    sequence_element::equals (*el));
+      if (els != first_insn_i)
+	return els;
+*/
       return insert_element (el, elements ().begin ());
     }
 
@@ -2870,9 +2896,10 @@ sh_ams2::sequence::cost (void) const
 
 // Check whether REG is used in any element after START.
 bool
-sh_ams2::sequence::reg_used_in_sequence (rtx reg, sequence_iterator start)
+sh_ams2::sequence
+::reg_used_in_sequence (rtx reg, sequence_const_iterator start) const
 {
-  for (sequence_iterator els = start; els != elements ().end (); ++els)
+  for (sequence_const_iterator els = start; els != elements ().end (); ++els)
     {
       if ((*els)->uses_reg (reg))
         return true;
@@ -4157,11 +4184,7 @@ sh_ams2::execute (function* fun)
       // Keep the reg-mod's insn if there's a sequence that doesn't get updated.
       if (std::find_if ((*it)->sequences ().begin (),
                         (*it)->sequences ().end (),
-                        std::bind1st (
-                          std::pointer_to_binary_function<std::set<sequence*>,
-                                                          sequence*, bool> (
-                            set_contains),
-                          seqs_to_skip))
+			element_is_in (seqs_to_skip))
           != (*it)->sequences ().end ())
         {
           log_msg ("reg-mod is used by a sequence that won't be updated\n");
