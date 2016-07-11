@@ -151,7 +151,6 @@ public:
   class addr_expr;
 
  private:
-  class split_sequence_info;
   class mod_tracker;
   class mod_addr_result;
 
@@ -1206,9 +1205,7 @@ NOTE:
     }
 
   private:
-    static void split_1 (std::list<split_sequence_info>& new_seqs,
-                         reg_mod* rm, bool add_to_front, bool add_to_back);
-    static void split_2 (split_sequence_info& seq_info, sequence_element* el);
+    static void split_1 (sequence& seq, sequence_element* el);
 
     int gen_address_mod_1 (filter_iterator<sequence_iterator,
                                            element_to_optimize> el,
