@@ -266,9 +266,6 @@ log_sequence_element (const sh_ams2::sequence_element& e,
           log_msg ("\n  effective addr:  ");
           log_addr_expr (m.effective_addr ());
         }
-
-      if (!m.optimization_enabled ())
-        log_msg ("\n  (won't be optimized)");
     }
   else if (e.type () == sh_ams2::type_reg_mod)
     {
@@ -309,9 +306,10 @@ log_sequence_element (const sh_ams2::sequence_element& e,
         log_msg ("unknown");
       else
         log_addr_expr (ru.effective_addr ());
-      if (!ru.optimization_enabled ())
-        log_msg ("\n  (won't be optimized)");
     }
+
+  if (!e.optimization_enabled ())
+    log_msg ("\n  (won't be optimized)");
 
   if (e.cost () == sh_ams2::infinite_costs)
     log_msg ("\n  cost: infinite");
@@ -828,20 +826,21 @@ sh_ams2::sequence_element::remove_dependent_el (sh_ams2::sequence_element* dep)
   m_dependent_els.remove_if (sequence_element::equals (dep));
 }
 
-// Return true if the element is used (directly or indirectly) by
-// another element that cannot be optimized.
+// Return true if the element can be removed or changed by an optimization
+// subpass.
 bool
-sh_ams2::sequence_element::used_by_unoptimizable_el (void) const
+sh_ams2::sequence_element::can_be_optimized (void) const
 {
+  if (!optimization_enabled () || effective_addr ().is_invalid ())
+    return false;
+
   for (std::list<sequence_element*>::const_iterator it
          = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
     {
-      if (!(*it)->optimization_enabled ()
-          || (*it)->effective_addr ().is_invalid ()
-          || (*it)->used_by_unoptimizable_el ())
-        return true;
+      if (!(*it)->can_be_optimized ())
+        return false;
     }
-  return false;
+  return true;
 }
 
 // Return true if the effective address of FIRST and SECOND only differs in
@@ -1659,8 +1658,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   for (reg_mod_iter els = begin<reg_mod_match> (),
        els_end = end<reg_mod_match> (); els != els_end; )
     {
-      if ((*els)->insn () == NULL || (*els)->used_by_unoptimizable_el ()
-          || (*els)->effective_addr ().is_invalid ())
+      if ((*els)->insn () == NULL || !(*els)->can_be_optimized ())
         {
           ++els;
           continue;
@@ -3679,7 +3677,20 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
           // reg instead.
           if (reg_effective_addr.is_invalid ()
               || reg_current_addr.is_invalid ())
-            return make_reg_addr (x);
+            {
+              (*new_reg_mod)->set_optimization_enabled (false);
+
+              // Add a reg mod that sets the reg to itself so that the
+              // reg can be used as a starting address.
+              sequence_iterator start_addr = seq->insert_unique (
+                make_ref_counted<reg_mod> ((rtx_insn*)NULL, x, x,
+                                           make_reg_addr (x),
+                                           make_reg_addr (x)));
+              (*new_reg_mod)->add_dependency (start_addr->get ());
+              (*start_addr)->add_dependent_el (new_reg_mod->get ());
+
+              return make_reg_addr (x);
+            }
 
           return reg_effective_addr;
         }

@@ -657,9 +657,9 @@ NOTE:
     // The sequences that use or have previously used this element.
     std::set<sequence*>& sequences (void) { return m_sequences; }
 
-    // Return true if the element is used (directly or indirectly) by
-    // another element that cannot be optimized.
-    bool used_by_unoptimizable_el (void) const;
+    // Return true if the element can be removed or changed by an optimization
+    // subpass.
+    bool can_be_optimized (void) const;
 
     // Check whether the element uses the register R in any way.
     virtual bool uses_reg (rtx r ATTRIBUTE_UNUSED) const { return false; }
