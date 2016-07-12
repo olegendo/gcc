@@ -970,11 +970,18 @@ NOTE:
     reg_use (rtx_insn* i)
     : sequence_element (type_reg_use, i) { };
 
-    reg_use (rtx_insn* i, rtx reg, rtx* ref)
-    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref) { }
+    reg_use (rtx_insn* i, rtx reg)
+    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (NULL),
+      m_current_addr (make_invalid_addr ()) { }
 
-    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& ea)
-    : sequence_element (type_reg_use, i, ea), m_reg (reg), m_reg_ref (ref) { }
+    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& a)
+    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
+      m_current_addr (a) { }
+
+    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& a,
+             const addr_expr& ea)
+    : sequence_element (type_reg_use, i, ea), m_reg (reg), m_reg_ref (ref),
+      m_current_addr (a) { }
 
     virtual bool operator == (const sequence_element& other) const;
 
@@ -999,6 +1006,14 @@ NOTE:
     const rtx* reg_ref (void) const { return m_reg_ref; }
     bool set_reg_ref (rtx new_reg);
 
+    // The address expression of the reg_ref. Is either a (reg) or (reg + disp).
+    const addr_expr& current_addr (void) const { return m_current_addr; }
+    void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
+
+
+    virtual void update_cost (delegate& d, sequence& seq,
+                              sequence_iterator el_it);
+
     virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
@@ -1012,6 +1027,7 @@ NOTE:
 
     rtx m_reg;
     rtx* m_reg_ref;
+    addr_expr m_current_addr;
 
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;

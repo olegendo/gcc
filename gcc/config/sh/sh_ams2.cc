@@ -297,8 +297,11 @@ log_sequence_element (const sh_ams2::sequence_element& e,
       log_rtx (ru.reg ());
       if (ru.reg_ref ())
         {
-          log_msg ("in expr\n");
-          log_rtx (*ru.reg_ref ());
+          log_msg (" in expr\n");
+          if (ru.current_addr ().is_invalid ())
+            log_rtx (*ru.reg_ref ());
+          else
+            log_addr_expr (ru.current_addr ());
         }
 
       log_msg ("\n  effective addr:   ");
@@ -1055,6 +1058,25 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
   gcc_unreachable ();
 }
 
+void
+sh_ams2::reg_use::update_cost (delegate& d, sequence& seq,
+                               sequence_iterator el_it)
+{
+  if (m_current_addr.is_invalid () || m_current_addr.has_no_disp ())
+    {
+      set_cost (0);
+      return;
+    }
+
+  // Get the cost of the constant displacement.
+  set_cost (d.addr_reg_mod_cost (
+    gen_reg_rtx (GET_MODE (m_reg)),
+    gen_rtx_PLUS (GET_MODE (m_reg),
+                  m_current_addr.base_reg (),
+                  GEN_INT (m_current_addr.disp ())),
+    seq, el_it));
+}
+
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 bool sh_ams2::mem_access::allow_new_insns = true;
 
@@ -1485,10 +1507,19 @@ sh_ams2::sequence::find_addr_reg_uses (void)
                        it != reg_use_refs.end (); ++it)
                     {
                       rtx* use_ref = *it;
+
+                      if (use_ref == NULL)
+                        {
+                          insert_unique (make_ref_counted<reg_use> (i, *regs));
+                          continue;
+                        }
+
+                      addr_expr use_expr = rtx_to_addr_expr (*use_ref);
                       reg_use* new_reg_use
                         = (reg_use*)insert_unique (
                             make_ref_counted<reg_use> (i, *regs,
-                                                       use_ref))->get ();
+                                                       use_ref,
+                                                       use_expr))->get ();
                       addr_expr effective_addr
                         = rtx_to_addr_expr (*regs, Pmode, this, new_reg_use);
 
@@ -1497,7 +1528,6 @@ sh_ams2::sequence::find_addr_reg_uses (void)
                       if (!effective_addr.is_invalid () && use_ref
                           && (UNARY_P (*use_ref) || ARITHMETIC_P (*use_ref)))
                         {
-                          addr_expr use_expr = rtx_to_addr_expr (*use_ref);
                           effective_addr = check_make_non_mod_addr (
                             effective_addr.base_reg (),
                             effective_addr.index_reg (),
@@ -1544,8 +1574,7 @@ sh_ams2::sequence::find_addr_reg_uses (void)
       reg_mod* rm = it->second;
       reg_use* new_reg_use
         = (reg_use*)insert_unique (
-            make_ref_counted<reg_use> (last_el_insn, reg,
-                                       (rtx_def**)NULL))->get ();
+            make_ref_counted<reg_use> (last_el_insn, reg))->get ();
       new_reg_use->set_effective_addr (rm->effective_addr ());
       new_reg_use->add_dependency (rm);
       rm->add_dependent_el (new_reg_use);
@@ -1599,7 +1628,11 @@ public:
         if (it->first->is_mem_access ())
           ((mem_access*)it->first)->set_current_addr (it->second);
         else if (it->first->type () == type_reg_use)
-          ((reg_use*)it->first)->set_reg (it->second.base_reg ());
+          {
+            reg_use* ru = (reg_use*)it->first;
+            ru->set_reg (it->second.base_reg ());
+            ru->set_current_addr (it->second);
+          }
         else
           gcc_unreachable ();
       }
@@ -2064,8 +2097,9 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
           // If the expression in which the reg is used is known, modify the
           // reg that'll be used in the expression.
           tracker.addr_changed_els ()
-            .push_back (std::make_pair (ru, make_reg_addr (ru->reg ())));
+            .push_back (std::make_pair (ru, ru->current_addr ()));
           ru->set_reg (new_addr.base_reg ());
+          ru->set_current_addr (new_addr);
         }
       else
         {
