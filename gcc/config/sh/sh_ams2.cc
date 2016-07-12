@@ -1477,72 +1477,67 @@ sh_ams2::sequence::find_addr_reg_uses (void)
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
 
-      // Search for reg uses only if the insn doesn't contain any
-      // mem accesses or reg mods.
-      std::pair<insn_map::iterator, insn_map::iterator>
-        els_in_insn = elements_in_insn (i);
-
-      if (els_in_insn.first == els_in_insn.second)
+      for (std::set<rtx, cmp_by_regno>::iterator
+             regs = visited_addr_regs.begin ();
+           regs != visited_addr_regs.end (); ++regs)
         {
-          for (std::set<rtx, cmp_by_regno>::iterator
-                 regs = visited_addr_regs.begin ();
-               regs !=  visited_addr_regs.end (); ++regs)
+          // Check if the reg is used in this insn.
+          bool function_uses_reg
+            = CALL_P (i) && find_reg_fusage (i, USE, *regs);
+          if (reg_overlap_mentioned_p (*regs, PATTERN (i)) || function_uses_reg)
             {
-              // Check if the reg is used in this insn.
-              if (reg_overlap_mentioned_p (*regs, PATTERN (i))
-                  || (CALL_P (i) && find_reg_fusage (i, USE, *regs)))
+              // If so, find all references to the reg in this insn.
+              reg_use_refs.clear ();
+              find_addr_reg_uses_1 (*regs, PATTERN (i),
+                                    std::back_inserter (reg_use_refs));
+
+              // If no refs were found and this is a funcall, an
+              // unspecified reg use will be created.
+              if (reg_use_refs.empty () && function_uses_reg)
+                reg_use_refs.push_back (NULL);
+
+              // Create a reg use for each reference that was found.
+              for (std::vector<rtx*>::iterator it = reg_use_refs.begin ();
+                   it != reg_use_refs.end (); ++it)
                 {
-                  // If so, find all references to the reg in this insn.
-                  reg_use_refs.clear ();
-                  find_addr_reg_uses_1 (*regs, PATTERN (i),
-                                        std::back_inserter (reg_use_refs));
+                  rtx* use_ref = *it;
 
-                  // If no refs were found, an unspecified reg use will be
-                  // created.
-                  if (reg_use_refs.empty ())
-                    reg_use_refs.push_back (NULL);
-
-                  // Create a reg use for each reference that was found.
-                  for (std::vector<rtx*>::iterator it = reg_use_refs.begin ();
-                       it != reg_use_refs.end (); ++it)
+                  if (use_ref == NULL)
                     {
-                      rtx* use_ref = *it;
-
-                      if (use_ref == NULL)
-                        {
-                          insert_unique (make_ref_counted<reg_use> (i, *regs));
-                          continue;
-                        }
-
-                      addr_expr use_expr = rtx_to_addr_expr (*use_ref);
-                      reg_use* new_reg_use
-                        = (reg_use*)insert_unique (
-                            make_ref_counted<reg_use> (i, *regs,
-                                                       use_ref,
-                                                       use_expr))->get ();
-                      addr_expr effective_addr
-                        = rtx_to_addr_expr (*regs, Pmode, this, new_reg_use);
-
-                      // If the use ref also contains a constant displacement,
-                      // add that to the effective address.
-                      if (!effective_addr.is_invalid () && use_ref
-                          && (UNARY_P (*use_ref) || ARITHMETIC_P (*use_ref)))
-                        {
-                          effective_addr = check_make_non_mod_addr (
-                            effective_addr.base_reg (),
-                            effective_addr.index_reg (),
-                            effective_addr.scale (),
-                            effective_addr.disp () + use_expr.disp ());
-                        }
-                      new_reg_use->set_effective_addr (effective_addr);
-
-                      last_el_insn = new_reg_use->insn ();
+                      insert_unique (make_ref_counted<reg_use> (i, *regs));
+                      continue;
                     }
+
+                  addr_expr use_expr = rtx_to_addr_expr (*use_ref);
+                  reg_use* new_reg_use
+                    = (reg_use*)insert_unique (
+                        make_ref_counted<reg_use> (i, *regs,
+                                                   use_ref,
+                                                   use_expr))->get ();
+                  addr_expr effective_addr
+                    = rtx_to_addr_expr (*regs, Pmode, this, new_reg_use);
+
+                  // If the use ref also contains a constant displacement,
+                  // add that to the effective address.
+                  if (!effective_addr.is_invalid () && use_ref
+                      && (UNARY_P (*use_ref) || ARITHMETIC_P (*use_ref)))
+                    {
+                      effective_addr = check_make_non_mod_addr (
+                        effective_addr.base_reg (),
+                        effective_addr.index_reg (),
+                        effective_addr.scale (),
+                        effective_addr.disp () + use_expr.disp ());
+                    }
+                  new_reg_use->set_effective_addr (effective_addr);
+
+                  last_el_insn = new_reg_use->insn ();
                 }
             }
         }
 
       // Update the visited and live address regs list.
+      std::pair<insn_map::iterator, insn_map::iterator>
+        els_in_insn = elements_in_insn (i);
       for (insn_map::iterator els = els_in_insn.first;
            els != els_in_insn.second; ++els)
         {
@@ -2544,6 +2539,11 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
       break;
 
     case SET:
+      // If an address reg is modified, this should be a reg-mod instead
+      // of a reg-use.
+      if (m_addr_regs.find (SET_DEST (x)) != m_addr_regs.end ())
+        return;
+
       find_addr_reg_uses_1 (reg, SET_SRC (x), out);
       break;
 
