@@ -2912,6 +2912,9 @@ sh_ams2::mem_access::update_access_alternatives (const sequence& seq,
 
   alternatives ().clear ();
 
+  if (!optimization_enabled ())
+    return;
+
   d.mem_access_alternatives (alternatives (), seq, it, val_alts);
   set_alternative_validation (val_alts);
 
@@ -3908,6 +3911,8 @@ sh_ams2::execute (function* fun)
           mem_access* m = (mem_access*)m_it->get ();
           m->set_effective_addr (rtx_to_addr_expr (m->current_addr_rtx (),
                                                    m->mach_mode (), &seq, m));
+          if (m->effective_addr ().is_invalid ())
+            m->set_optimization_enabled (false);
         }
     }
 
