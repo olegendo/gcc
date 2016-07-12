@@ -532,6 +532,52 @@ prev (BidirIt it,
 } // namespace stdx
 
 
+// specializations of is_a_helper (in is-a.h)
+
+template <> template <> inline bool
+is_a_helper < sh_ams2::mem_access* >::test (sh_ams2::sequence_element* p)
+{
+  return p->type () == sh_ams2::type_mem_load
+	 || p->type () == sh_ams2::type_mem_store
+	 || p->type () == sh_ams2::type_mem_operand;
+}
+
+template <> template <> inline bool
+is_a_helper < sh_ams2::mem_load* >::test (sh_ams2::sequence_element* p)
+{
+  return p->type () == sh_ams2::type_mem_load;
+}
+
+template <> template <> inline bool
+is_a_helper < sh_ams2::mem_store* >::test (sh_ams2::sequence_element* p)
+{
+  return p->type () == sh_ams2::type_mem_store;
+}
+
+template <> template <> inline bool
+is_a_helper < sh_ams2::mem_operand* >::test (sh_ams2::sequence_element* p)
+{
+  return p->type () == sh_ams2::type_mem_operand;
+}
+
+template <> template <> inline bool
+is_a_helper < sh_ams2::reg_mod* >::test (sh_ams2::sequence_element* p)
+{
+  return p->type () == sh_ams2::type_reg_mod;
+}
+
+template <> template <> inline bool
+is_a_helper < sh_ams2::reg_barrier* >::test (sh_ams2::sequence_element* p)
+{
+  return p->type () == sh_ams2::type_reg_barrier;
+}
+
+template <> template <> inline bool
+is_a_helper < sh_ams2::reg_use* >::test (sh_ams2::sequence_element* p)
+{
+  return p->type () == sh_ams2::type_reg_use;
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 // RTL pass class
 
@@ -1013,14 +1059,12 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
   for (std::list<sh_ams2::sequence_element*>::iterator it =
          dependencies ().begin (); it != dependencies ().end (); ++it)
     {
-      if ((*it)->type () != type_reg_mod)
-        continue;
-
-      if (regs_equal (((reg_mod*)*it)->reg (), reused_reg))
-        {
-          reused_rm = (reg_mod*)*it;
-          break;
-        }
+      if (reg_mod* rm = dyn_cast<reg_mod*> (*it))
+	if (regs_equal (rm->reg (), reused_reg))
+	  {
+	    reused_rm = rm;
+	    break;
+	  }
     }
   gcc_assert (reused_rm != NULL);
 
@@ -1029,17 +1073,19 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
          reused_rm->dependent_els ().begin ();
        it != reused_rm->dependent_els ().end (); ++it)
     {
-      if ((*it)->type () != type_reg_mod)
-        continue;
+      reg_mod* rm = dyn_cast<reg_mod*> (*it);
 
-      if (((reg_mod*)*it)->current_addr ().is_invalid ())
+      if (rm == NULL)
+	continue;
+
+      if (rm->current_addr ().is_invalid ())
         continue;
 
       rtx dep_reused_reg;
-      if (((reg_mod*)*it)->current_addr ().has_base_reg ())
-        dep_reused_reg = ((reg_mod*)*it)->current_addr ().base_reg ();
-      else if (((reg_mod*)*it)->current_addr ().has_index_reg ())
-        dep_reused_reg = ((reg_mod*)*it)->current_addr ().index_reg ();
+      if (rm->current_addr ().has_base_reg ())
+        dep_reused_reg = rm->current_addr ().base_reg ();
+      else if (rm->current_addr ().has_index_reg ())
+        dep_reused_reg = rm->current_addr ().index_reg ();
       else
         continue;
 
@@ -1542,14 +1588,14 @@ sh_ams2::sequence::find_addr_reg_uses (void)
            els != els_in_insn.second; ++els)
         {
           sequence_element* el = els->second->get ();
-          if (el->type () == type_reg_mod)
+          if (reg_mod* rm = dyn_cast<reg_mod*> (el))
             {
-              reg_mod* rm = (reg_mod*)el;
               visited_addr_regs.insert (rm->reg ());
               live_addr_regs[rm->reg ()] = rm;
             }
           last_el_insn = el->insn ();
         }
+
       for (std::map<rtx, reg_mod*, cmp_by_regno>::iterator it
              = live_addr_regs.begin (); it != live_addr_regs.end ();)
         {
@@ -1620,11 +1666,10 @@ public:
            ::reverse_iterator it = m_addr_changed_els.rbegin ();
          it != m_addr_changed_els.rend (); ++it)
       {
-        if (it->first->is_mem_access ())
-          ((mem_access*)it->first)->set_current_addr (it->second);
-        else if (it->first->type () == type_reg_use)
+        if (mem_access* ma = dyn_cast<mem_access*> (it->first))
+          ma->set_current_addr (it->second);
+        else if (reg_use* ru = dyn_cast<reg_use*> (it->first))
           {
-            reg_use* ru = (reg_use*)it->first;
             ru->set_reg (it->second.base_reg ());
             ru->set_current_addr (it->second);
           }
@@ -1703,10 +1748,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     {
       // Mark the reg-mods before the current element as visited.
       for (sequence_iterator it = prev_el; it != els; ++it)
-        {
-          if ((*it)->type () == type_reg_mod)
-            visited_reg_mods.insert ((reg_mod*)it->get ());
-        }
+	if (reg_mod* rm = dyn_cast<reg_mod*> (it->get ()))
+	  visited_reg_mods.insert (rm);
 
       gen_address_mod_1 (els, dlg, used_reg_mods, visited_reg_mods,
                          base_lookahead
@@ -1719,8 +1762,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   for (reg_mod_iter els = begin<reg_mod_match> (),
        els_end = end<reg_mod_match> (); els != els_end; )
     {
-      gcc_assert ((*els)->type() == type_reg_mod);
-      reg_mod* rm = (reg_mod*)els->get ();
+      reg_mod* rm = as_a<reg_mod*> (els->get ());
       if (!rm->current_addr ().is_invalid ()
 	  && rm->current_addr ().has_no_base_reg () &&
           rm->current_addr ().has_no_index_reg ())
@@ -1854,14 +1896,11 @@ gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
           // Mark the reg-mods between the current and next element as visited.
           // This will be undone by the mod-tracker later.
           for (sequence_iterator it = el; it != next_el; ++it)
-            {
-              if ((*it)->type () == type_reg_mod)
-                {
-                  reg_mod* rm = (reg_mod*)it->get ();
-                  visited_reg_mods.insert (rm);
-                  tracker.visited_changed_reg_mods ().push_back (rm);
-                }
-            }
+	    if (reg_mod* rm = dyn_cast<reg_mod*> (it->get ()))
+	      {
+		visited_reg_mods.insert (rm);
+		tracker.visited_changed_reg_mods ().push_back (rm);
+	      }
 
           int next_cost = gen_address_mod_1 (next_el, dlg,
                                              used_reg_mods, visited_reg_mods,
@@ -1939,8 +1978,9 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
   reg_mod* min_start_addr = NULL;
   mod_tracker tracker (*this, used_reg_mods, visited_reg_mods);
   machine_mode acc_mode = Pmode;
-  if ((*el)->type () == type_reg_use)
-    acc_mode = GET_MODE (((reg_use*)el->get ())->reg ());
+
+  if (reg_use* ru = dyn_cast<reg_use*> (el->get ()))
+    acc_mode = GET_MODE (ru->reg ());
 
   std::list<reg_mod*> start_addrs;
   start_addresses ().get_relevant_addresses (end_addr,
@@ -2021,8 +2061,8 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
 
   if ((*el)->is_mem_access ())
     acc_mode = Pmode;
-  else if ((*el)->type () == type_reg_use)
-    acc_mode = GET_MODE (((reg_use*)el->get ())->reg ());
+  else if (reg_use* ru = dyn_cast<reg_use*> (el->get ()))
+    acc_mode = GET_MODE (ru->reg ());
   else
     gcc_unreachable ();
 
@@ -2074,18 +2114,16 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
   else if (alt.address ().type () == post_mod)
     new_addr = post_mod_addr (new_addr.base_reg (), alt.address ().disp ());
 
-  if ((*el)->is_mem_access ())
+  if (mem_access* m = dyn_cast<mem_access*> (el->get ()))
     {
       // Update the current address of the mem access with the alternative.
-      mem_access* m = (mem_access*)el->get ();
       tracker.addr_changed_els ()
         .push_back (std::make_pair (m, m->current_addr ()));
       m->set_current_addr (new_addr);
       m->set_cost (alt.cost ());
     }
-  else if ((*el)->type () == type_reg_use)
+  else if (reg_use* ru = dyn_cast<reg_use*> (el->get ()))
     {
-      reg_use* ru = (reg_use*)el->get ();
       gcc_assert (new_addr.has_no_index_reg () && new_addr.has_no_disp ());
       if (ru->reg_ref () != NULL)
         {
@@ -2110,9 +2148,8 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
           // Find and add the dependency for the new reg-mod
           for (sequence_iterator it = stdx::prev (inserted_el); ; --it)
             {
-              if ((*it)->type () == type_reg_mod)
+	      if (reg_mod* rm = dyn_cast<reg_mod*> (it->get ()))
                 {
-                  reg_mod* rm = (reg_mod*)it->get ();
                   if (regs_equal (rm->reg (), new_addr.base_reg ())
                       || regs_equal (rm->reg (), new_addr.index_reg ()))
                     {
@@ -2625,9 +2662,8 @@ sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
       m_insn_el_map.insert (std::make_pair (el->insn (), iter));
 
   // Update the address reg and the start address list.
-  if (el->type () == type_reg_mod)
+  if (reg_mod* rm = dyn_cast<reg_mod*> (el.get ()))
     {
-      reg_mod* rm = (reg_mod*)el.get ();
       ++m_addr_regs[rm->reg ()];
       m_start_addr_list.add (rm);
     }
@@ -2749,11 +2785,9 @@ sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el,
     }
 
   // Update the address reg and the start address list.
-  if ((*el)->type () == type_reg_mod)
+  if (reg_mod* rm = dyn_cast<reg_mod*> (el->get ()))
     {
-      reg_mod* rm = (reg_mod*)el->get ();
-      addr_reg_map::iterator addr_reg
-        = m_addr_regs.find (rm->reg ());
+      addr_reg_map::iterator addr_reg = m_addr_regs.find (rm->reg ());
       --addr_reg->second;
       if (addr_reg->second == 0)
         m_addr_regs.erase (addr_reg);
@@ -2890,19 +2924,15 @@ sh_ams2::sequence::cost_already_minimal (void) const
   for (sequence_const_iterator els = elements ().begin ();
        els != elements ().end (); ++els)
     {
-      if ((*els)->is_mem_access ())
-        {
-          mem_access *m = (mem_access*)els->get ();
-          for (alternative_set::const_iterator
-		  alt = m->alternatives ().begin ();
-               alt != m->alternatives ().end (); ++alt)
-            {
-              if (alt->cost () < m->cost ())
-                return false;
-            }
-        }
+      if (mem_access* m = dyn_cast<mem_access*> (els->get ()))
+	{
+	  for (alternative_set::const_iterator a = m->alternatives ().begin ();
+	       a != m->alternatives ().end (); ++a)
+	    if (a->cost () < m->cost ())
+	      return false;
+	}
       else if ((*els)->cost () > 0)
-        return false;
+	return false;
     }
   return true;
 }
