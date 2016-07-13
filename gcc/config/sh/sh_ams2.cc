@@ -1517,7 +1517,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                                            reg_current_addr))->get ();
           addr_expr reg_effective_addr
             = rtx_to_addr_expr (value, prev_val.acc ? prev_val.acc->mach_mode ()
-                                : Pmode,
+                                                    : Pmode,
                                 this, new_reg_mod);
           new_reg_mod->set_effective_addr (reg_effective_addr);
 
@@ -1541,7 +1541,6 @@ sh_ams2::sequence::find_addr_reg_uses (void)
   std::set<rtx, cmp_by_regno> visited_addr_regs;
   std::map<rtx, reg_mod*, cmp_by_regno> live_addr_regs;
   std::vector<rtx*> reg_use_refs;
-  rtx_insn* last_el_insn = NULL;
 
   for (rtx_insn* i = start_insn (); i != NULL_RTX; i = next_nonnote_insn_bb (i))
     {
@@ -1552,57 +1551,50 @@ sh_ams2::sequence::find_addr_reg_uses (void)
              regs = visited_addr_regs.begin ();
            regs != visited_addr_regs.end (); ++regs)
         {
-          // Check if the reg is used in this insn.
-          bool function_uses_reg
-            = CALL_P (i) && find_reg_fusage (i, USE, *regs);
-          if (reg_overlap_mentioned_p (*regs, PATTERN (i)) || function_uses_reg)
+          // Find all references to the reg in this insn.
+          reg_use_refs.clear ();
+          find_addr_reg_uses_1 (*regs, PATTERN (i),
+                                std::back_inserter (reg_use_refs));
+
+          // If no refs were found and this is a funcall, an
+          // unspecified reg use will be created.
+          if (reg_use_refs.empty () && CALL_P (i)
+              && find_reg_fusage (i, USE, *regs))
+            reg_use_refs.push_back (NULL);
+
+          // Create a reg use for each reference that was found.
+          for (std::vector<rtx*>::iterator it = reg_use_refs.begin ();
+               it != reg_use_refs.end (); ++it)
             {
-              // If so, find all references to the reg in this insn.
-              reg_use_refs.clear ();
-              find_addr_reg_uses_1 (*regs, PATTERN (i),
-                                    std::back_inserter (reg_use_refs));
+              rtx* use_ref = *it;
 
-              // If no refs were found and this is a funcall, an
-              // unspecified reg use will be created.
-              if (reg_use_refs.empty () && function_uses_reg)
-                reg_use_refs.push_back (NULL);
-
-              // Create a reg use for each reference that was found.
-              for (std::vector<rtx*>::iterator it = reg_use_refs.begin ();
-                   it != reg_use_refs.end (); ++it)
+              if (use_ref == NULL)
                 {
-                  rtx* use_ref = *it;
-
-                  if (use_ref == NULL)
-                    {
-                      insert_unique (make_ref_counted<reg_use> (i, *regs));
-                      continue;
-                    }
-
-                  addr_expr use_expr = rtx_to_addr_expr (*use_ref);
-                  reg_use* new_reg_use
-                    = (reg_use*)insert_unique (
-                        make_ref_counted<reg_use> (i, *regs,
-                                                   use_ref,
-                                                   use_expr))->get ();
-                  addr_expr effective_addr
-                    = rtx_to_addr_expr (*regs, Pmode, this, new_reg_use);
-
-                  // If the use ref also contains a constant displacement,
-                  // add that to the effective address.
-                  if (!effective_addr.is_invalid () && use_ref
-                      && (UNARY_P (*use_ref) || ARITHMETIC_P (*use_ref)))
-                    {
-                      effective_addr = check_make_non_mod_addr (
-                        effective_addr.base_reg (),
-                        effective_addr.index_reg (),
-                        effective_addr.scale (),
-                        effective_addr.disp () + use_expr.disp ());
-                    }
-                  new_reg_use->set_effective_addr (effective_addr);
-
-                  last_el_insn = new_reg_use->insn ();
+                  insert_unique (make_ref_counted<reg_use> (i, *regs));
+                  continue;
                 }
+
+              addr_expr use_expr = rtx_to_addr_expr (*use_ref);
+              reg_use* new_reg_use
+                = (reg_use*)insert_unique (
+                    make_ref_counted<reg_use> (i, *regs,
+                                               use_ref,
+                                               use_expr))->get ();
+              addr_expr effective_addr
+                = rtx_to_addr_expr (*regs, Pmode, this, new_reg_use);
+
+              // If the use ref also contains a constant displacement,
+              // add that to the effective address.
+              if (!effective_addr.is_invalid () && use_ref
+                  && (UNARY_P (*use_ref) || ARITHMETIC_P (*use_ref)))
+                {
+                  effective_addr = check_make_non_mod_addr (
+                    effective_addr.base_reg (),
+                    effective_addr.index_reg (),
+                    effective_addr.scale (),
+                    effective_addr.disp () + use_expr.disp ());
+                }
+              new_reg_use->set_effective_addr (effective_addr);
             }
         }
 
@@ -1618,7 +1610,6 @@ sh_ams2::sequence::find_addr_reg_uses (void)
               visited_addr_regs.insert (rm->reg ());
               live_addr_regs[rm->reg ()] = rm;
             }
-          last_el_insn = el->insn ();
         }
 
       for (std::map<rtx, reg_mod*, cmp_by_regno>::iterator it
@@ -1638,9 +1629,9 @@ sh_ams2::sequence::find_addr_reg_uses (void)
     {
       rtx reg = it->first;
       reg_mod* rm = it->second;
-      reg_use* new_reg_use
-        = (reg_use*)insert_unique (
-            make_ref_counted<reg_use> (last_el_insn, reg))->get ();
+      reg_use* new_reg_use = (reg_use*)insert_element (
+        make_ref_counted<reg_use> ((rtx_insn*)NULL, reg),
+        elements ().end ())->get ();
       new_reg_use->set_effective_addr (rm->effective_addr ());
       new_reg_use->add_dependency (rm);
       rm->add_dependent_el (new_reg_use);
@@ -2656,7 +2647,7 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
       break;
 
     default:
-      if (UNARY_P (x) || ARITHMETIC_P (x))
+      if (UNARY_P (x) || BINARY_P (x))
         {
           // If the reg is inside a (plus reg (const_int ...)) rtx,
           // add the whole rtx instead of just the reg.
