@@ -3788,24 +3788,14 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
 
           (*new_reg_mod)->set_effective_addr (reg_effective_addr);
 
+          if (reg_current_addr.is_invalid ()
+              || reg_effective_addr.is_invalid ())
+            (*new_reg_mod)->set_optimization_enabled (false);
+
           // If the expression is something AMS can't handle, use the original
           // reg instead.
-          if (reg_effective_addr.is_invalid ()
-              || reg_current_addr.is_invalid ())
-            {
-              (*new_reg_mod)->set_optimization_enabled (false);
-
-              // Add a reg mod that sets the reg to itself so that the
-              // reg can be used as a starting address.
-              sequence_iterator start_addr = seq->insert_unique (
-                make_ref_counted<reg_mod> ((rtx_insn*)NULL, x, x,
-                                           make_reg_addr (x),
-                                           make_reg_addr (x)));
-              (*new_reg_mod)->add_dependency (start_addr->get ());
-              (*start_addr)->add_dependent_el (new_reg_mod->get ());
-
-              return make_reg_addr (x);
-            }
+          if (reg_effective_addr.is_invalid ())
+            return make_reg_addr (x);
 
           return reg_effective_addr;
         }
