@@ -1188,6 +1188,22 @@ private:
   sequence* m_new_seq;
 };
 
+// The return type of find_reg_value. Stores the reg's value, the modifying
+// insn and the modifying mem access in case of auto-mod accesses.
+class sh_ams2::find_reg_value_result
+{
+public:
+  rtx value;
+  rtx_insn* insn;
+  mem_access* acc;
+
+  find_reg_value_result (rtx v, rtx_insn* i)
+    : value (v), insn (i), acc (NULL) { }
+
+  find_reg_value_result (rtx v, rtx_insn* i, mem_access* a)
+    : value (v), insn (i), acc (a) { }
+};
+
 // Return all the start addresses that could be used to arrive at END_ADDR.
 // FIXME: Avoid copying the list elements over and over.
 template <typename OutputIterator> void
@@ -1479,23 +1495,30 @@ sh_ams2::sequence::find_addr_reg_mods (void)
 
       while (last_insn != NULL)
         {
-          std::pair<rtx, rtx_insn*> prev_val = find_reg_value (reg, last_insn);
-          rtx value = prev_val.first;
-          rtx_insn* mod_insn = prev_val.second;
+          find_reg_value_result prev_val = find_reg_value (reg, last_insn);
+          rtx value = prev_val.value;
+          rtx_insn* mod_insn = prev_val.insn;
 
           if (value != NULL_RTX && REG_P (value) && regs_equal (value, reg))
             break;
 
-          addr_expr reg_current_addr
-            = find_reg_note (mod_insn, REG_INC, NULL_RTX)
-            ? make_reg_addr (reg) : rtx_to_addr_expr (value);
+          addr_expr reg_current_addr = rtx_to_addr_expr (
+            value, prev_val.acc ? prev_val.acc->mach_mode () : Pmode);
+
+          if (reg_current_addr.type () == pre_mod
+              || reg_current_addr.type () == post_mod)
+            reg_current_addr = non_mod_addr (reg_current_addr.base_reg (),
+                                             invalid_regno,
+                                             1, reg_current_addr.disp ());
 
           reg_mod* new_reg_mod
             = (reg_mod*)insert_unique (
                 make_ref_counted<reg_mod> (mod_insn, reg, value,
                                            reg_current_addr))->get ();
-          addr_expr reg_effective_addr = rtx_to_addr_expr (value, Pmode,
-                                                           this, new_reg_mod);
+          addr_expr reg_effective_addr
+            = rtx_to_addr_expr (value, prev_val.acc ? prev_val.acc->mach_mode ()
+                                : Pmode,
+                                this, new_reg_mod);
           new_reg_mod->set_effective_addr (reg_effective_addr);
 
           if (last_reg_mod != NULL)
@@ -3334,7 +3357,7 @@ sh_ams2::reg_mod::generate_new_insns (bool insn_sequence_started)
 // START_INSN.  Return that value along with the insn in which REG gets
 // modified.  If the value of REG cannot be determined, return NULL.
 // If REG didn't get modified, return the REG itself.
-std::pair<rtx, rtx_insn*>
+sh_ams2::find_reg_value_result
 sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
 {
   std::vector<mem_access*> mems;
@@ -3345,11 +3368,11 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
   for (i = start_insn; i != NULL_RTX; i = prev_nonnote_insn_bb (i))
     {
       if (BARRIER_P (i))
-	return std::make_pair (NULL_RTX, i);
+	return find_reg_value_result (NULL_RTX, i);
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
       if (reg_set_p (reg, i) && CALL_P (i))
-	return std::make_pair (NULL_RTX, i);
+	return find_reg_value_result (NULL_RTX, i);
 
       std::pair<rtx, bool> r = find_reg_value_1 (reg, i);
       if (!r.second)
@@ -3377,26 +3400,26 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
                   if (GET_RTX_CLASS (code) == RTX_AUTOINC
                       && REG_P (XEXP (mem_addr, 0))
                       && regs_equal (XEXP (mem_addr, 0), reg))
-                    return std::make_pair (mem_addr, i);
+                    return find_reg_value_result (mem_addr, i, acc);
                 }
               gcc_unreachable ();
             }
           else
             {
               // The reg is modified in some unspecified way, e.g. a clobber.
-              return std::make_pair (NULL_RTX, i);
+              return find_reg_value_result (NULL_RTX, i);
             }
         }
       else
         {
           if (GET_CODE (r.first) == SET)
-            return std::make_pair (SET_SRC (r.first), i);
+            return find_reg_value_result (SET_SRC (r.first), i);
           else
-            return std::make_pair (NULL_RTX, i);
+            return find_reg_value_result (NULL_RTX, i);
         }
     }
 
-  return std::make_pair (reg, i);
+  return find_reg_value_result (reg, i);
 }
 
 // The recursive part of find_reg_value. If REG is modified in INSN,
@@ -3748,10 +3771,10 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
         {
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
-          std::pair<rtx, rtx_insn*> prev_val
+          find_reg_value_result prev_val
             = seq->find_reg_value (x, prev_nonnote_insn_bb (el->insn ()));
-          rtx value = prev_val.first;
-          rtx_insn* mod_insn = prev_val.second;
+          rtx value = prev_val.value;
+          rtx_insn* mod_insn = prev_val.insn;
 
           // Stop expanding the reg if the reg can't be expanded any further.
           if (value != NULL_RTX && REG_P (value) && regs_equal (value, x))
@@ -3783,8 +3806,10 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
           (*new_reg_mod)->add_dependent_el (el);
 
           // Expand the register's value further.
-          addr_expr reg_effective_addr = rtx_to_addr_expr (
-            value, mem_mach_mode, seq, new_reg_mod->get ());
+          addr_expr reg_effective_addr
+            = rtx_to_addr_expr (value, prev_val.acc ? prev_val.acc->mach_mode ()
+                                                    : mem_mach_mode,
+                                seq, new_reg_mod->get ());
 
           (*new_reg_mod)->set_effective_addr (reg_effective_addr);
 

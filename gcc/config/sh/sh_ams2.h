@@ -153,6 +153,7 @@ public:
  private:
   class mod_tracker;
   class mod_addr_result;
+  class find_reg_value_result;
 
  public:
 
@@ -1160,7 +1161,7 @@ NOTE:
 
     // Find the value that REG was last set to, starting the search from
     // START_INSN.
-    std::pair<rtx, rtx_insn*> find_reg_value (rtx reg, rtx_insn* start_insn);
+    find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn);
 
     // The first insn and basic block in the sequence.
     sequence_const_iterator start_insn_element (void) const;
