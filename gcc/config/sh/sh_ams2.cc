@@ -961,7 +961,7 @@ sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
                                   sequence& seq ATTRIBUTE_UNUSED,
                                   sequence_iterator el_it ATTRIBUTE_UNUSED)
 {
-  if (!optimization_enabled () || effective_addr ().is_invalid ())
+  if (effective_addr ().is_invalid ())
     {
       set_cost (0);
       return;
@@ -980,7 +980,9 @@ sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
           return;
         }
     }
-  gcc_unreachable ();
+
+  gcc_assert (!optimization_enabled ());
+  set_cost (0);
 }
 
 void
@@ -1726,6 +1728,52 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 {
   typedef element_type_matches<type_reg_mod> reg_mod_match;
   typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
+
+  // If a reg has been set more than once, skip the elements that use
+  // that reg since we don't know which value they use.
+  // FIXME: Find a way to tell apart different versions of the same register.
+  std::map<rtx, int, cmp_by_regno> reg_set_count;
+  for (sequence_iterator el = elements ().begin ();
+       el != elements ().end (); ++el)
+    {
+      if (reg_mod* rm = dyn_cast<reg_mod*> (el->get ()))
+        {
+          // Count only those reg-mods that won't be removed.
+          if (rm->insn () == NULL || !rm->can_be_optimized ())
+            {
+              std::map<rtx, int, cmp_by_regno>::iterator found
+                = reg_set_count.find (rm->reg ());
+              if (found == reg_set_count.end ())
+                reg_set_count.insert (std::make_pair (rm->reg (), 1));
+              else
+                ++found->second;
+            }
+        }
+
+      if ((*el)->effective_addr ().is_invalid ())
+        continue;
+
+      if ((*el)->effective_addr ().has_base_reg ())
+        {
+          std::map<rtx, int, cmp_by_regno>::iterator found
+            = reg_set_count.find (((*el)->effective_addr ().base_reg ()));
+          if (found->second > 1)
+            {
+              (*el)->set_optimization_enabled (false);
+              continue;
+            }
+        }
+      if ((*el)->effective_addr ().has_index_reg ())
+        {
+          std::map<rtx, int, cmp_by_regno>::iterator found
+            = reg_set_count.find (((*el)->effective_addr ().index_reg ()));
+          if (found->second > 1)
+            {
+              (*el)->set_optimization_enabled (false);
+              continue;
+            }
+        }
+    }
 
   // Remove the sequence's original reg-mods.
   for (reg_mod_iter els = begin<reg_mod_match> (),
