@@ -2743,16 +2743,30 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
   if (elements ().empty ())
     return insert_element (el, elements ().end ());
 
-  // Elements without an insn go to the sequence's start.
   if (!el->insn ())
     {
-      // Check for duplicates.
-      for (sequence_iterator els = elements ().begin ();
-           els != elements ().end () && !(*els)->insn (); ++els)
+      // Reg-uses without an insn go to the sequence's end.
+      if (el->type () == type_reg_use)
         {
-          if (*el == **els)
-            return els;
+          // Check for duplicates.
+          for (sequence_reverse_iterator els = elements ().rbegin ();
+               els != elements ().rend () && !(*els)->insn (); ++els)
+            {
+              if (*el == **els)
+                return stdx::next (els).base ();
+            }
+          return insert_element (el, elements ().end ());
         }
+      // Other insn-less elements go to the sequence's start.
+      else
+        {
+          // Check for duplicates.
+          for (sequence_iterator els = elements ().begin ();
+               els != elements ().end () && !(*els)->insn (); ++els)
+            {
+              if (*el == **els)
+                return els;
+            }
 
 /*
       // FIXME: this should be the same as above, shouldn't it?
@@ -2764,11 +2778,9 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
       if (els != first_insn_i)
 	return els;
 */
-      return insert_element (el, elements ().begin ());
+          return insert_element (el, elements ().begin ());
+        }
     }
-
-  if (!elements ().back ()->insn ())
-      return insert_element (el, elements ().end ());
 
   // If the sequence element's insn contains other elements, insert
   // the element after them.
@@ -2802,13 +2814,20 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
       els_in_insn = elements_in_insn (i);
       if (els_in_insn.first == els_in_insn.second)
         {
-          // If there are no elements after this insn, insert it to the
-          // sequence's end.
+          // If there are no elements after this insn, insert it before
+          // the insn-less reg-uses.
           if (i == NULL)
-            return insert_element (el, elements ().end ());
+            {
+              for (sequence_reverse_iterator els = elements ().rbegin ();
+                   els != elements ().rend (); ++els)
+                {
+                  if ((*els)->type () != type_reg_use)
+                    return insert_element (el, els.base ());
+                }
+              return insert_element (el, elements ().begin ());
+            }
           continue;
         }
-
 
       for (insn_map::iterator els = els_in_insn.first;
            els != els_in_insn.second; ++els)
