@@ -1501,14 +1501,8 @@ sh_ams2::sequence::find_addr_reg_mods (void)
           if (value != NULL_RTX && REG_P (value) && regs_equal (value, reg))
             break;
 
-          addr_expr reg_current_addr = rtx_to_addr_expr (
-            value, prev_val.acc ? prev_val.acc->mach_mode () : Pmode);
-
-          if (reg_current_addr.type () == pre_mod
-              || reg_current_addr.type () == post_mod)
-            reg_current_addr = non_mod_addr (reg_current_addr.base_reg (),
-                                             invalid_regno,
-                                             1, reg_current_addr.disp ());
+          addr_expr reg_current_addr
+            = prev_val.acc ? make_reg_addr (reg) : rtx_to_addr_expr (value);
 
           reg_mod* new_reg_mod
             = (reg_mod*)insert_unique (
