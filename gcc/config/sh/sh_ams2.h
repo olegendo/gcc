@@ -577,7 +577,7 @@ public:
 
     virtual bool operator == (const sequence_element& other) const
     {
-      return type () == other.type ();
+      return type () == other.type () && insn () == other.insn ();
     }
 
     // Returns the type of the element.  Could also use RTTI for this.

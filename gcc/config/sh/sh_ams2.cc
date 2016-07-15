@@ -325,7 +325,6 @@ log_sequence_element (const sh_ams2::sequence_element& e,
   if (e.dec_chain ().length () > 1)
     log_msg ("\n  (dec chain pos: %d  length: %d)", e.dec_chain ().pos (),
 						    e.dec_chain ().length ());
-
   if (log_dependencies)
     {
       if (!e.dependencies ().empty ())
@@ -3657,7 +3656,8 @@ bool sh_ams2::reg_use::
 operator == (const sequence_element& other) const
 {
   return sequence_element::operator == (other)
-    && sh_ams2::regs_equal (reg (), ((const reg_use&)other).reg ());
+    && sh_ams2::regs_equal (reg (), ((const reg_use&)other).reg ())
+    && current_addr () == ((const reg_use&)other).current_addr ();
 }
 
 // Return a non_mod_addr if it can be created with the given scale and
