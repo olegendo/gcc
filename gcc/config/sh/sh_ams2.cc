@@ -2821,7 +2821,7 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
               for (sequence_reverse_iterator els = elements ().rbegin ();
                    els != elements ().rend (); ++els)
                 {
-                  if ((*els)->type () != type_reg_use)
+                  if ((*els)->insn () || (*els)->type () != type_reg_use)
                     return insert_element (el, els.base ());
                 }
               return insert_element (el, elements ().begin ());
