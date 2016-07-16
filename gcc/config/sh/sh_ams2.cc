@@ -891,6 +891,14 @@ sh_ams2::sequence_element::can_be_optimized (void) const
   return true;
 }
 
+bool
+sh_ams2::reg_mod::can_be_optimized (void) const
+{
+  if (m_auto_mod_acc && !m_auto_mod_acc->optimization_enabled ())
+    return false;
+  return sequence_element::can_be_optimized ();
+}
+
 // Return true if the effective address of FIRST and SECOND only differs in
 // the constant displacement and the difference is DIFF.
 bool
@@ -1513,6 +1521,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                                                     : Pmode,
                                 this, new_reg_mod);
           new_reg_mod->set_effective_addr (reg_effective_addr);
+          new_reg_mod->set_auto_mod_acc (prev_val.acc);
 
           if (last_reg_mod != NULL)
             {
@@ -1788,6 +1797,12 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     {
       if ((*els)->insn () == NULL || !(*els)->can_be_optimized ())
         {
+          // If an auto-mod mem access' reg-mod can't be removed, the
+          // access shouldn't be changed either.
+          reg_mod* rm = dyn_cast<reg_mod*> (els->get ());
+          if (rm->auto_mod_acc ())
+            rm->auto_mod_acc ()->set_optimization_enabled (false);
+
           ++els;
           continue;
         }
@@ -2477,6 +2492,9 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                          c_start_addr.scale (),
                                          c_start_addr.disp () + auto_mod_disp),
                            el, tracker, used_reg_mods, visited_reg_mods, dlg);
+
+      if (mem_access* m = dyn_cast<mem_access*> (el->get ()))
+        start_addr->set_auto_mod_acc (m);
       c_start_addr = start_addr->effective_addr ();
       start_addr->adjust_cost (clone_cost);
       clone_cost = 0;
@@ -3811,6 +3829,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
                                                              reg_current_addr));
           el->add_dependency (new_reg_mod->get ());
           (*new_reg_mod)->add_dependent_el (el);
+          ((reg_mod*)new_reg_mod->get ())->set_auto_mod_acc (prev_val.acc);
 
           // Expand the register's value further.
           addr_expr reg_effective_addr

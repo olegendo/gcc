@@ -660,7 +660,7 @@ NOTE:
 
     // Return true if the element can be removed or changed by an optimization
     // subpass.
-    bool can_be_optimized (void) const;
+    virtual bool can_be_optimized (void) const;
 
     // Check whether the element uses the register R in any way.
     virtual bool uses_reg (rtx r ATTRIBUTE_UNUSED) const { return false; }
@@ -887,17 +887,18 @@ NOTE:
   public:
     reg_mod (rtx_insn* i, rtx r, rtx v)
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_current_addr (make_invalid_addr ()) { };
+    m_current_addr (make_invalid_addr ()), m_auto_mod_acc (NULL) { };
 
     reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a, addr_expr ea)
       : sequence_element (type_reg_mod, i, ea), m_reg (r), m_value (v),
-    m_current_addr (a) { };
+    m_current_addr (a), m_auto_mod_acc (NULL) { };
 
     reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a)
     : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_current_addr (a) { };
+    m_current_addr (a), m_auto_mod_acc (NULL) { };
 
     virtual bool operator == (const sequence_element& other) const;
+    virtual bool can_be_optimized (void) const;
 
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
@@ -909,6 +910,11 @@ NOTE:
     // Might be invalid if AMS was not able to understand it (-> barrier)
     const addr_expr& current_addr (void) const { return m_current_addr; }
     void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
+
+    // The mem_access for reg-mods that are caused by auto-mod accesses.
+    mem_access* auto_mod_acc (void) const { return m_auto_mod_acc; }
+    void set_auto_mod_acc (mem_access* a)  { m_auto_mod_acc = a; }
+
 
     virtual void update_cost (delegate& d, sequence& seq,
                               sequence_iterator el_it);
@@ -925,6 +931,7 @@ NOTE:
     rtx m_reg;
     rtx m_value;
     addr_expr m_current_addr;
+    mem_access* m_auto_mod_acc;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
