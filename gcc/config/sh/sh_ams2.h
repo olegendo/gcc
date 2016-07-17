@@ -246,7 +246,7 @@ public:
   // pointers.  i.e. we can't pass/copy the whole thing by value and keep the
   // type info.  because of that we have one fat address expression base class
   // that keeps all the possible members of all subclasses.
-  enum addr_type_t { non_mod, pre_mod, post_mod };
+  enum addr_type_t { invalid_addr_expr, non_mod, pre_mod, post_mod };
 
   class addr_expr
   {
@@ -258,10 +258,11 @@ public:
 
     typedef filter_iterator<const rtx*, is_valid_regno> regs_iterator;
 
-    addr_expr (void) : m_cached_to_rtx (NULL)
+    addr_expr (void)
+    : m_type (invalid_addr_expr), m_base_index_reg (), m_disp (0),
+      m_disp_min (0), m_disp_max (0), m_scale (0), m_scale_min (0),
+      m_scale_max (0), m_cached_to_rtx (0)
     {
-      m_base_index_reg[0] = invalid_regno;
-      m_base_index_reg[1] = invalid_regno;
     }
 
     addr_type_t type (void) const { return m_type; }
@@ -323,8 +324,8 @@ public:
 
     std::pair<disp_t, bool> operator - (const addr_expr& other) const;
 
-    // returns true if address expression is valid or not.
-    bool is_invalid (void) const { return disp_min () > disp_max (); }
+    // tells if this address expression is valid or not.
+    bool is_invalid (void) const { return type () == invalid_addr_expr; }
     bool is_valid (void) const { return !is_invalid (); }
 
     // displacement relative to the base reg before the actual memory access.
@@ -1486,7 +1487,7 @@ sh_ams2::make_pre_dec_addr (machine_mode mode, rtx base_reg)
 inline sh_ams2::addr_expr
 sh_ams2::make_invalid_addr (void)
 {
-  return make_disp_addr (-1, -2);
+  return addr_expr ();
 }
 
 inline bool
