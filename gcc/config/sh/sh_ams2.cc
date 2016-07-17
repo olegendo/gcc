@@ -1730,16 +1730,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
         {
           // Count only those reg-mods that won't be removed.
           if (rm->insn () == NULL || !rm->can_be_optimized ())
-            {
-		// FIXME: use std::map::insert.
-		// it will reject duplicate entries, no need to find them first.
-              std::map<rtx, int, cmp_by_regno>::iterator found
-                = reg_set_count.find (rm->reg ());
-              if (found == reg_set_count.end ())
-                reg_set_count.insert (std::make_pair (rm->reg (), 1));
-              else
-                ++found->second;
-            }
+	    reg_set_count[rm->reg ()] += 1;
         }
 
       for (addr_expr::regs_iterator ri = (*el)->effective_addr ().regs_begin ();
