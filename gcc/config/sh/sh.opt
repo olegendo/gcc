@@ -369,8 +369,8 @@ Target Report Var(sh_lra_flag) Init(0) Save
 Use LRA instead of reload (transitional)
 
 mams
-Target Report Var(sh_ams_enable) Init(1)
-Enable or disable AMS pass (transitional)
+Target Report Var(sh_ams_enable) Init(0)
+Enable or disable AMS pass (transitional).
 
 mams-opt=
 Target Report RejectNegative Joined Var(sh_ams_opt)
