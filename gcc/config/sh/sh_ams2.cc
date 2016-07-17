@@ -1340,20 +1340,15 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
          = sorted_terms.begin (); it != sorted_terms.end (); ++it)
     {
       shared_term& term = **it;
-      for (std::vector<sequence_element*>::iterator el
-             = term.sharing_els ().begin ();
-           el != term.sharing_els ().end (); ++el)
-        {
-          if (inserted_els.find (*el) != inserted_els.end ())
-            continue;
+      for (std::vector<sequence_element*>::iterator el =
+	   term.sharing_els ().begin (); el != term.sharing_els ().end (); ++el)
+	if (inserted_els.insert (*el).second)
+	  {
+	    if (!term.new_seq ())
+	      term.set_new_seq (&(*sequences.insert (seq_it, sequence ())));
 
-          inserted_els.insert (*el);
-
-          if (!term.new_seq ())
-            term.set_new_seq (&(*sequences.insert (seq_it, sequence ())));
-
-          element_new_seqs[*el] = term.new_seq ();
-        }
+	    element_new_seqs[*el] = term.new_seq ();
+	  }
     }
 
   // Add each mem access and reg use from the original sequence to the
