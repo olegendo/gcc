@@ -1127,13 +1127,7 @@ bool sh_ams2::mem_access::allow_new_insns = true;
 class sh_ams2::shared_term
 {
 public:
-  shared_term (addr_expr& t, sequence_element* el)
-    : m_term (t), m_sharing_els (), m_new_seq (NULL) {
-    m_sharing_els.push_back (el);
-  }
-
-  // The shared term.
-  const addr_expr& term () { return m_term; }
+  shared_term (void) : m_score (0), m_sharing_els (), m_new_seq (NULL) { }
 
   // The elements that share this term.
   std::vector<sequence_element*>& sharing_els () { return m_sharing_els; }
@@ -1142,42 +1136,44 @@ public:
   sequence* new_seq (void) const { return m_new_seq; }
   void set_new_seq (sequence *s) {  m_new_seq = s; }
 
-  static bool compare (shared_term* a, shared_term* b)
+  static bool compare (const shared_term* a, const shared_term* b)
   { return a->score () > b->score (); }
 
   // A score that's used to determine which shared expressions should
   // be used for splitting access sequences.  A higher score means that
   // the shared term is more likely to be selected as a base for a
   // new sequence.
-  unsigned int score (void) const
-  {
-    if (m_term.is_invalid ())
-      return 0;
+  unsigned int score (void) const { return m_score; }
 
-    unsigned int score = 10;
+  unsigned int calc_score (const addr_expr& term)
+  {
+    if (term.is_invalid ())
+      return m_score = 0;
+
+    m_score = 10;
 
     // Displacement-only terms with large displacements are
     // represented with a constant 0 address.
-    if (m_term.has_no_base_reg () && m_term.has_no_index_reg ()
-        && m_term.has_no_disp ())
-      score += 2;
+    if (term.has_no_base_reg () && term.has_no_index_reg ()
+	&& term.has_no_disp ())
+      m_score += 2;
 
-    if (m_term.has_base_reg ())
-      score += 2;
-    if (m_term.has_index_reg ())
+    if (term.has_base_reg ())
+      m_score += 2;
+    if (term.has_index_reg ())
       {
-        score += 2;
-        if (m_term.scale () != 1)
-          ++score;
+	m_score += 2;
+	if (term.scale () != 1)
+	  ++m_score;
       }
-    if (m_term.has_disp ())
-      ++score;
+    if (term.has_disp ())
+      ++m_score;
 
-    return score*m_sharing_els.size ();
+    return m_score = m_score * m_sharing_els.size ();
   }
 
 private:
-  addr_expr m_term;
+  unsigned int m_score;
   std::vector<sequence_element*> m_sharing_els;
   sequence* m_new_seq;
 };
@@ -1199,7 +1195,6 @@ public:
 };
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
-// FIXME: Avoid copying the list elements over and over.
 template <typename OutputIterator> void
 sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr,
                                                   OutputIterator out)
@@ -1323,14 +1318,7 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
                 *it = make_const_addr ((disp_t)0);
             }
 
-	  // FIXME: use std::map::insert directly, it checks for duplicated
-	  // keys.  no need to find it first.
-          shared_term_map::iterator term = shared_terms.find (*it);
-          if (term == shared_terms.end ())
-            shared_terms.insert (
-              std::make_pair (*it, shared_term (*it, el->get ())));
-          else
-            term->second.sharing_els ().push_back (el->get ());
+	  shared_terms[*it].sharing_els ().push_back (el->get ());
         }
     }
 
@@ -1339,7 +1327,10 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
   sorted_terms.reserve (shared_terms.size ());
   for (shared_term_map::iterator it = shared_terms.begin ();
        it != shared_terms.end (); ++it)
+    {
+      it->second.calc_score (it->first);
       sorted_terms.push_back (&(it->second));
+    }
   std::sort (sorted_terms.begin (), sorted_terms.end (), shared_term::compare);
 
   // Create new sequences for the shared terms with the highest scores
