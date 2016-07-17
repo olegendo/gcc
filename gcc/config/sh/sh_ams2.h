@@ -1251,7 +1251,8 @@ NOTE:
     }
 
   private:
-    static void split_1 (sequence& seq, sequence_element* el);
+    static void split_1 (sequence& seq,
+			 const ref_counting_ptr<sequence_element>& el);
 
     int gen_address_mod_1 (filter_iterator<sequence_iterator,
                                            element_to_optimize> el,

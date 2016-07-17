@@ -1335,6 +1335,7 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 
   // Create new sequences for the shared terms with the highest scores
   // and mark the accesses' new sequences in ELEMENT_NEW_SEQS appropriately.
+  // FIXME: use linear allocator to avoid allocations for temporary set.
   std::set<sequence_element*> inserted_els;
   for (std::vector<shared_term*>::iterator it
          = sorted_terms.begin (); it != sorted_terms.end (); ++it)
@@ -1357,11 +1358,9 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
   for (sequence_reverse_iterator it =
          seq.elements ().rbegin (); it != seq.elements ().rend (); ++it)
     {
-      sequence_element* el = it->get ();
-      element_to_seq_map::iterator found = element_new_seqs.find (el);
-      if (found == element_new_seqs.end ())
-        continue;
-      split_1 (*found->second, el);
+      element_to_seq_map::iterator found = element_new_seqs.find (it->get ());
+      if (found != element_new_seqs.end ())
+	split_1 (*found->second, *it);
     }
 
   // Remove the old sequence and return the next element after the
@@ -1372,12 +1371,13 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 // Internal function of access_sequence::split.  Adds EL and its
 // dependencies to SEQ.
 void
-sh_ams2::sequence::split_1 (sequence& seq, sequence_element* el)
+sh_ams2::sequence::split_1 (sequence& seq,
+			    const ref_counting_ptr<sequence_element>& el)
 {
-  seq.insert_unique (ref_counting_ptr<sequence_element>(el));
+  seq.insert_unique (el);
   for (std::list<sequence_element*>::iterator it =
          el->dependencies ().begin (); it != el->dependencies ().end (); ++it)
-    split_1 (seq, *it);
+    split_1 (seq, ref_counting_ptr<sequence_element> (*it));
 }
 
 sh_ams2::sequence::~sequence (void)
