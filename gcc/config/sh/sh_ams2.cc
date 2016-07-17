@@ -261,7 +261,7 @@ log_sequence_element (const sh_ams2::sequence_element& e,
       else
         log_addr_expr (m.current_addr ());
 
-      if (!m.effective_addr ().is_invalid ())
+      if (m.effective_addr ().is_valid ())
         {
           log_msg ("\n  effective addr:  ");
           log_addr_expr (m.effective_addr ());
@@ -284,7 +284,7 @@ log_sequence_element (const sh_ams2::sequence_element& e,
       else
         log_addr_expr (rm.current_addr ());
 
-      if (!rm.effective_addr ().is_invalid ())
+      if (rm.effective_addr ().is_valid ())
         {
           log_msg ("\n  effective addr:  ");
           log_addr_expr (rm.effective_addr ());
@@ -728,20 +728,20 @@ sh_ams2::addr_expr::to_rtx (void) const
 void
 sh_ams2::addr_expr::set_base_reg (rtx val)
 {
-  if (val == m_base_reg)
+  if (val == m_base_index_reg[0])
     return;
 
-  m_base_reg = val;
+  m_base_index_reg[0] = val;
   m_cached_to_rtx = NULL;
 }
 
 void
 sh_ams2::addr_expr::set_index_reg (rtx val)
 {
-  if (val == m_index_reg)
+  if (val == m_base_index_reg[1])
     return;
 
-  m_index_reg = val;
+  m_base_index_reg[1] = val;
   m_cached_to_rtx = NULL;
 }
 
@@ -1351,6 +1351,8 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
                 *it = make_const_addr ((disp_t)0);
             }
 
+	  // FIXME: use std::map::insert directly, it checks for duplicated
+	  // keys.  no need to find it first.
           shared_term_map::iterator term = shared_terms.find (*it);
           if (term == shared_terms.end ())
             shared_terms.insert (
@@ -1757,6 +1759,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
           // Count only those reg-mods that won't be removed.
           if (rm->insn () == NULL || !rm->can_be_optimized ())
             {
+		// FIXME: use std::map::insert.
+		// it will reject duplicate entries, no need to find them first.
               std::map<rtx, int, cmp_by_regno>::iterator found
                 = reg_set_count.find (rm->reg ());
               if (found == reg_set_count.end ())

@@ -251,28 +251,44 @@ public:
   class addr_expr
   {
   public:
-    addr_expr (void) : m_cached_to_rtx (NULL) { }
+    struct is_valid_regno
+    {
+      bool operator () (const rtx x) const { return x != invalid_regno; }
+    };
+
+    typedef filter_iterator<const rtx*, is_valid_regno> regs_iterator;
+
+    addr_expr (void) : m_cached_to_rtx (NULL)
+    {
+      m_base_index_reg[0] = invalid_regno;
+      m_base_index_reg[1] = invalid_regno;
+    }
 
     addr_type_t type (void) const { return m_type; }
 
+    regs_iterator regs_begin (void) const
+    {
+      return regs_iterator (m_base_index_reg + (is_invalid () ? 2 : 0),
+			    m_base_index_reg + 2);
+    }
+    regs_iterator regs_end (void) const
+    {
+      return regs_iterator (m_base_index_reg + 2, m_base_index_reg + 2);
+    }
 
-// FIXME: has_base_reg and has_index reg are checked in several places
-// and essentially the same stuff is done on both, e.g. in
-//   start_addr_list::get_relevant_addresses
-//   start_addr_list::add
-//   start_addr_list::remove
-//   sequence::split_2
-//
-// it'd be easer if we could iterate over the registers in the addr_expr.
-// e.g. put m_base_reg and m_index_reg in an 2-element array and use
-// raw-pointers as base iterators, then decorate it with a filter_iterator
-// that checks for != invalid_regno to skip over invalid regs.
+    bool regs_empty (void) const { return regs_begin () == regs_end (); }
+
     rtx base_reg (void) const
     {
-      gcc_assert (!is_invalid ());
-      return m_base_reg;
+      gcc_assert (is_valid ());
+      return m_base_index_reg[0];
     }
-    bool has_base_reg (void) const { return base_reg () != invalid_regno; }
+
+    bool has_base_reg (void) const
+    {
+      return is_valid () && base_reg () != invalid_regno;
+    }
+
     bool has_no_base_reg (void) const { return !has_base_reg (); }
 
     disp_t disp (void) const { return m_disp; }
@@ -283,10 +299,15 @@ public:
 
     rtx index_reg (void) const
     {
-      gcc_assert (!is_invalid ());
-      return m_index_reg;
+      gcc_assert (is_valid ());
+      return m_base_index_reg[1];
     }
-    bool has_index_reg (void) const { return index_reg () != invalid_regno; }
+
+    bool has_index_reg (void) const
+    {
+      return is_valid () && index_reg () != invalid_regno;
+    }
+
     bool has_no_index_reg (void) const { return !has_index_reg (); }
 
     scale_t scale (void) const { return m_scale; }
@@ -302,9 +323,9 @@ public:
 
     std::pair<disp_t, bool> operator - (const addr_expr& other) const;
 
-    // returns true if the original address expression is more complex than
-    // what AMS can handle.
+    // returns true if address expression is valid or not.
     bool is_invalid (void) const { return disp_min () > disp_max (); }
+    bool is_valid (void) const { return !is_invalid (); }
 
     // displacement relative to the base reg before the actual memory access.
     // e.g. a pre-dec access will have a pre-disp of -mode_size.
@@ -381,11 +402,11 @@ public:
     // in such cases, after the constant pool layout has been determined,
     // the value of the base register will be e.g. a constant label_ref.
     // currently we can't deal with those.
-    rtx m_base_reg;
+
+    rtx m_base_index_reg[2];
     disp_t m_disp;
     disp_t m_disp_min;
     disp_t m_disp_max;
-    rtx m_index_reg;
     scale_t m_scale;
     scale_t m_scale_min;
     scale_t m_scale_max;
@@ -1497,14 +1518,14 @@ inline sh_ams2::non_mod_addr
 		disp_t disp, disp_t disp_min, disp_t disp_max)
 {
   m_type = non_mod;
-  m_base_reg = base_reg;
+  m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp_min;
   m_disp_max = disp_max;
-  m_index_reg = index_reg;
+  m_base_index_reg[1] = index_reg;
   m_scale = scale;
   if (m_scale == 0)
-    m_index_reg = invalid_regno;
+    m_base_index_reg[1] = invalid_regno;
   m_scale_min = scale_min;
   m_scale_max = scale_max;
 }
@@ -1513,14 +1534,14 @@ inline sh_ams2::non_mod_addr
 ::non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp)
 {
   m_type = non_mod;
-  m_base_reg = base_reg;
+  m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp;
   m_disp_max = disp;
-  m_index_reg = index_reg;
+  m_base_index_reg[1] = index_reg;
   m_scale = scale;
   if (m_scale == 0)
-    m_index_reg = invalid_regno;
+    m_base_index_reg[1] = invalid_regno;
   m_scale_min = scale;
   m_scale_max = scale;
 }
@@ -1529,11 +1550,11 @@ inline sh_ams2::pre_mod_addr
 ::pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
 {
   m_type = pre_mod;
-  m_base_reg = base_reg;
+  m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp_min;
   m_disp_max = disp_max;
-  m_index_reg = invalid_regno;
+  m_base_index_reg[1] = invalid_regno;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
@@ -1541,11 +1562,11 @@ inline sh_ams2::pre_mod_addr
 ::pre_mod_addr (rtx base_reg, disp_t disp)
 {
   m_type = pre_mod;
-  m_base_reg = base_reg;
+  m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp;
   m_disp_max = disp;
-  m_index_reg = invalid_regno;
+  m_base_index_reg[1] = invalid_regno;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
@@ -1553,11 +1574,11 @@ inline sh_ams2::post_mod_addr
 ::post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
 {
   m_type = post_mod;
-  m_base_reg = base_reg;
+  m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp_min;
   m_disp_max = disp_max;
-  m_index_reg = invalid_regno;
+  m_base_index_reg[1] = invalid_regno;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
@@ -1565,11 +1586,11 @@ inline sh_ams2::post_mod_addr
 ::post_mod_addr (rtx base_reg, disp_t disp)
 {
   m_type = post_mod;
-  m_base_reg = base_reg;
+  m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp;
   m_disp_max = disp;
-  m_index_reg = invalid_regno;
+  m_base_index_reg[1] = invalid_regno;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
