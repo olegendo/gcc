@@ -1049,15 +1049,10 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
   set_cost (cost);
 
   // Cloning costs:
-
-  rtx reused_reg = NULL;
-
-  if (current_addr ().has_base_reg ())
-    reused_reg = current_addr ().base_reg ();
-  else if (current_addr ().has_index_reg ())
-    reused_reg = current_addr ().index_reg ();
-  else
+  if (current_addr ().regs_empty ())
     return;
+
+  rtx reused_reg = *(current_addr ().regs_begin ());
 
   // There's no cloning cost for reg-mods that set the reg to itself.
   if (regs_equal (reused_reg, reg ()))
@@ -1084,19 +1079,11 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
     {
       reg_mod* rm = dyn_cast<reg_mod*> (*it);
 
-      if (rm == NULL)
+      if (rm == NULL || rm->current_addr ().is_invalid ()
+	  || rm->current_addr ().regs_empty ())
 	continue;
 
-      if (rm->current_addr ().is_invalid ())
-        continue;
-
-      rtx dep_reused_reg;
-      if (rm->current_addr ().has_base_reg ())
-        dep_reused_reg = rm->current_addr ().base_reg ();
-      else if (rm->current_addr ().has_index_reg ())
-        dep_reused_reg = rm->current_addr ().index_reg ();
-      else
-        continue;
+      rtx dep_reused_reg = *(rm->current_addr ().regs_begin ());
 
       if (regs_equal (reused_reg, dep_reused_reg))
         {
@@ -1225,15 +1212,10 @@ sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr,
   // Addresses containing registers might be used if they have a
   // register in common with the end address.
   typedef std::pair <reg_map::iterator, reg_map::iterator> matching_range_t;
-  if (end_addr.has_base_reg ())
+  for (addr_expr::regs_iterator ri = end_addr.regs_begin ();
+       ri != end_addr.regs_end (); ++ri)
     {
-      matching_range_t r = m_reg_addresses.equal_range (end_addr.base_reg ());
-      for (matching_range_t::first_type it = r.first; it != r.second; ++it)
-        *out++ = it->second;
-    }
-  if (end_addr.has_index_reg ())
-    {
-      matching_range_t r = m_reg_addresses.equal_range (end_addr.index_reg ());
+      matching_range_t r = m_reg_addresses.equal_range (*ri);
       for (matching_range_t::first_type it = r.first; it != r.second; ++it)
         *out++ = it->second;
     }
@@ -1244,16 +1226,17 @@ void
 sh_ams2::start_addr_list::add (reg_mod* start_addr)
 {
   addr_expr addr = start_addr->effective_addr ().is_invalid ()
-    ? make_reg_addr (start_addr->reg ()) : start_addr->effective_addr ();
+		   ? make_reg_addr (start_addr->reg ())
+		   : start_addr->effective_addr ();
 
   // If the address has a base or index reg, add it to M_REG_ADDRESSES.
-  if (addr.has_base_reg ())
-    m_reg_addresses.insert (std::make_pair (addr.base_reg (), start_addr));
-  if (addr.has_index_reg ())
-    m_reg_addresses.insert (std::make_pair (addr.index_reg (), start_addr));
-
   // Otherwise, add it to the constant list.
-  if (addr.has_no_base_reg () && addr.has_no_index_reg ())
+
+  for (addr_expr::regs_iterator ri = addr.regs_begin ();
+       ri != addr.regs_end (); ++ri)
+    m_reg_addresses.insert (std::make_pair (*ri, start_addr));
+
+  if (addr.regs_empty ())
     m_const_addresses.push_back (start_addr);
 }
 
@@ -1265,22 +1248,11 @@ sh_ams2::start_addr_list::remove (reg_mod* start_addr)
     ? make_reg_addr (start_addr->reg ()) : start_addr->effective_addr ();
 
   std::pair <reg_map::iterator, reg_map::iterator> matching_range;
-  if (addr.has_base_reg ())
+
+  for (addr_expr::regs_iterator ri = addr.regs_begin ();
+       ri != addr.regs_end (); ++ri)
     {
-      matching_range = m_reg_addresses.equal_range (addr.base_reg ());
-      for (reg_map::iterator it = matching_range.first;
-           it != matching_range.second; ++it)
-        {
-          if (it->second == start_addr)
-            {
-              m_reg_addresses.erase (it);
-              break;
-            }
-        }
-    }
-  if (addr.has_index_reg ())
-    {
-      matching_range = m_reg_addresses.equal_range (addr.index_reg ());
+      matching_range = m_reg_addresses.equal_range (*ri);
       for (reg_map::iterator it = matching_range.first;
            it != matching_range.second; ++it)
         {
@@ -1292,7 +1264,7 @@ sh_ams2::start_addr_list::remove (reg_mod* start_addr)
         }
     }
 
-  if (addr.has_no_base_reg () && addr.has_no_index_reg ())
+  if (addr.regs_empty ())
     m_const_addresses.remove (start_addr);
 }
 
@@ -1334,7 +1306,7 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
       for (std::vector<addr_expr>::iterator it = terms.begin ();
            it != terms.end (); ++it)
         {
-          if (!it->is_invalid () && it->has_no_base_reg ()
+          if (it->is_valid () && it->has_no_base_reg ()
               && it->has_no_index_reg ())
             {
               // If a displacement-only term fits into an address alternative,
@@ -1589,7 +1561,7 @@ sh_ams2::sequence::find_addr_reg_uses (void)
 
               // If the use ref also contains a constant displacement,
               // add that to the effective address.
-              if (!effective_addr.is_invalid () && use_ref
+              if (effective_addr.is_valid () && use_ref
                   && (UNARY_P (*use_ref) || ARITHMETIC_P (*use_ref)))
                 {
                   effective_addr = check_make_non_mod_addr (
@@ -1770,29 +1742,13 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
             }
         }
 
-      if ((*el)->effective_addr ().is_invalid ())
-        continue;
-
-      if ((*el)->effective_addr ().has_base_reg ())
-        {
-          std::map<rtx, int, cmp_by_regno>::iterator found
-            = reg_set_count.find (((*el)->effective_addr ().base_reg ()));
-          if (found->second > 1)
-            {
-              (*el)->set_optimization_enabled (false);
-              continue;
-            }
-        }
-      if ((*el)->effective_addr ().has_index_reg ())
-        {
-          std::map<rtx, int, cmp_by_regno>::iterator found
-            = reg_set_count.find (((*el)->effective_addr ().index_reg ()));
-          if (found->second > 1)
-            {
-              (*el)->set_optimization_enabled (false);
-              continue;
-            }
-        }
+      for (addr_expr::regs_iterator ri = (*el)->effective_addr ().regs_begin ();
+	   ri != (*el)->effective_addr ().regs_end (); ++ri)
+	if (reg_set_count.find (*ri)->second > 1)
+	  {
+	    (*el)->set_optimization_enabled (false);
+	    break;
+	  }
     }
 
   // Remove the sequence's original reg-mods.
@@ -1837,9 +1793,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
        els_end = end<reg_mod_match> (); els != els_end; )
     {
       reg_mod* rm = as_a<reg_mod*> (els->get ());
-      if (!rm->current_addr ().is_invalid ()
-	  && rm->current_addr ().has_no_base_reg () &&
-          rm->current_addr ().has_no_index_reg ())
+      if (rm->current_addr ().is_valid () && rm->current_addr ().regs_empty ())
 	{
 	  if (!reg_used_in_sequence (rm->reg (),
                                      stdx::next ((sequence_iterator)els)))
@@ -2081,7 +2035,7 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
 
   // If the end address is a constant address, try loading it into
   // the reg directly.
-  if (end_addr.has_no_base_reg () && end_addr.has_no_index_reg ())
+  if (end_addr.regs_empty ())
     {
       rtx const_reg = gen_reg_rtx (acc_mode);
 
@@ -2483,8 +2437,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
   // post-access version of the base reg can be reused by later accesses.
   // Do the same for constant displacement addresses so that there's no
   // cloning penalty for reusing the constant address in another access.
-  if (addr_type != non_mod
-      || (c_end_addr.has_no_base_reg () && c_end_addr.has_no_index_reg ()))
+  if (addr_type != non_mod || c_end_addr.regs_empty ())
     {
       rtx pre_mod_reg = start_addr->reg ();
       start_addr
@@ -2667,7 +2620,7 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
           // If the reg is inside a (plus reg (const_int ...)) rtx,
           // add the whole rtx instead of just the reg.
           addr_expr use_expr = rtx_to_addr_expr (x);
-          if (!use_expr.is_invalid () && use_expr.has_no_index_reg ()
+          if (use_expr.is_valid () && use_expr.has_no_index_reg ()
               && use_expr.has_base_reg () && use_expr.has_disp ()
               && regs_equal (reg, use_expr.base_reg ()))
             {
@@ -3339,7 +3292,7 @@ sh_ams2::reg_mod::generate_new_insns (bool insn_sequence_started)
     }
 
   rtx new_val;
-  if (current_addr ().has_no_base_reg () && current_addr ().has_no_index_reg ())
+  if (current_addr ().regs_empty ())
     {
       new_val = GEN_INT (current_addr ().disp ());
       log_msg ("reg mod new val (1) = ");
