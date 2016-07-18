@@ -1469,9 +1469,9 @@ sh_ams2::sequence::find_addr_reg_mods (void)
 	  addr_expr reg_current_addr = prev.acc ? make_reg_addr (reg)
 						: rtx_to_addr_expr (prev.value);
 
-	  reg_mod* new_reg_mod = (reg_mod*)insert_unique (
+	  reg_mod* new_reg_mod = as_a<reg_mod*> (&**insert_unique (
 		make_ref_counted<reg_mod> (prev.insn, reg, prev.value,
-					   reg_current_addr))->get ();
+					   reg_current_addr)));
 
 	  addr_expr reg_effective_addr =
 		rtx_to_addr_expr (prev.value, prev.acc ? prev.acc->mach_mode ()
@@ -1535,13 +1535,12 @@ sh_ams2::sequence::find_addr_reg_uses (void)
                 }
 
               addr_expr use_expr = rtx_to_addr_expr (*use_ref);
-              reg_use* new_reg_use
-                = (reg_use*)insert_unique (
-                    make_ref_counted<reg_use> (i, *regs,
-                                               use_ref,
-                                               use_expr))->get ();
-              addr_expr effective_addr
-                = rtx_to_addr_expr (*regs, Pmode, this, new_reg_use);
+
+	      reg_use* new_reg_use = as_a<reg_use*> (&**insert_unique (
+		    make_ref_counted<reg_use> (i, *regs, use_ref, use_expr)));
+
+	      addr_expr effective_addr = rtx_to_addr_expr (*regs, Pmode, this,
+							   new_reg_use);
 
               // If the use ref also contains a constant displacement,
               // add that to the effective address.
@@ -1589,9 +1588,8 @@ sh_ams2::sequence::find_addr_reg_uses (void)
     {
       rtx reg = it->first;
       reg_mod* rm = it->second;
-      reg_use* new_reg_use = (reg_use*)insert_element (
-        make_ref_counted<reg_use> ((rtx_insn*)NULL, reg),
-        elements ().end ())->get ();
+      reg_use* new_reg_use = as_a<reg_use*> (&**insert_element (
+	make_ref_counted<reg_use> ((rtx_insn*)NULL, reg), elements ().end ()));
       new_reg_use->set_effective_addr (rm->effective_addr ());
       new_reg_use->add_dependency (rm);
       rm->add_dependent_el (new_reg_use);
@@ -2014,12 +2012,12 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
     {
       rtx const_reg = gen_reg_rtx (acc_mode);
 
-      reg_mod* const_load
-        = (reg_mod*)insert_element (
-            make_ref_counted<reg_mod> ((rtx_insn*)NULL, const_reg, NULL_RTX,
-                                       make_const_addr (end_addr.disp ()),
-                                       make_const_addr (end_addr.disp ())),
-            elements ().begin ())->get ();
+      reg_mod* const_load = as_a<reg_mod*> (&**insert_element (
+	make_ref_counted<reg_mod> ((rtx_insn*)NULL, const_reg, NULL_RTX,
+				   make_const_addr (end_addr.disp ()),
+				   make_const_addr (end_addr.disp ())),
+	elements ().begin ()));
+
       int cost = try_insert_address_mods (const_load, end_addr,
                                           min_disp, max_disp,
                                           addr_type, acc_mode, el,
@@ -2142,10 +2140,9 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
           // Otherwise, insert a reg-mod that sets the used reg to
           // the correct value.
 
-          sequence_iterator inserted_el
-            = insert_element (
-              make_ref_counted<reg_mod> ((rtx_insn*)NULL, ru->reg (), NULL_RTX,
-                                         new_addr, ru->effective_addr ()), el);
+	  sequence_iterator inserted_el = insert_element (
+	      make_ref_counted<reg_mod> ((rtx_insn*)NULL, ru->reg (), NULL_RTX,
+					 new_addr, ru->effective_addr ()), el);
           tracker.inserted_reg_mods ().push_back (inserted_el);
 
           // Find and add the dependency for the new reg-mod
@@ -2454,10 +2451,9 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
       tracker.use_changed_reg_mods ().push_back (used_rm);
     }
   rtx new_reg = gen_reg_rtx (acc_mode);
-  sequence_iterator inserted_el
-    = insert_element (
-        make_ref_counted<reg_mod> ((rtx_insn*)NULL, new_reg, NULL_RTX,
-                                   curr_addr, effective_addr), el);
+  sequence_iterator inserted_el = insert_element (
+	make_ref_counted<reg_mod> ((rtx_insn*)NULL, new_reg, NULL_RTX,
+				   curr_addr, effective_addr), el);
   visited_reg_mods.insert ((reg_mod*)inserted_el->get ());
   (*inserted_el)->add_dependency (used_rm);
   used_rm->add_dependent_el (inserted_el->get ());
@@ -2466,7 +2462,7 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
                                                       inserted_el->get ()));
   (*inserted_el)->set_cost (dlg.addr_reg_mod_cost (new_reg, curr_addr_rtx,
                                              *this, el));
-  return (reg_mod*)inserted_el->get ();
+  return as_a<reg_mod*> (inserted_el->get ());
 }
 
 // Find a starting address whose effective address is the single base reg REG.
