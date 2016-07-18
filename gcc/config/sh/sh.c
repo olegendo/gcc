@@ -14213,8 +14213,8 @@ adjust_lookahead_count (const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
 
 int
 ams2_reg_disp_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams2::disp_t disp,
-                   const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                   sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
+		    const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
+		    sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
 {
   // the costs for adding small constants should be higher than
   // QI/HI displacement mode addresses.
@@ -14233,26 +14233,22 @@ ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
                         const sh_ams2::sequence& seq,
                         sh_ams2::sequence_const_iterator el)
 {
-  sh_ams2::addr_expr ea;
-  if ((*el)->is_mem_access ())
-    ea = ((const sh_ams2::mem_access*)el->get ())->effective_addr ();
-  else if ((*el)->type () == sh_ams2::type_reg_mod)
-    ea = ((const sh_ams2::reg_mod*)el->get ())->effective_addr ();
-  else if ((*el)->type () == sh_ams2::type_reg_use)
-    ea = ((const sh_ams2::reg_use*)el->get ())->effective_addr ();
-  else
-    gcc_unreachable ();
+  sh_ams2::addr_expr ea = (*el)->effective_addr ();
+
+  gcc_assert ((*el)->is_mem_access () || (*el)->type () == sh_ams2::type_reg_mod
+	      || (*el)->type () == sh_ams2::type_reg_use);
 
   // increase the costs if the next mem access that uses this
   // could also use reg+reg addressing mode instead.
   sh_ams2::sequence_const_iterator next_el = el;
-  sh_ams2::mem_access* next_acc = NULL;
   ++next_el;
-  if (next_el != seq.elements ().end () && (*next_el)->is_mem_access ())
-    next_acc = (sh_ams2::mem_access*)next_el->get ();
-  if (next_acc != NULL
-      && next_acc->effective_addr () == ea
-      )
+
+  sh_ams2::mem_access* next_acc =
+	next_el != seq.elements ().end () && (*next_el)->is_mem_access ()
+	? (sh_ams2::mem_access*)next_el->get ()
+	: NULL;
+
+  if (next_acc != NULL && next_acc->effective_addr () == ea)
     {
       for (sh_ams2::alternative_set::const_iterator
 	     alt = next_acc->alternatives ().begin ();
