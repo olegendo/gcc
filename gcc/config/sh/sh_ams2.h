@@ -99,6 +99,10 @@ public:
     // Default is true.
     bool split_sequences;
 
+    // Simplify the sequences after optimization by removing unecessary
+    // reg copies.  Default is false.
+    bool remove_reg_copies;
+
     // By default AMS will do alternative validation, but it can be disabled
     // by the delegate to speed up processing.  This will force the validation.
     // Default is false.
@@ -154,6 +158,7 @@ public:
   class mod_tracker;
   class mod_addr_result;
   class find_reg_value_result;
+  class reg_copy;
 
  public:
 
@@ -256,7 +261,8 @@ public:
       bool operator () (const rtx x) const { return x != invalid_regno; }
     };
 
-    typedef filter_iterator<const rtx*, is_valid_regno> regs_iterator;
+    typedef filter_iterator<rtx*, is_valid_regno> regs_iterator;
+    typedef filter_iterator<const rtx*, is_valid_regno> regs_const_iterator;
 
     addr_expr (void)
     : m_type (invalid_addr_expr), m_base_index_reg (), m_disp (0),
@@ -267,12 +273,21 @@ public:
 
     addr_type_t type (void) const { return m_type; }
 
-    regs_iterator regs_begin (void) const
+    regs_const_iterator regs_begin (void) const
+    {
+      return regs_const_iterator (m_base_index_reg + (is_invalid () ? 2 : 0),
+                                  m_base_index_reg + 2);
+    }
+    regs_iterator regs_begin (void)
     {
       return regs_iterator (m_base_index_reg + (is_invalid () ? 2 : 0),
-			    m_base_index_reg + 2);
+                                  m_base_index_reg + 2);
     }
-    regs_iterator regs_end (void) const
+    regs_const_iterator regs_end (void) const
+    {
+      return regs_const_iterator (m_base_index_reg + 2, m_base_index_reg + 2);
+    }
+    regs_iterator regs_end (void)
     {
       return regs_iterator (m_base_index_reg + 2, m_base_index_reg + 2);
     }
@@ -1128,6 +1143,9 @@ NOTE:
     // Generate the address modifications needed to arrive at the
     // addresses in the sequence.
     void gen_address_mod (delegate& dlg, int base_lookahead);
+
+    // Try to eliminate unnecessary reg -> reg copies.
+    void eliminate_reg_copies (void);
 
     // Update the original insn stream with the changes in this sequence.
     void update_insn_stream (void);

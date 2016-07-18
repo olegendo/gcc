@@ -141,6 +141,7 @@ log_options (const sh_ams2::options& opt)
   log_msg ("option check_minimal_cost = %d\n", opt.check_minimal_cost);
   log_msg ("option check_original_cost = %d\n", opt.check_original_cost);
   log_msg ("option split_sequences = %d\n", opt.split_sequences);
+  log_msg ("option remove_reg_copies = %d\n", opt.remove_reg_copies);
   log_msg ("base_lookahead_count = %d", opt.base_lookahead_count);
 }
 
@@ -626,6 +627,7 @@ sh_ams2::options::options (void)
   check_minimal_cost = true;
   check_original_cost = true;
   split_sequences = true;
+  remove_reg_copies = false;
   force_alt_validation = false;
   disable_alt_validation = false;
   cse = false;
@@ -671,6 +673,7 @@ sh_ams2::options::options (const std::string& str)
   get_int_opt (check_minimal_cost);
   get_int_opt (check_original_cost);
   get_int_opt (split_sequences);
+  get_int_opt (remove_reg_copies);
   get_int_opt (base_lookahead_count);
   get_int_opt (force_alt_validation);
   get_int_opt (disable_alt_validation);
@@ -1192,7 +1195,7 @@ sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr,
 
   // Addresses containing registers might be used if they have a
   // register in common with the end address.
-  for (addr_expr::regs_iterator ri = end_addr.regs_begin ();
+  for (addr_expr::regs_const_iterator ri = end_addr.regs_begin ();
        ri != end_addr.regs_end (); ++ri)
     {
       std::pair <reg_map::iterator, reg_map::iterator> r =
@@ -1214,7 +1217,7 @@ sh_ams2::start_addr_list::add (reg_mod* start_addr)
   // If the address has a base or index reg, add it to M_REG_ADDRESSES.
   // Otherwise, add it to the constant list.
 
-  for (addr_expr::regs_iterator ri = addr.regs_begin ();
+  for (addr_expr::regs_const_iterator ri = addr.regs_begin ();
        ri != addr.regs_end (); ++ri)
     m_reg_addresses.insert (std::make_pair (*ri, start_addr));
 
@@ -1230,7 +1233,7 @@ sh_ams2::start_addr_list::remove (reg_mod* start_addr)
 			  ? make_reg_addr (start_addr->reg ())
 			  : start_addr->effective_addr ();
 
-  for (addr_expr::regs_iterator ri = addr.regs_begin ();
+  for (addr_expr::regs_const_iterator ri = addr.regs_begin ();
        ri != addr.regs_end (); ++ri)
     {
       std::pair <reg_map::iterator, reg_map::iterator> r =
@@ -1695,7 +1698,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 	    reg_set_count[rm->reg ()] += 1;
         }
 
-      for (addr_expr::regs_iterator ri = (*el)->effective_addr ().regs_begin ();
+      for (addr_expr::regs_const_iterator ri =
+             (*el)->effective_addr ().regs_begin ();
 	   ri != (*el)->effective_addr ().regs_end (); ++ri)
 	if (reg_set_count.find (*ri)->second > 1)
 	  {
@@ -2478,6 +2482,146 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
 
   gcc_assert (found_addr != NULL);
   return found_addr;
+}
+
+// Used for keeping track of register copying reg-mods.
+class sh_ams2::reg_copy
+{
+public:
+  reg_copy (rtx s, rtx d, sequence_iterator e)
+  : src (s), dest (d), el (e), reg_modified (false), can_be_removed (true),
+    use_count (0) {}
+  rtx src, dest;
+  sequence_iterator el;
+  bool reg_modified;
+  bool can_be_removed;
+  int use_count;
+};
+
+// Try to eliminate unnecessary reg -> reg copies.
+// If a sequence element uses a copied reg and neither the copy nor the
+// original reg gets modified up to that point, use the original reg
+// instead.  If all instances of the copy reg can be removed this way,
+// remove the copying reg-mod too.
+void
+sh_ams2::sequence::eliminate_reg_copies (void)
+{
+  typedef std::multimap<rtx, reg_copy, cmp_by_regno> reg_copy_map;
+  reg_copy_map reg_copies;
+  std::set<rtx_insn*> visited_insns;
+  rtx_insn* prev_insn = BB_HEAD (start_bb ());
+
+  for (sequence_iterator el = elements ().begin ();
+       el != elements ().end (); ++el)
+    {
+      // Skip reg-mods that set the reg to itself.
+      if (reg_mod* rm = dyn_cast<reg_mod*> (el->get ()))
+        {
+          const addr_expr& addr = rm->current_addr ();
+          if (addr.is_invalid ()
+              || (addr.has_no_index_reg () && addr.has_no_disp ()
+                  && regs_equal (addr.base_reg (), rm->reg ())))
+            continue;
+        }
+      log_sequence_element (**el);
+      log_msg ("\n");
+
+      rtx_insn* curr_insn = NULL;
+      for (sequence_iterator it = el; it != elements ().end (); ++it)
+        if ((*it)->insn ())
+          {
+            curr_insn = (*it)->insn ();
+            break;
+          }
+
+      // Check if any reg copy got modified in the insns between the current
+      // and previous elements.
+      for (rtx_insn* i = prev_insn; i != curr_insn; i = NEXT_INSN (i))
+        {
+          visited_insns.insert (i);
+          for (reg_copy_map::iterator it = reg_copies.begin ();
+               it != reg_copies.end (); ++it)
+            {
+              reg_copy& copy = it->second;
+              if (!copy.reg_modified
+                  && (reg_set_p (copy.src, i) || reg_set_p (copy.dest, i)))
+                copy.reg_modified = true;
+            }
+        }
+      prev_insn = curr_insn;
+
+      addr_expr addr;
+
+      if (reg_mod* rm = dyn_cast<reg_mod*> (el->get ()))
+        {
+          // Check if the current reg-mod modifies a reg copy.
+          reg_copy_map::iterator copy_in_map = reg_copies.find (rm->reg ());
+          if (copy_in_map != reg_copies.end ())
+            copy_in_map->second.reg_modified = true;
+
+          addr = rm->current_addr ();
+
+          // If this reg-mod is a reg <- reg copy, add it to the
+          // copies list.
+          if (addr.is_valid () && addr.has_no_index_reg ()
+              && addr.has_no_disp () && addr.has_base_reg ())
+            reg_copies.insert (
+              std::make_pair (rm->reg (),
+                              reg_copy (addr.base_reg (), rm->reg (), el)));
+        }
+      else if (mem_access* m = dyn_cast<mem_access*> (el->get ()))
+        addr = m->current_addr ();
+      else if (reg_use* ru = dyn_cast<reg_use*> (el->get ()))
+        addr = ru->current_addr ();
+      else
+        continue;
+
+      if (addr.is_invalid ())
+        continue;
+
+      // If the current element's base or index reg is a copied reg that
+      // wasn't modified (and neither was the original reg), replace it
+      // with the original reg.
+      for (addr_expr::regs_iterator ri = addr.regs_begin ();
+           ri != addr.regs_end (); ++ri)
+        {
+          reg_copy_map::iterator copy_in_map = reg_copies.find (*ri);
+          if (copy_in_map != reg_copies.end ())
+            {
+              ++copy_in_map->second.use_count;
+              reg_copy copy = copy_in_map->second;
+              if (copy.reg_modified)
+                copy_in_map->second.can_be_removed = false;
+              else
+                *ri = copy.src;
+            }
+        }
+      log_msg ("new addr: ");
+      log_addr_expr (addr);
+      log_msg ("\n");
+      if (reg_mod* rm = dyn_cast<reg_mod*> (el->get ()))
+        rm->set_current_addr (addr);
+      else if (mem_access* m = dyn_cast<mem_access*> (el->get ()))
+        m->set_current_addr (addr);
+      else if (reg_use* ru = dyn_cast<reg_use*> (el->get ()))
+        {
+          ru->set_current_addr (addr);
+          ru->set_reg (addr.base_reg ());
+        }
+    }
+
+  // Remove all copies from the sequence that aren't used anymore.
+  // Only remove those copies that were used somewhere.
+  for (reg_copy_map::iterator it = reg_copies.begin ();
+       it != reg_copies.end (); ++it)
+    {
+      reg_copy& copy = it->second;
+
+      if (copy.can_be_removed && copy.use_count > 0)
+        // FIXME: Update the dependencies in case a later sub-pass wants
+        // to use them.
+        remove_element (copy.el);
+    }
 }
 
 // Update the original insn stream with the changes in this sequence.
@@ -4166,6 +4310,13 @@ sh_ams2::execute (function* fun)
       sequence& seq = *it;
       if (seqs_to_skip.find (&seq) != seqs_to_skip.end ())
         continue;
+
+      if (m_options.remove_reg_copies)
+        {
+          log_sequence (seq, false);
+          log_msg ("\nremoving unnecessary reg copies\n");
+          seq.eliminate_reg_copies ();
+        }
 
       log_sequence (seq, false);
       log_msg ("\nupdating insns\n");
