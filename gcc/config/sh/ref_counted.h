@@ -167,35 +167,48 @@ operator >= (const ref_counting_ptr<T>& t, const ref_counting_ptr<U>& u)
 template<typename T>
 ref_counting_ptr<T> make_ref_counted (void)
 {
-  return ref_counting_ptr<T>(new T ());
+  return ref_counting_ptr<T> (new T ());
 }
+
 template<typename T, typename A0>
 ref_counting_ptr<T> make_ref_counted (const A0& a0)
 {
-  return ref_counting_ptr<T>(new T (a0));
+  return ref_counting_ptr<T> (new T (a0));
 }
+
 template<typename T, typename A0, typename A1>
 ref_counting_ptr<T> make_ref_counted (const A0& a0, const A1& a1)
 {
-  return ref_counting_ptr<T>(new T (a0, a1));
+  return ref_counting_ptr<T> (new T (a0, a1));
 }
+
 template<typename T, typename A0, typename A1, typename A2>
 ref_counting_ptr<T> make_ref_counted (const A0& a0, const A1& a1, const A2& a2)
 {
-  return ref_counting_ptr<T>(new T (a0, a1, a2));
+  return ref_counting_ptr<T> (new T (a0, a1, a2));
 }
+
 template<typename T, typename A0, typename A1, typename A2, typename A3>
 ref_counting_ptr<T> make_ref_counted (const A0& a0, const A1& a1, const A2& a2,
                                       const A3& a3)
 {
-  return ref_counting_ptr<T>(new T (a0, a1, a2, a3));
+  return ref_counting_ptr<T> (new T (a0, a1, a2, a3));
 }
+
 template<typename T, typename A0, typename A1, typename A2, typename A3,
          typename A4>
 ref_counting_ptr<T> make_ref_counted (const A0& a0, const A1& a1, const A2& a2,
                                       const A3& a3, const A4& a4)
 {
-  return ref_counting_ptr<T>(new T (a0, a1, a2, a3, a4));
+  return ref_counting_ptr<T> (new T (a0, a1, a2, a3, a4));
+}
+
+template<typename T, typename A0, typename A1, typename A2, typename A3,
+         typename A4, typename A5>
+ref_counting_ptr<T> make_ref_counted (const A0& a0, const A1& a1, const A2& a2,
+                                      const A3& a3, const A4& a4, const A5& a5)
+{
+  return ref_counting_ptr<T> (new T (a0, a1, a2, a3, a4, a5));
 }
 
 #endif // includeguard_gcc_sh_ref_counted_includeguard
