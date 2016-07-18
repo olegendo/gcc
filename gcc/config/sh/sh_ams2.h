@@ -287,7 +287,8 @@ public:
 
     bool has_base_reg (void) const
     {
-      return is_valid () && base_reg () != invalid_regno;
+      gcc_assert (is_valid ());
+      return base_reg () != invalid_regno;
     }
 
     bool has_no_base_reg (void) const { return !has_base_reg (); }
@@ -306,7 +307,8 @@ public:
 
     bool has_index_reg (void) const
     {
-      return is_valid () && index_reg () != invalid_regno;
+      gcc_assert (is_valid ());
+      return index_reg () != invalid_regno;
     }
 
     bool has_no_index_reg (void) const { return !has_index_reg (); }
