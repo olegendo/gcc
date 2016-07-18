@@ -3897,7 +3897,6 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
       else
         break;
 
-// FIXME: this is unreachable.
       return check_make_non_mod_addr (invalid_regno, index_reg,
                                       scale, op0.disp () * op1.disp ());
     default:
