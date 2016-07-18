@@ -3736,10 +3736,8 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 
           // If the expression is something AMS can't handle, use the original
           // reg instead.
-          if (reg_effective_addr.is_invalid ())
-            return make_reg_addr (x);
-
-          return reg_effective_addr;
+	  return reg_effective_addr.is_invalid () ? make_reg_addr (x)
+						  : reg_effective_addr;
         }
       return make_reg_addr (x);
 
@@ -3898,6 +3896,8 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
         }
       else
         break;
+
+// FIXME: this is unreachable.
       return check_make_non_mod_addr (invalid_regno, index_reg,
                                       scale, op0.disp () * op1.disp ());
     default:
