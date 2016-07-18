@@ -2450,19 +2450,20 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
       used_reg_mods.insert (used_rm);
       tracker.use_changed_reg_mods ().push_back (used_rm);
     }
-  rtx new_reg = gen_reg_rtx (acc_mode);
-  sequence_iterator inserted_el = insert_element (
-	make_ref_counted<reg_mod> ((rtx_insn*)NULL, new_reg, NULL_RTX,
-				   curr_addr, effective_addr), el);
-  visited_reg_mods.insert ((reg_mod*)inserted_el->get ());
-  (*inserted_el)->add_dependency (used_rm);
-  used_rm->add_dependent_el (inserted_el->get ());
-  tracker.inserted_reg_mods ().push_back (inserted_el);
-  tracker.dependent_els ().push_back (std::make_pair (used_rm,
-                                                      inserted_el->get ()));
-  (*inserted_el)->set_cost (dlg.addr_reg_mod_cost (new_reg, curr_addr_rtx,
-                                             *this, el));
-  return as_a<reg_mod*> (inserted_el->get ());
+
+  sequence_iterator i = insert_element (
+	make_ref_counted<reg_mod> ((rtx_insn*)NULL, gen_reg_rtx (acc_mode),
+				   NULL_RTX, curr_addr, effective_addr), el);
+  reg_mod* ii = as_a<reg_mod*> (&**i);
+
+  visited_reg_mods.insert (ii);
+  ii->add_dependency (used_rm);
+  used_rm->add_dependent_el (ii);
+  tracker.inserted_reg_mods ().push_back (i);
+  tracker.dependent_els ().push_back (std::make_pair (used_rm, ii));
+
+  ii->set_cost (dlg.addr_reg_mod_cost (ii->reg (), curr_addr_rtx, *this, el));
+  return ii;
 }
 
 // Find a starting address whose effective address is the single base reg REG.
