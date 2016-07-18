@@ -1747,7 +1747,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
        els_end = end<reg_mod_match> (); els != els_end; )
     {
       reg_mod* rm = as_a<reg_mod*> (els->get ());
-      if (rm->current_addr ().is_valid () && rm->current_addr ().regs_empty ())
+      if (rm->insn () == NULL && rm->current_addr ().is_valid ()
+          && rm->current_addr ().regs_empty ())
 	{
 	  if (!reg_used_in_sequence (rm->reg (),
                                      stdx::next ((sequence_iterator)els)))
