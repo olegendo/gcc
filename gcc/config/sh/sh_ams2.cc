@@ -3712,9 +3712,8 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
               return make_reg_addr (x);
             }
 
-	  addr_expr reg_cur_addr = find_reg_note (mod_insn, REG_INC, NULL_RTX)
-				   ? make_reg_addr (x)
-				   : rtx_to_addr_expr (value, mem_mode);
+	  addr_expr reg_cur_addr = prev_val.acc ? make_reg_addr (x)
+                                   : rtx_to_addr_expr (value, mem_mode);
 
 	  // Insert the modifying insn into the sequence as a reg mod.
 	  reg_mod* new_reg_mod = as_a<reg_mod*> (&**seq->insert_unique (
