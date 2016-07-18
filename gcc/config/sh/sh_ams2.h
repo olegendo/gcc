@@ -477,9 +477,6 @@ public:
   static addr_expr
   make_pre_dec_addr (machine_mode mode, rtx base_reg = any_regno);
 
-  static addr_expr
-  make_invalid_addr (void);
-
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // An alternative for an address mode.  These are usually provided
   // to AMS by the delegate for each memory access in an (access) sequence.
@@ -722,13 +719,12 @@ NOTE:
     }
 
   protected:
-    sequence_element (element_type t, rtx_insn* i)
-      : m_type (t), m_cost (0), m_insn (i),
-      m_effective_addr (make_invalid_addr ()), m_optimization_enabled (true) { }
-
-    sequence_element (element_type t, rtx_insn* i, addr_expr ea)
-      : m_type (t), m_cost (0), m_insn (i), m_effective_addr (ea),
-      m_optimization_enabled (true) { }
+    sequence_element (element_type t, rtx_insn* i,
+		      const addr_expr& ea = addr_expr ())
+    : m_type (t), m_cost (0), m_insn (i), m_effective_addr (ea),
+      m_optimization_enabled (true)
+    {
+    }
 
   private:
     static const adjacent_chain_info g_no_incdec_chain;
@@ -828,8 +824,10 @@ NOTE:
 
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m, rtx addr_rtx)
-    : sequence_element (t, i), m_current_addr (make_invalid_addr ()),
-      m_current_addr_rtx (addr_rtx), m_machine_mode (m) { }
+    : sequence_element (t, i), m_current_addr (), m_current_addr_rtx (addr_rtx),
+      m_machine_mode (m)
+    {
+    }
 
     // The current address expressions are usually set/updated by the sub-class.
     addr_expr m_current_addr;
@@ -907,17 +905,12 @@ NOTE:
   class reg_mod : public sequence_element
   {
   public:
-    reg_mod (rtx_insn* i, rtx r, rtx v)
-    : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_current_addr (make_invalid_addr ()), m_auto_mod_acc (NULL) { };
-
-    reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a, addr_expr ea)
-      : sequence_element (type_reg_mod, i, ea), m_reg (r), m_value (v),
-    m_current_addr (a), m_auto_mod_acc (NULL) { };
-
-    reg_mod (rtx_insn* i, rtx r, rtx v, addr_expr a)
-    : sequence_element (type_reg_mod, i), m_reg (r), m_value (v),
-    m_current_addr (a), m_auto_mod_acc (NULL) { };
+    reg_mod (rtx_insn* i, rtx r, rtx v, const addr_expr& a = addr_expr (),
+	     const addr_expr& ea = addr_expr (), mem_access* ma = NULL)
+    : sequence_element (type_reg_mod, i, ea), m_reg (r), m_value (v),
+      m_current_addr (a), m_auto_mod_acc (ma)
+    {
+    }
 
     virtual bool operator == (const sequence_element& other) const;
     virtual bool can_be_optimized (void) const;
@@ -997,21 +990,17 @@ NOTE:
   class reg_use : public sequence_element
   {
   public:
-    reg_use (rtx_insn* i)
-    : sequence_element (type_reg_use, i) { };
-
     reg_use (rtx_insn* i, rtx reg)
-    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (NULL),
-      m_current_addr (make_invalid_addr ()) { }
-
-    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& a)
-    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (ref),
-      m_current_addr (a) { }
+    : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (NULL)
+    {
+    }
 
     reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& a,
-             const addr_expr& ea)
+             const addr_expr& ea = addr_expr ())
     : sequence_element (type_reg_use, i, ea), m_reg (reg), m_reg_ref (ref),
-      m_current_addr (a) { }
+      m_current_addr (a)
+    {
+    }
 
     virtual bool operator == (const sequence_element& other) const;
 
@@ -1483,12 +1472,6 @@ sh_ams2::make_pre_dec_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = -GET_MODE_SIZE (mode);
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
-}
-
-inline sh_ams2::addr_expr
-sh_ams2::make_invalid_addr (void)
-{
-  return addr_expr ();
 }
 
 inline bool
