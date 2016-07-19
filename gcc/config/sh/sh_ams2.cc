@@ -1439,12 +1439,11 @@ sh_ams2::sequence::find_mem_accesses (rtx_insn* i, rtx& x, element_type type)
 void
 sh_ams2::sequence::find_addr_reg_mods (void)
 {
-  rtx_insn* last_insn = BB_END (start_bb ());
-  reg_mod* last_reg_mod = NULL;
-
   for (addr_reg_map::iterator it = m_addr_regs.begin ();
        it != m_addr_regs.end (); ++it)
     {
+      rtx_insn* last_insn = BB_END (start_bb ());
+      reg_mod* last_reg_mod = NULL;
       for (rtx reg = it->first; last_insn != NULL; )
 	{
 	  const find_reg_value_result prev = find_reg_value (reg, last_insn);
