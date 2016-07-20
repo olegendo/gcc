@@ -1261,9 +1261,12 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 {
   typedef std::map<sequence_element*, sequence*> element_to_seq_map;
   typedef std::map<addr_expr, shared_term, cmp_addr_expr> shared_term_map;
+  typedef element_type_matches<type_reg_mod> reg_mod_match;
+  typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
 
   // Shows which new sequence each sequence element should go into.
   element_to_seq_map element_new_seqs;
+  std::vector<sequence*> new_seqs;
 
   shared_term_map shared_terms;
   sequence& seq = *seq_it;
@@ -1334,8 +1337,10 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 	if (inserted_els.insert (*el).second)
 	  {
 	    if (!term.new_seq ())
-	      term.set_new_seq (&(*sequences.insert (seq_it, sequence ())));
-
+              {
+                term.set_new_seq (&(*sequences.insert (seq_it, sequence ())));
+                new_seqs.push_back (term.new_seq ());
+              }
 	    element_new_seqs[*el] = term.new_seq ();
 	  }
     }
@@ -1351,21 +1356,52 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 	split_1 (*found->second, *it);
     }
 
+  // Add to the split sequences those reg-mods that modify one of their
+  // address regs, along with their dependencies.
+  for (std::vector<sequence*>::iterator seqs = new_seqs.begin ();
+       seqs != new_seqs.end (); ++seqs)
+    {
+      // Since adding new elements might add more address regs,
+      // repeat until no new elements have been added.
+      while (1)
+        {
+          unsigned insert_count = 0;
+          for (reg_mod_iter els = seq.begin<reg_mod_match> (),
+                 els_end = seq.end<reg_mod_match> (); els != els_end; ++els)
+            {
+              reg_mod* rm = as_a<reg_mod*> (els->get ());
+              if ((*seqs)->addr_regs ().find (rm->reg ()) !=
+                  (*seqs)->addr_regs ().end ())
+                insert_count +=
+                  split_1 (**seqs, ref_counting_ptr<sequence_element> (rm));
+            }
+          if (insert_count == 0)
+            break;
+        }
+    }
+
   // Remove the old sequence and return the next element after the
   // newly inserted sequences.
   return sequences.erase (seq_it);
 }
 
-// Internal function of access_sequence::split.  Adds EL and its
-// dependencies to SEQ.
-void
+// Internal function of access_sequence::split.  Add EL and its dependencies
+// to SEQ.  Return the number of unique elements inserted.
+int
 sh_ams2::sequence::split_1 (sequence& seq,
 			    const ref_counting_ptr<sequence_element>& el)
 {
-  seq.insert_unique (el);
+  unsigned insert_count = 0;
+  unsigned prev_size = seq.elements ().size ();
+
+  seq.insert_unique (el)->get ();
+  if (prev_size < seq.elements ().size ())
+    ++insert_count;
+
   for (std::list<sequence_element*>::iterator it = el->dependencies ().begin ();
        it != el->dependencies ().end (); ++it)
-    split_1 (seq, ref_counting_ptr<sequence_element> (*it));
+    insert_count += split_1 (seq, ref_counting_ptr<sequence_element> (*it));
+  return insert_count;
 }
 
 sh_ams2::sequence::~sequence (void)
