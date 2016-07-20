@@ -4272,6 +4272,7 @@ sh_ams2::execute (function* fun)
     }
 
   log_msg ("\nremoving unused reg-mods\n");
+  std::multimap<rtx_insn*, sequence*> insns_to_delete;
   for (std::vector<ref_counting_ptr<sequence_element> >::iterator it
          = original_reg_mods.begin (); it != original_reg_mods.end ();)
     {
@@ -4310,8 +4311,8 @@ sh_ams2::execute (function* fun)
       else if ((*it)->insn ())
         {
           // Also keep the insn if it has other sequence elements in it.
-          for (std::set<sequence*>::iterator seqs
-                 = (*it)->sequences ().begin ();
+          for (std::set<sequence*>::iterator seqs =
+                 (*it)->sequences ().begin ();
                seqs != (*it)->sequences ().end (); ++seqs)
             {
               std::pair<insn_map::iterator, insn_map::iterator>
@@ -4332,10 +4333,34 @@ sh_ams2::execute (function* fun)
                     }
                 }
             }
-          set_insn_deleted ((*it)->insn ());
+          for (std::set<sequence*>::iterator seqs =
+                 (*it)->sequences ().begin ();
+               seqs != (*it)->sequences ().end (); ++seqs)
+            insns_to_delete.insert (std::make_pair ((*it)->insn (), *seqs));
         }
     next:
       it = original_reg_mods.erase (it);
+    }
+
+  // Remove the unused reg-mods' insns only if their sequences
+  // are going to be updated.
+  bool remove = true;
+  for (std::multimap<rtx_insn*, sequence*>::iterator it =
+         insns_to_delete.begin (); it != insns_to_delete.end (); ++it)
+    {
+      std::multimap<rtx_insn*, sequence*>::iterator next = stdx::next (it);
+      rtx_insn* i = it->first;
+      sequence* seq = it->second;
+
+      if (seqs_to_skip.find (seq) != seqs_to_skip.end ())
+        remove = false;
+      if (next == insns_to_delete.end () || next->first != i)
+        {
+          if (remove)
+            set_insn_deleted (i);
+          else
+            remove = true;
+        }
     }
 
   log_msg ("\nupdating sequence insns\n");
