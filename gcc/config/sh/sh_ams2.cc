@@ -2700,7 +2700,7 @@ sh_ams2::sequence::update_insn_stream (void)
   // Emit remaining address modifying insns after the last insn in the access.
   if (insn_sequence_started)
     {
-      bool emit_after = (GET_CODE (last_insn) == INSN);
+      bool emit_after = NONJUMP_INSN_P (last_insn);
 
       rtx_insn* new_insns = get_insns ();
       end_sequence ();
@@ -4342,25 +4342,50 @@ sh_ams2::execute (function* fun)
       it = original_reg_mods.erase (it);
     }
 
-  // Remove the unused reg-mods' insns only if their sequences
-  // are going to be updated.
-  bool remove = true;
-  for (std::multimap<rtx_insn*, sequence*>::iterator it =
-         insns_to_delete.begin (); it != insns_to_delete.end (); ++it)
+  // Remove the unused reg-mods' insns only if all of their
+  // sequences will get updated.
+  std::multimap<rtx_insn*, sequence*>::iterator prev = insns_to_delete.begin ();
+  while (1)
     {
-      std::multimap<rtx_insn*, sequence*>::iterator next = stdx::next (it);
+      unsigned insert_count = 0;
+      for (std::multimap<rtx_insn*, sequence*>::iterator it =
+             insns_to_delete.begin (); it != insns_to_delete.end ();)
+        {
+          rtx_insn* i = it->first;
+          sequence* seq = it->second;
+
+          if (i != prev->first)
+            prev = it;
+
+          // If one sequence isn't updated, all other sequences
+          // that used this reg-mod can't be updated either.
+          if (seqs_to_skip.find (seq) != seqs_to_skip.end ())
+            for (it = prev; it != insns_to_delete.end () && it->first == i;
+                 ++it)
+              {
+                if (seqs_to_skip.find (it->second) == seqs_to_skip.end ())
+                  {
+                    seqs_to_skip.insert (it->second);
+                    ++insert_count;
+                  }
+              }
+          else
+            ++it;
+        }
+      // Repeat until no new sequences got added to SEQS_TO_SKIP.
+      if (insert_count == 0)
+        break;
+    }
+  for (std::multimap<rtx_insn*, sequence*>::iterator it =
+         insns_to_delete.begin (); it != insns_to_delete.end ();)
+    {
       rtx_insn* i = it->first;
       sequence* seq = it->second;
 
-      if (seqs_to_skip.find (seq) != seqs_to_skip.end ())
-        remove = false;
-      if (next == insns_to_delete.end () || next->first != i)
-        {
-          if (remove)
-            set_insn_deleted (i);
-          else
-            remove = true;
-        }
+      if (seqs_to_skip.find (seq) == seqs_to_skip.end ())
+        set_insn_deleted (i);
+      while (it != insns_to_delete.end () && it->first == i)
+        ++it;
     }
 
   log_msg ("\nupdating sequence insns\n");
