@@ -2699,15 +2699,12 @@ void
 sh_ams2::sequence::update_insn_stream (void)
 {
   bool insn_sequence_started = false;
-  rtx_insn* last_insn = NULL;
 
   for (sequence_iterator els = elements ().begin ();
        els != elements ().end (); ++els)
     {
       if ((*els)->insn ())
         {
-          last_insn = (*els)->insn ();
-
           if (insn_sequence_started)
             {
               rtx_insn* new_insns = get_insns ();
@@ -2732,9 +2729,11 @@ sh_ams2::sequence::update_insn_stream (void)
         = (*els)->generate_new_insns (insn_sequence_started);
     }
 
-  // Emit remaining address modifying insns after the last insn in the access.
+  // Emit remaining address modifying insns after the last insn in the
+  // sequence's BB.
   if (insn_sequence_started)
     {
+      rtx_insn* last_insn = BB_END (start_bb ());
       bool emit_after = NONJUMP_INSN_P (last_insn);
 
       rtx_insn* new_insns = get_insns ();
