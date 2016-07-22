@@ -1265,8 +1265,10 @@ NOTE:
 
     int gen_address_mod_1 (filter_iterator<sequence_iterator,
                                            element_to_optimize> el,
-                           delegate& dlg, std::set<reg_mod*>& visited_reg_mods,
+                           delegate& dlg,
                            std::set<reg_mod*>& used_reg_mods,
+                           std::map<rtx, reg_mod*, cmp_by_regno>&
+                             visited_reg_mods,
                            int lookahead_num, bool record_in_sequence = true);
 
     std::pair<int, reg_mod*>
@@ -1275,7 +1277,8 @@ NOTE:
                               disp_t min_disp, disp_t max_disp,
                               addr_type_t addr_type,
                               delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                              std::set<reg_mod*>& visited_reg_mods);
+                              std::map<rtx, reg_mod*, cmp_by_regno>&
+                                visited_reg_mods);
 
     void insert_address_mods (const alternative& alt,
                               reg_mod* base_start_addr,
@@ -1284,7 +1287,8 @@ NOTE:
                               const addr_expr& index_end_addr,
                               sequence_iterator el, mod_tracker& tracker,
                               std::set<reg_mod*>& used_reg_mods,
-                              std::set<reg_mod*>& visited_reg_mods,
+                              std::map<rtx, reg_mod*, cmp_by_regno>&
+                                visited_reg_mods,
                               delegate& dlg);
 
     mod_addr_result
@@ -1293,7 +1297,8 @@ NOTE:
                              addr_type_t addr_type, machine_mode acc_mode,
                              sequence_iterator el, mod_tracker& tracker,
                              std::set<reg_mod*>& used_reg_mods,
-                             std::set<reg_mod*>& visited_reg_mods,
+                             std::map<rtx, reg_mod*, cmp_by_regno>&
+                               visited_reg_mods,
                              delegate& dlg);
 
     reg_mod*
@@ -1302,11 +1307,11 @@ NOTE:
                      const addr_expr& effective_addr,
                      sequence_iterator el, mod_tracker& tracker,
                      std::set<reg_mod*>& used_reg_mods,
-                     std::set<reg_mod*>& visited_reg_mods, delegate& dlg);
+                     delegate& dlg);
 
-    reg_mod* find_start_addr_for_reg (rtx reg,
-                                      std::set<reg_mod*>& used_reg_mods,
-                                      std::set<reg_mod*>& visited_reg_mods);
+    reg_mod* find_start_addr_for_reg (
+      rtx reg, std::set<reg_mod*>& used_reg_mods,
+      std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods);
 
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void

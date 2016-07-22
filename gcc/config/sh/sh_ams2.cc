@@ -1621,7 +1621,7 @@ class sh_ams2::mod_tracker
 {
 public:
   mod_tracker (sequence& seq, std::set<reg_mod*>& used_reg_mods,
-               std::set<reg_mod*>& visited_reg_mods)
+               std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods)
     : m_seq (seq), m_used_reg_mods (used_reg_mods),
       m_visited_reg_mods (visited_reg_mods)
   {
@@ -1648,10 +1648,15 @@ public:
       m_used_reg_mods.erase (*it);
     m_use_changed_reg_mods.clear ();
 
-    for (std::vector<reg_mod*>::iterator
+    for (std::vector<std::pair<rtx, reg_mod*> >::iterator
            it = m_visited_changed_reg_mods.begin ();
          it != m_visited_changed_reg_mods.end (); ++it)
-      m_visited_reg_mods.erase (*it);
+      {
+        if (it->second == NULL)
+          m_visited_reg_mods.erase (it->first);
+        else
+          m_visited_reg_mods[it->first] = it->second;
+      }
     m_visited_changed_reg_mods.clear ();
 
     for (std::vector<std::pair <sequence_element*, addr_expr> >
@@ -1675,10 +1680,28 @@ public:
          it != m_inserted_reg_mods.rend (); ++it)
       {
         m_seq.remove_element (*it);
-        m_visited_reg_mods.erase ((reg_mod*)(*it)->get ());
         m_used_reg_mods.erase ((reg_mod*)(*it)->get ());
       }
     m_inserted_reg_mods.clear ();
+  }
+
+  void visit_reg_mod (reg_mod* rm)
+  {
+    std::map<rtx, reg_mod*, cmp_by_regno>::iterator prev =
+      m_visited_reg_mods.find (rm->reg ());
+
+    if (prev == m_visited_reg_mods.end ())
+      {
+        m_visited_changed_reg_mods.push_back (
+          std::make_pair (rm->reg (), (reg_mod*)NULL));
+        m_visited_reg_mods[rm->reg ()] = rm;
+      }
+    else
+      {
+        m_visited_changed_reg_mods.push_back (
+          std::make_pair (rm->reg (), prev->second));
+        prev->second = rm;
+      }
   }
 
   // List of sequence elements that got new dependencies.
@@ -1694,7 +1717,7 @@ public:
   use_changed_reg_mods (void) { return m_use_changed_reg_mods; }
 
   // List of reg-mods that got visited.
-  std::vector<reg_mod*>&
+  std::vector<std::pair<rtx, reg_mod*> >&
   visited_changed_reg_mods (void) { return m_visited_changed_reg_mods; }
 
   // List of sequence elements whose address changed, along
@@ -1706,9 +1729,11 @@ private:
   sequence& m_seq;
   std::vector<std::pair<sequence_element*, sequence_element*> > m_dependent_els;
   std::vector<sequence_iterator> m_inserted_reg_mods;
-  std::vector<reg_mod*> m_use_changed_reg_mods, m_visited_changed_reg_mods;
+  std::vector<reg_mod*> m_use_changed_reg_mods;
+  std::vector<std::pair<rtx, reg_mod*> >  m_visited_changed_reg_mods;
   std::vector<std::pair <sequence_element*, addr_expr> > m_addr_changed_els;
-  std::set<reg_mod*>& m_used_reg_mods, m_visited_reg_mods;
+  std::set<reg_mod*>& m_used_reg_mods;
+  std::map<rtx, reg_mod*, cmp_by_regno>& m_visited_reg_mods;
 };
 
 // Generate the address modifications needed to arrive at the
@@ -1730,7 +1755,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
         {
           // Count only those reg-mods that won't be removed.
           if (rm->insn () == NULL || !rm->can_be_optimized ())
-	    reg_set_count[rm->reg ()] += 1;
+	    ++reg_set_count[rm->reg ()];
         }
 
       for (addr_expr::regs_const_iterator ri =
@@ -1762,7 +1787,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     }
 
   // FIXME: use linear allocator to avoid allocations for temporary set.
-  std::set<reg_mod*> used_reg_mods, visited_reg_mods;
+  std::set<reg_mod*> used_reg_mods;
+  std::map<rtx, reg_mod*, cmp_by_regno> visited_reg_mods;
   typedef filter_iterator<sequence_iterator, element_to_optimize> el_opt_iter;
   sequence_iterator prev_el = elements ().begin ();
 
@@ -1771,8 +1797,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     {
       // Mark the reg-mods before the current element as visited.
       for (sequence_iterator it = prev_el; it != els; ++it)
-	if (reg_mod* rm = dyn_cast<reg_mod*> (it->get ()))
-	  visited_reg_mods.insert (rm);
+        if (reg_mod* rm = dyn_cast<reg_mod*> (it->get ()))
+          visited_reg_mods[rm->reg ()] = rm;
 
       gen_address_mod_1 (els, dlg, used_reg_mods, visited_reg_mods,
                          base_lookahead
@@ -1807,7 +1833,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 int sh_ams2::sequence::
 gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
                    delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                   std::set<reg_mod*>& visited_reg_mods,
+                   std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods,
                    int lookahead_num, bool record_in_sequence)
 {
   const addr_expr& ae = (*el)->effective_addr ();
@@ -1919,10 +1945,7 @@ gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
           // This will be undone by the mod-tracker later.
           for (sequence_iterator it = el; it != next_el; ++it)
 	    if (reg_mod* rm = dyn_cast<reg_mod*> (it->get ()))
-	      {
-		visited_reg_mods.insert (rm);
-		tracker.visited_changed_reg_mods ().push_back (rm);
-	      }
+              tracker.visit_reg_mod (rm);
 
           int next_cost = gen_address_mod_1 (next_el, dlg,
                                              used_reg_mods, visited_reg_mods,
@@ -1993,7 +2016,8 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
                           disp_t min_disp, disp_t max_disp,
                           addr_type_t addr_type,
                           delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                          std::set<reg_mod*>& visited_reg_mods)
+                          std::map<rtx, reg_mod*, cmp_by_regno>&
+                            visited_reg_mods)
 {
   int min_cost = infinite_costs;
   reg_mod* min_start_addr = NULL;
@@ -2010,8 +2034,12 @@ find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
        addrs != start_addrs.end (); ++addrs)
     {
       // We can only use those reg-mods as starting addresses that
-      // are before the current sequence element.
-      if (visited_reg_mods.find (*addrs) == visited_reg_mods.end ())
+      // have been visited.  If multiple visited reg-mods set the same
+      // reg, we can only use the last one.
+      std::map<rtx, reg_mod*, cmp_by_regno>::iterator visited_addr =
+        visited_reg_mods.find ((*addrs)->reg ());
+      if (visited_addr == visited_reg_mods.end ()
+          || visited_addr->second != *addrs)
         continue;
 
       int cost = try_insert_address_mods (*addrs, end_addr, min_disp, max_disp,
@@ -2075,7 +2103,8 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
                      const addr_expr& index_end_addr,
                      sequence_iterator el, mod_tracker& tracker,
                      std::set<reg_mod*>& used_reg_mods,
-                     std::set<reg_mod*>& visited_reg_mods, delegate& dlg)
+                     std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods,
+                     delegate& dlg)
 {
   machine_mode acc_mode;
   const addr_expr& ae = (*el)->effective_addr ();
@@ -2200,7 +2229,9 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                          addr_type_t addr_type, machine_mode acc_mode,
                          sequence_iterator el, mod_tracker& tracker,
                          std::set<reg_mod*>& used_reg_mods,
-                         std::set<reg_mod*>& visited_reg_mods, delegate& dlg)
+                         std::map<rtx, reg_mod*, cmp_by_regno>&
+                           visited_reg_mods,
+                         delegate& dlg)
 {
   int total_cost = 0;
   int clone_cost = used_reg_mods.find (start_addr) != used_reg_mods.end ()
@@ -2292,7 +2323,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                                   c_start_addr.index_reg (),
                                                   c_end_addr.scale (), 0),
                                     el, tracker,
-                                    used_reg_mods, visited_reg_mods, dlg);
+                                    used_reg_mods, dlg);
       c_start_addr = start_addr->effective_addr ();
       start_addr->adjust_cost (clone_cost);
       clone_cost = 0;
@@ -2322,7 +2353,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                            non_mod_addr (c_start_addr.index_reg (),
                                          c_end_addr.index_reg (),
                                          -1, c_start_addr.disp ()),
-                           el, tracker, used_reg_mods, visited_reg_mods, dlg);
+                           el, tracker, used_reg_mods, dlg);
       new_addr->add_dependency (start_addr);
       start_addr->add_dependent_el (new_addr);
       tracker.dependent_els ().push_back (std::make_pair (start_addr,
@@ -2362,7 +2393,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                          c_start_addr.index_reg (),
                                          c_start_addr.scale (),
                                          c_start_addr.disp ()),
-                           el, tracker, used_reg_mods, visited_reg_mods, dlg);
+                           el, tracker, used_reg_mods, dlg);
       new_addr->add_dependency (start_addr);
       start_addr->add_dependent_el (new_addr);
       tracker.dependent_els ().push_back (std::make_pair (start_addr,
@@ -2417,7 +2448,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                                   c_start_addr.scale (),
                                                   c_start_addr.disp () + disp),
                                     el, tracker,
-                                    used_reg_mods, visited_reg_mods, dlg);
+                                    used_reg_mods, dlg);
       c_start_addr = start_addr->effective_addr ();
       start_addr->adjust_cost (clone_cost);
       clone_cost = 0;
@@ -2440,7 +2471,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                          c_start_addr.index_reg (),
                                          c_start_addr.scale (),
                                          c_start_addr.disp () + auto_mod_disp),
-                           el, tracker, used_reg_mods, visited_reg_mods, dlg);
+                           el, tracker, used_reg_mods, dlg);
 
       if (mem_access* m = dyn_cast<mem_access*> (el->get ()))
         start_addr->set_auto_mod_acc (m);
@@ -2463,7 +2494,7 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
                  const addr_expr& effective_addr,
                  sequence_iterator el, mod_tracker& tracker,
                  std::set<reg_mod*>& used_reg_mods,
-                 std::set<reg_mod*>& visited_reg_mods, delegate& dlg)
+                 delegate& dlg)
 {
   if (used_reg_mods.find (used_rm) == used_reg_mods.end ())
     {
@@ -2476,7 +2507,7 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
 				   NULL_RTX, curr_addr, effective_addr), el);
   reg_mod* ii = as_a<reg_mod*> (&**i);
 
-  visited_reg_mods.insert (ii);
+  tracker.visit_reg_mod (ii);
   ii->add_dependency (used_rm);
   used_rm->add_dependent_el (ii);
   tracker.inserted_reg_mods ().push_back (i);
@@ -2491,7 +2522,8 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
 // before (so that there's no cloning cost when using it).
 sh_ams2::reg_mod* sh_ams2::sequence::
 find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
-                         std::set<reg_mod*>& visited_reg_mods)
+                         std::map<rtx, reg_mod*, cmp_by_regno>&
+                           visited_reg_mods)
 {
   std::list<reg_mod*> start_addrs;
   start_addresses ().get_relevant_addresses (make_reg_addr (reg),
@@ -2501,7 +2533,10 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
   for (start_addr_list::iterator addrs = start_addrs.begin ();
        addrs != start_addrs.end (); ++addrs)
     {
-      if (visited_reg_mods.find (*addrs) == visited_reg_mods.end ())
+      std::map<rtx, reg_mod*, cmp_by_regno>::iterator visited_addr =
+        visited_reg_mods.find ((*addrs)->reg ());
+      if (visited_addr == visited_reg_mods.end ()
+          || visited_addr->second != *addrs )
         continue;
 
       const addr_expr &ae = (*addrs)->effective_addr ().is_invalid ()
