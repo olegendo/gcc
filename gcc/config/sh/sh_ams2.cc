@@ -1643,14 +1643,15 @@ public:
       }
     m_dependent_els.clear ();
 
-    for (std::vector<reg_mod*>::iterator it = m_use_changed_reg_mods.begin ();
-         it != m_use_changed_reg_mods.end (); ++it)
+    for (std::vector<reg_mod*>::reverse_iterator it =
+           m_use_changed_reg_mods.rbegin ();
+         it != m_use_changed_reg_mods.rend (); ++it)
       m_used_reg_mods.erase (*it);
     m_use_changed_reg_mods.clear ();
 
-    for (std::vector<std::pair<rtx, reg_mod*> >::iterator
-           it = m_visited_changed_reg_mods.begin ();
-         it != m_visited_changed_reg_mods.end (); ++it)
+    for (std::vector<std::pair<rtx, reg_mod*> >::reverse_iterator
+           it = m_visited_changed_reg_mods.rbegin ();
+         it != m_visited_changed_reg_mods.rend (); ++it)
       {
         if (it->second == NULL)
           m_visited_reg_mods.erase (it->first);
