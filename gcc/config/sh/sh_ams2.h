@@ -649,7 +649,8 @@ public:
 
     // If false, AMS skips this element when optimizing.
     bool optimization_enabled (void) const { return m_optimization_enabled; }
-    void set_optimization_enabled (bool val) { m_optimization_enabled = val; }
+    void set_optimization_enabled (void) { m_optimization_enabled = true; }
+    void set_optimization_disabled (void) { m_optimization_enabled = false; }
 
     // An increasing/decreasing chain of adjacent accesses that this access
     // is part of.

@@ -1760,7 +1760,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 	   ri != el->effective_addr ().regs_end (); ++ri)
 	if (reg_set_count.find (*ri)->second > 1)
 	  {
-	    el->set_optimization_enabled (false);
+	    el->set_optimization_disabled ();
 	    break;
 	  }
     }
@@ -1775,7 +1775,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
           // access shouldn't be changed either.
           reg_mod* rm = dyn_cast<reg_mod*> (&*els);
           if (rm->auto_mod_acc ())
-            rm->auto_mod_acc ()->set_optimization_enabled (false);
+            rm->auto_mod_acc ()->set_optimization_disabled ();
 
           ++els;
           continue;
@@ -3288,7 +3288,7 @@ sh_ams2::mem_access::update_access_alternatives (const sequence& seq,
   if (alternatives ().empty ())
     {
       log_msg ("no valid alternatives, not optimizing this access\n");
-      set_optimization_enabled (false);
+      set_optimization_disabled ();
     }
 
   // At least on clang/libc++ there is a problem with bind1st, mem_fun and
@@ -3303,7 +3303,7 @@ sh_ams2::mem_access::update_access_alternatives (const sequence& seq,
     {
       log_msg ("original address does not match any alternative, "
 	       "not optimizing this access\n");
-      set_optimization_enabled (false);
+      set_optimization_disabled ();
     }
 }
 
@@ -3929,7 +3929,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 	  new_reg_mod->set_effective_addr (reg_effective_addr);
 
 	  if (reg_cur_addr.is_invalid () || reg_effective_addr.is_invalid ())
-	    new_reg_mod->set_optimization_enabled (false);
+	    new_reg_mod->set_optimization_disabled ();
 
           // If the expression is something AMS can't handle, use the original
           // reg instead.
@@ -4121,7 +4121,6 @@ sh_ams2::execute (function* fun)
   typedef element_type_matches<type_reg_mod> reg_mod_match;
   typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
   typedef element_type_matches<type_reg_use> reg_use_match;
-  typedef filter_iterator<sequence_iterator, reg_use_match> reg_use_iter;
 
 //  df_set_flags (DF_DEFER_INSN_RESCAN); // needed?
 
@@ -4158,7 +4157,7 @@ sh_ams2::execute (function* fun)
           m->set_effective_addr (rtx_to_addr_expr (m->current_addr_rtx (),
                                                    m->mach_mode (), &seq, m));
           if (m->effective_addr ().is_invalid ())
-            m->set_optimization_enabled (false);
+            m->set_optimization_disabled ();
         }
     }
 
@@ -4228,10 +4227,9 @@ sh_ams2::execute (function* fun)
           log_msg ("skipping sequence as it contains no memory accesses\n");
 
           // Mark all reg-uses of this sequence unoptimizable.
-          for (reg_use_iter ru = seq.begin<reg_use_match> (),
-                 ru_end = seq.end<reg_use_match> (); ru != ru_end; ++ru)
-            ru->set_optimization_enabled (false);
-
+	  std::for_each (seq.begin<reg_use_match> (), seq.end<reg_use_match> (),
+			 std::mem_fun_ref (&sequence_element
+					    ::set_optimization_disabled));
           continue;
         }
 
@@ -4512,21 +4510,6 @@ sh_ams2::execute (function* fun)
 	    }
 	}
     }
-
-/*
-simple register forward propagation
-
-  - recalculate death notes via df after ams
-  - look for reg-reg copies where the source reg dies immediately or
-    shortly after the copy and is not used anywhere else
-    -> remove the copy and replace all copy dst reg occurencens with the
-       src reg.
-
-
-locate candidate sequences for access reordering (linearization)
-  - kind of lavenstein distance ... how many accesses are "out of place"
-    and need to be moved in order to get a monotonic sequence
-*/
 
   log_return (0, "\n\n");
 }
