@@ -379,7 +379,7 @@ log_sequence (const sh_ams2::sequence& seq, bool log_alternatives = true,
   if (seq.empty ())
     return;
 
-  for (sh_ams2::sequence_const_iterator it = seq.begin ();
+  for (sh_ams2::sequence::const_iterator it = seq.begin ();
        it != seq.end (); ++it)
     {
       log_sequence_element (*it, log_alternatives, log_dependencies);
@@ -968,7 +968,7 @@ sh_ams2::sequence_element::not_adjacent_dec (
 void
 sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
                                   sequence& seq ATTRIBUTE_UNUSED,
-                                  sequence_iterator el_it ATTRIBUTE_UNUSED)
+                                  sequence::iterator el_it ATTRIBUTE_UNUSED)
 {
   if (effective_addr ().is_invalid ())
     {
@@ -994,7 +994,7 @@ sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
 
 void
 sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
-                               sequence_iterator el_it)
+                               sequence::iterator el_it)
 {
   if (current_addr ().is_invalid ())
     {
@@ -1093,7 +1093,7 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
 
 void
 sh_ams2::reg_use::update_cost (delegate& d, sequence& seq,
-                               sequence_iterator el_it)
+                               sequence::iterator el_it)
 {
   if (m_current_addr.is_invalid () || m_current_addr.has_no_disp ())
     {
@@ -1259,9 +1259,9 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
                           std::list<sequence>& sequences)
 {
   typedef std::map<sequence_element*, sequence*> element_to_seq_map;
-  typedef std::map<addr_expr, shared_term, cmp_addr_expr> shared_term_map;
+  typedef std::map<addr_expr, shared_term, addr_expr::compare> shared_term_map;
   typedef element_type_matches<type_reg_mod> reg_mod_match;
-  typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
+  typedef filter_iterator<iterator, reg_mod_match> reg_mod_iter;
 
   // Shows which new sequence each sequence element should go into.
   element_to_seq_map element_new_seqs;
@@ -1273,7 +1273,7 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
   // Find all terms that appear in the effective addresses of the mem accesses
   // and reg uses.  These will be used as potential bases for new sequences.
   std::vector<addr_expr> terms;
-  for (sequence_iterator el = seq.begin (); el != seq.end (); ++el)
+  for (iterator el = seq.begin (); el != seq.end (); ++el)
     {
       if (!el->is_mem_access () && el->type () != type_reg_use)
         continue;
@@ -1346,7 +1346,7 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
   // Add each mem access and reg use from the original sequence to the
   // appropriate new sequence based on ELEMENT_NEW_SEQS.  Also add their
   // dependencies.
-  for (sequence_reverse_iterator it = seq.rbegin (); it != seq.rend (); ++it)
+  for (reverse_iterator it = seq.rbegin (); it != seq.rend (); ++it)
     {
       element_to_seq_map::iterator found = element_new_seqs.find (&*it);
       if (found != element_new_seqs.end ())
@@ -1403,7 +1403,7 @@ sh_ams2::sequence::split_1 (sequence& seq,
 
 sh_ams2::sequence::~sequence (void)
 {
-  for (sequence_iterator els = begin (); els != end ();)
+  for (iterator els = begin (); els != end ();)
     {
       els->sequences ().erase (this);
       els = remove_element (els, false);
@@ -1673,7 +1673,7 @@ public:
       }
     m_addr_changed_els.clear ();
 
-    for (std::vector<sequence_iterator>::reverse_iterator it
+    for (std::vector<sequence::iterator>::reverse_iterator it
            = m_inserted_reg_mods.rbegin ();
          it != m_inserted_reg_mods.rend (); ++it)
       {
@@ -1707,7 +1707,7 @@ public:
   dependent_els (void) { return m_dependent_els; }
 
   // List of reg-mods that were inserted into the sequence.
-  std::vector<sequence_iterator>&
+  std::vector<sequence::iterator>&
   inserted_reg_mods (void) { return m_inserted_reg_mods; }
 
   // List of reg-mods whose value got used by another reg-mod.
@@ -1726,7 +1726,7 @@ public:
 private:
   sequence& m_seq;
   std::vector<std::pair<sequence_element*, sequence_element*> > m_dependent_els;
-  std::vector<sequence_iterator> m_inserted_reg_mods;
+  std::vector<sequence::iterator> m_inserted_reg_mods;
   std::vector<reg_mod*> m_use_changed_reg_mods;
   std::vector<std::pair<rtx, reg_mod*> >  m_visited_changed_reg_mods;
   std::vector<std::pair <sequence_element*, addr_expr> > m_addr_changed_els;
@@ -1740,13 +1740,13 @@ void
 sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 {
   typedef element_type_matches<type_reg_mod> reg_mod_match;
-  typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
+  typedef filter_iterator<iterator, reg_mod_match> reg_mod_iter;
 
   // If a reg has been set more than once, skip the elements that use
   // that reg since we don't know which value they use.
   // FIXME: Find a way to tell apart different versions of the same register.
   std::map<rtx, int, cmp_by_regno> reg_set_count;
-  for (sequence_iterator el = begin (); el != end (); ++el)
+  for (iterator el = begin (); el != end (); ++el)
     {
       if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
         {
@@ -1786,14 +1786,14 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   // FIXME: use linear allocator to avoid allocations for temporary set.
   std::set<reg_mod*> used_reg_mods;
   std::map<rtx, reg_mod*, cmp_by_regno> visited_reg_mods;
-  typedef filter_iterator<sequence_iterator, element_to_optimize> el_opt_iter;
-  sequence_iterator prev_el = begin ();
+  typedef filter_iterator<iterator, element_to_optimize> el_opt_iter;
+  iterator prev_el = begin ();
 
   for (el_opt_iter els = begin<element_to_optimize> (),
        els_end = end<element_to_optimize> (); els != els_end; ++els)
     {
       // Mark the reg-mods before the current element as visited.
-      for (sequence_iterator it = prev_el; it != els; ++it)
+      for (iterator it = prev_el; it != els; ++it)
         if (reg_mod* rm = dyn_cast<reg_mod*> (&*it))
           visited_reg_mods[rm->reg ()] = rm;
 
@@ -1826,7 +1826,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 // If RECORD_IN_SEQUENCE is false, don't insert the actual modifications
 // in the sequence, only calculate the cost.
 int sh_ams2::sequence::
-gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
+gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
                    delegate& dlg, std::set<reg_mod*>& used_reg_mods,
                    std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods,
                    int lookahead_num, bool record_in_sequence)
@@ -1850,7 +1850,7 @@ gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
   addr_expr min_end_base, min_end_index;
   mod_tracker tracker (*this, used_reg_mods, visited_reg_mods);
 
-  filter_iterator<sequence_iterator, element_to_optimize> next_el =
+  filter_iterator<iterator, element_to_optimize> next_el =
     lookahead_num ? stdx::next (el) : end<element_to_optimize> ();
 
   const alternative_set* alternatives;
@@ -1938,7 +1938,7 @@ gen_address_mod_1 (filter_iterator<sequence_iterator, element_to_optimize> el,
 
           // Mark the reg-mods between the current and next element as visited.
           // This will be undone by the mod-tracker later.
-          for (sequence_iterator it = el; it != next_el; ++it)
+          for (iterator it = el; it != next_el; ++it)
 	    if (reg_mod* rm = dyn_cast<reg_mod*> (&*it))
               tracker.visit_reg_mod (rm);
 
@@ -2007,7 +2007,7 @@ struct sh_ams2::mod_addr_result
 // Find the cheapest starting address that can be used to arrive at END_ADDR.
 // Return it along with the cost of the address modifications.
 std::pair<int, sh_ams2::reg_mod*> sh_ams2::sequence::
-find_cheapest_start_addr (const addr_expr& end_addr, sequence_iterator el,
+find_cheapest_start_addr (const addr_expr& end_addr, iterator el,
                           disp_t min_disp, disp_t max_disp,
                           addr_type_t addr_type,
                           delegate& dlg, std::set<reg_mod*>& used_reg_mods,
@@ -2096,7 +2096,7 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
                      reg_mod* index_start_addr,
                      const addr_expr& base_end_addr,
                      const addr_expr& index_end_addr,
-                     sequence_iterator el, mod_tracker& tracker,
+                     iterator el, mod_tracker& tracker,
                      std::set<reg_mod*>& used_reg_mods,
                      std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods,
                      delegate& dlg)
@@ -2183,13 +2183,13 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
           // Otherwise, insert a reg-mod that sets the used reg to
           // the correct value.
 
-	  sequence_iterator inserted_el = insert_element (
+	  iterator inserted_el = insert_element (
 	      make_ref_counted<reg_mod> ((rtx_insn*)NULL, ru->reg (), NULL_RTX,
 					 new_addr, ru->effective_addr ()), el);
           tracker.inserted_reg_mods ().push_back (inserted_el);
 
           // Find and add the dependency for the new reg-mod
-          for (sequence_iterator it = stdx::prev (inserted_el); ; --it)
+          for (iterator it = stdx::prev (inserted_el); ; --it)
             {
 	      if (reg_mod* rm = dyn_cast<reg_mod*> (&*it))
 		if (regs_equal (rm->reg (), new_addr.base_reg ())
@@ -2221,7 +2221,7 @@ sh_ams2::mod_addr_result sh_ams2::sequence::
 try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                          disp_t min_disp, disp_t max_disp,
                          addr_type_t addr_type, machine_mode acc_mode,
-                         sequence_iterator el, mod_tracker& tracker,
+                         iterator el, mod_tracker& tracker,
                          std::set<reg_mod*>& used_reg_mods,
                          std::map<rtx, reg_mod*, cmp_by_regno>&
                            visited_reg_mods,
@@ -2486,7 +2486,7 @@ sh_ams2::reg_mod* sh_ams2::sequence::
 insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
                  rtx curr_addr_rtx, const addr_expr& curr_addr,
                  const addr_expr& effective_addr,
-                 sequence_iterator el, mod_tracker& tracker,
+                 iterator el, mod_tracker& tracker,
                  std::set<reg_mod*>& used_reg_mods,
                  delegate& dlg)
 {
@@ -2496,7 +2496,7 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
       tracker.use_changed_reg_mods ().push_back (used_rm);
     }
 
-  sequence_iterator i = insert_element (
+  iterator i = insert_element (
 	make_ref_counted<reg_mod> ((rtx_insn*)NULL, gen_reg_rtx (acc_mode),
 				   NULL_RTX, curr_addr, effective_addr), el);
   reg_mod* ii = as_a<reg_mod*> (&*i);
@@ -2552,11 +2552,11 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
 class sh_ams2::reg_copy
 {
 public:
-  reg_copy (rtx s, rtx d, sequence_iterator e)
+  reg_copy (rtx s, rtx d, sequence::iterator e)
   : src (s), dest (d), el (e), reg_modified (false), can_be_removed (true),
     use_count (0) {}
   rtx src, dest;
-  sequence_iterator el;
+  sequence::iterator el;
   bool reg_modified;
   bool can_be_removed;
   int use_count;
@@ -2575,7 +2575,7 @@ sh_ams2::sequence::eliminate_reg_copies (void)
   std::set<rtx_insn*> visited_insns;
   rtx_insn* prev_insn = BB_HEAD (start_bb ());
 
-  for (sequence_iterator el = begin (); el != end (); ++el)
+  for (iterator el = begin (); el != end (); ++el)
     {
       // Skip reg-mods that set the reg to itself.
       if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
@@ -2590,7 +2590,7 @@ sh_ams2::sequence::eliminate_reg_copies (void)
       log_msg ("\n");
 
       rtx_insn* curr_insn = NULL;
-      for (sequence_iterator it = el; it != end (); ++it)
+      for (iterator it = el; it != end (); ++it)
         if (it->insn ())
           {
             curr_insn = it->insn ();
@@ -2693,7 +2693,7 @@ sh_ams2::sequence::update_insn_stream (void)
 {
   bool insn_sequence_started = false;
 
-  for (sequence_iterator els = begin (); els != end (); ++els)
+  for (iterator els = begin (); els != end (); ++els)
     {
       if (els->insn ())
         {
@@ -2796,7 +2796,7 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
 basic_block
 sh_ams2::sequence::start_bb (void) const
 {
-  for (sequence_const_iterator e = begin (); e != end (); ++e)
+  for (const_iterator e = begin (); e != end (); ++e)
     {
 // FIXME: in which cases can an insn in the sequence NOT belong to a basic block?
 // either this check is unnecessary, or add a comment.
@@ -2810,7 +2810,7 @@ sh_ams2::sequence::start_bb (void) const
 rtx_insn*
 sh_ams2::sequence::start_insn (void) const
 {
-  for (sequence_const_iterator e = begin (); e != end (); ++e)
+  for (const_iterator e = begin (); e != end (); ++e)
     {
       if (e->insn ())
         return e->insn ();
@@ -2820,10 +2820,10 @@ sh_ams2::sequence::start_insn (void) const
 
 // FIXME:
 // start_bb and start_insn should use this.
-sh_ams2::sequence_const_iterator
+sh_ams2::sequence::const_iterator
 sh_ams2::sequence::start_insn_element (void) const
 {
-  for (sequence_const_iterator e = begin (); e != end (); ++e)
+  for (const_iterator e = begin (); e != end (); ++e)
     if (e->insn ())
       return e;
 
@@ -2833,17 +2833,17 @@ sh_ams2::sequence::start_insn_element (void) const
 
 // Insert a new element into the sequence.  Return an iterator pointing
 // to the newly inserted element.
-sh_ams2::sequence_iterator
+sh_ams2::sequence::iterator
 sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
-                                   sequence_iterator insert_before)
+                                   iterator insert_before)
 {
-  sequence_iterator iter (m_els.insert (insert_before.base (), el));
+  iterator i (m_els.insert (insert_before.base (), el));
 
   el->sequences ().insert (this);
 
   // Update the insn -> element map.
   if (el->insn ())
-      m_insn_el_map.insert (std::make_pair (el->insn (), iter));
+      m_insn_el_map.insert (std::make_pair (el->insn (), i));
 
   // Update the address reg and the start address list.
   if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
@@ -2852,14 +2852,14 @@ sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
       m_start_addr_list.add (rm);
     }
 
-  return iter;
+  return i;
 }
 
 // If EL is unique, insert it into the sequence and return an iterator
 // pointing to it.  If it already has a duplicate in the sequence, don't
 // insert it and return an iterator to the already inserted duplicate instead.
 // The place of the element is determined by its insn.
-sh_ams2::sequence_iterator
+sh_ams2::sequence::iterator
 sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
 {
   if (m_els.empty ())
@@ -2871,11 +2871,11 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
       if (el->type () == type_reg_use)
         {
           // Check for duplicates.
-          for (sequence_reverse_iterator els = rbegin ();
-               els != rend () && !els->insn (); ++els)
+          for (reverse_iterator els = rbegin ();
+	       els != rend () && !els->insn (); ++els)
             {
               if (*el == *els)
-                return sequence_iterator (stdx::next (els.base ().base ()));
+                return iterator (stdx::next (els.base ().base ()));
             }
           return insert_element (el, end ());
         }
@@ -2883,20 +2883,16 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
       else
         {
           // Check for duplicates.
-          for (sequence_iterator els = begin ();
-	       els != end () && !els->insn (); ++els)
-            {
-              if (*el == *els)
-                return els;
-            }
-
+          for (iterator els = begin (); els != end () && !els->insn (); ++els)
+	    if (*el == *els)
+	      return els;
 /*
       // FIXME: this should be the same as above, shouldn't it?
       // start_insn_element returns the first element that's got an insn,
       // so we can use that as an end iterator.  It's a bit easier to grasp.
-      sequence_const_iterator first_insn_i = start_insn_element ();
-      sequence_iterator els = std::find_if (elements ().begin (), first_insn_i,
-					    sequence_element::equals (*el));
+      const_iterator first_insn_i = start_insn_element ();
+      iterator els = std::find_if (elements ().begin (), first_insn_i,
+				   sequence_element::equals (*el));
       if (els != first_insn_i)
 	return els;
 */
@@ -2916,7 +2912,7 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
 
   for (insn_map::iterator i = els_in_insn.first; i != els_in_insn.second; ++i)
     {
-      sequence_iterator insert_after = i->second;
+      iterator insert_after = i->second;
       if (stdx::next (insert_after) == end ()
 	  || stdx::next (insert_after)->insn () != insert_after->insn ())
 	return insert_element (el, stdx::next (insert_after));
@@ -2932,12 +2928,10 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
           // the insn-less reg-uses.
           if (i == NULL)
             {
-              for (sequence_reverse_iterator els = rbegin ();
-                   els != rend (); ++els)
-                {
-                  if (els->insn () || els->type () != type_reg_use)
-                    return insert_element (el, sequence_iterator (els.base ().base ()));
-                }
+              for (reverse_iterator els = rbegin (); els != rend (); ++els)
+		if (els->insn () || els->type () != type_reg_use)
+		  return insert_element (el, iterator (els.base ().base ()));
+
               return insert_element (el, begin ());
             }
           continue;
@@ -2946,7 +2940,7 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
       for (insn_map::iterator els = els_in_insn.first;
            els != els_in_insn.second; ++els)
         {
-          sequence_iterator insert_before = els->second;
+          iterator insert_before = els->second;
           if (insert_before == begin ()
               || stdx::prev (insert_before)->insn () != insert_before->insn ())
             return insert_element (el, insert_before);
@@ -2959,9 +2953,8 @@ sh_ams2::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
 
 // Remove an element from the sequence.  Return an iterator pointing
 // to the next element.
-sh_ams2::sequence_iterator
-sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el,
-                                   bool clear_deps)
+sh_ams2::sequence::iterator
+sh_ams2::sequence::remove_element (iterator el, bool clear_deps)
 {
   // Update the insn -> element map.
   if (el->insn ())
@@ -3005,7 +2998,7 @@ sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el,
       el->dependent_els ().clear ();
     }
 
-  return sequence_iterator (m_els.erase (el.base ()));
+  return iterator (m_els.erase (el.base ()));
 }
 
 // The total cost of the accesses in the sequence.
@@ -3013,18 +3006,16 @@ int
 sh_ams2::sequence::cost (void) const
 {
   int cost = 0;
-  for (sequence_const_iterator i = begin ();
-       i != end () && cost != infinite_costs; ++i)
+  for (const_iterator i = begin (); i != end () && cost != infinite_costs; ++i)
     cost += i->cost ();
   return cost;
 }
 
 // Check whether REG is used in any element after START.
 bool
-sh_ams2::sequence
-::reg_used_in_sequence (rtx reg, sequence_const_iterator start) const
+sh_ams2::sequence::reg_used_in_sequence (rtx reg, const_iterator start) const
 {
-  for (sequence_const_iterator i = start; i != end (); ++i)
+  for (const_iterator i = start; i != end (); ++i)
     if (i->uses_reg (reg))
       return true;
 
@@ -3053,7 +3044,7 @@ sh_ams2::sequence
 void
 sh_ams2::sequence::calculate_adjacency_info (void)
 {
-  typedef filter_iterator<sequence_iterator, element_to_optimize> iter;
+  typedef filter_iterator<iterator, element_to_optimize> iter;
 
   for (iter m = begin<element_to_optimize> (),
          mend = end<element_to_optimize> (); m != mend; )
@@ -3102,7 +3093,7 @@ sh_ams2::sequence::calculate_adjacency_info (void)
 void
 sh_ams2::sequence::update_cost (delegate& d)
 {
-  for (sequence_iterator els = begin (); els != end (); ++els)
+  for (iterator els = begin (); els != end (); ++els)
     els->update_cost (d, *this, els);
 }
 
@@ -3112,7 +3103,7 @@ sh_ams2::sequence::update_cost (delegate& d)
 bool
 sh_ams2::sequence::cost_already_minimal (void) const
 {
-  for (sequence_const_iterator els = begin (); els != end (); ++els)
+  for (const_iterator els = begin (); els != end (); ++els)
     {
       if (const mem_access* m = dyn_cast<const mem_access*> (&*els))
 	{
@@ -3136,7 +3127,7 @@ sh_ams2::sequence::update_access_alternatives (delegate& d,
 {
   typedef element_type_matches<type_mem_load, type_mem_store, type_mem_operand>
     match;
-  typedef filter_iterator<sequence_iterator, match> iter;
+  typedef filter_iterator<iterator, match> iter;
 
   for (iter e = begin<match> (), e_end = end<match> (); e != e_end; ++e)
     ((mem_access*)&*e)->update_access_alternatives (*this, e,
@@ -3156,7 +3147,7 @@ sh_ams2::sequence::update_access_alternatives (delegate& d,
 // Update the alternatives of the access.
 void
 sh_ams2::mem_access::update_access_alternatives (const sequence& seq,
-                                                 sequence_const_iterator it,
+                                                 sequence::const_iterator it,
                                                  delegate& d,
                                                  bool force_validation,
                                                  bool disable_validation)
@@ -4117,9 +4108,9 @@ sh_ams2::execute (function* fun)
 
   typedef element_type_matches<type_mem_load, type_mem_store,
                                type_mem_operand> mem_match;
-  typedef filter_iterator<sequence_iterator, mem_match> mem_acc_iter;
+  typedef filter_iterator<sequence::iterator, mem_match> mem_acc_iter;
   typedef element_type_matches<type_reg_mod> reg_mod_match;
-  typedef filter_iterator<sequence_iterator, reg_mod_match> reg_mod_iter;
+  typedef filter_iterator<sequence::iterator, reg_mod_match> reg_mod_iter;
   typedef element_type_matches<type_reg_use> reg_use_match;
 
 //  df_set_flags (DF_DEFER_INSN_RESCAN); // needed?
@@ -4353,9 +4344,9 @@ sh_ams2::execute (function* fun)
                  (*it)->sequences ().begin ();
                seqs != (*it)->sequences ().end (); ++seqs)
             {
-              std::pair<insn_map::iterator, insn_map::iterator>
+              std::pair<sequence::insn_map::iterator, sequence::insn_map::iterator>
                 els_in_insn = (*seqs)->elements_in_insn ((*it)->insn ());
-              for (insn_map::iterator els = els_in_insn.first;
+              for (sequence::insn_map::iterator els = els_in_insn.first;
                    els != els_in_insn.second; ++els)
                 {
                   if (&*els->second != *it

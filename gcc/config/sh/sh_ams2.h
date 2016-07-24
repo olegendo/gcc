@@ -162,19 +162,6 @@ public:
   class reg_copy;
 
  public:
-
-  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::iterator,
-			  sequence_element > sequence_iterator;
-
-  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_iterator,
-			  const sequence_element > sequence_const_iterator;
-
-  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::reverse_iterator,
-			  sequence_element > sequence_reverse_iterator;
-
-  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_reverse_iterator,
-			  const sequence_element> sequence_const_reverse_iterator;
-
   static regno_t get_regno (const_rtx x);
 
   // Comparison struct for sets and maps containing reg rtx-es.
@@ -183,38 +170,6 @@ public:
     bool operator () (const rtx a, const rtx b) const
     {
       return REGNO (a) < REGNO (b);
-    }
-  };
-
-  // Comparison struct for sets and maps containing address expressions.
-  struct cmp_addr_expr
-  {
-    bool operator () (const addr_expr& a, const addr_expr& b) const
-    {
-      if (a.is_invalid () && b.is_invalid ())
-        return false;
-      if (a.is_invalid () || b.is_invalid ())
-        return a.is_invalid ();
-
-      if (a.has_base_reg () && b.has_base_reg ())
-        {
-          if (REGNO (a.base_reg ()) != REGNO (b.base_reg ()))
-            return REGNO (a.base_reg ()) < REGNO (b.base_reg ());
-        }
-      else if (a.has_base_reg () || b.has_base_reg ())
-        return a.has_base_reg ();
-
-      if (a.has_index_reg () && b.has_index_reg ())
-        {
-          if (REGNO (a.index_reg ()) != REGNO (b.index_reg ()))
-            return REGNO (a.index_reg ()) < REGNO (b.index_reg ());
-        }
-      else if (a.has_index_reg () || b.has_index_reg ())
-        return a.has_index_reg ();
-
-      if (a.disp () == b.disp () && a.has_index_reg () && b.has_index_reg ())
-        return a.scale () < b.scale ();
-      return a.disp () < b.disp ();
     }
   };
 
@@ -592,6 +547,286 @@ public:
   class reg_barrier;
   class reg_use;
 
+  typedef std::map<rtx, unsigned, cmp_by_regno> addr_reg_map;
+
+  // A structure used to store the address regs that can be used as a starting
+  // point to arrive at another address during address mod generation.
+  class start_addr_list
+  {
+  public:
+
+    typedef std::list<reg_mod*>::iterator iterator;
+    typedef std::multimap<rtx, reg_mod*, cmp_by_regno> reg_map;
+    template <typename OutputIterator> void
+    get_relevant_addresses (const addr_expr& end_addr, OutputIterator out);
+
+    void add (reg_mod* start_addr);
+    void remove (reg_mod* start_addr);
+
+  private:
+
+    // List of addresses that only have a constant displacement.
+    std::list<reg_mod*> m_const_addresses;
+
+    // A map for storing addresses that have a base and/or index reg.
+    // The key of each stored address is its base or index reg (the
+    // address is stored twice if it has both).
+    reg_map m_reg_addresses;
+  };
+
+  template <element_type T1, element_type T2 = T1, element_type T3 = T1>
+  struct element_type_matches
+  {
+    bool operator () (const sequence_element& e) const
+    {
+      return e.type () == T1 || e.type () == T2 || e.type () == T3;
+    }
+  };
+
+  struct element_to_optimize;
+
+
+  // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  // The access sequence that contains the memory accesses of some part of
+  // the code (usually a basic block), along with other relevant information
+  // (reg uses, reg mods, etc.).
+  class sequence_element;
+
+  class sequence
+  {
+  public:
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::iterator,
+			    sequence_element > iterator;
+
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_iterator,
+			    const sequence_element > const_iterator;
+
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::reverse_iterator,
+			    sequence_element > reverse_iterator;
+
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_reverse_iterator,
+			    const sequence_element> const_reverse_iterator;
+
+
+    typedef std::multimap<rtx_insn*, iterator> insn_map;
+
+    // Split the access sequence pointed to by SEQ into multiple sequences,
+    // grouping the accesses that have common terms in their effective address
+    // together.  Return an iterator to the sequence that comes after the newly
+    // inserted sequences.
+    static std::list<sequence>::iterator
+    split (std::list<sequence>::iterator seq_it,
+           std::list<sequence>& sequences);
+
+    ~sequence (void);
+
+    // Find all mem accesses in the rtx X of the insn I and add them to the
+    // sequence.  TYPE indicates the type of the next mem that we find
+    // (i.e. mem_load, mem_store or mem_operand).
+    void find_mem_accesses (rtx_insn* i, rtx& x,
+                            element_type type = type_mem_load);
+
+    // Add a reg mod for every insn that modifies an address register.
+    void find_addr_reg_mods (void);
+
+    // Add a reg use for every use of an address register that's not a
+    // memory access
+    void find_addr_reg_uses (void);
+
+    // Generate the address modifications needed to arrive at the
+    // addresses in the sequence.
+    void gen_address_mod (delegate& dlg, int base_lookahead);
+
+    // Try to eliminate unnecessary reg -> reg copies.
+    void eliminate_reg_copies (void);
+
+    // Update the original insn stream with the changes in this sequence.
+    void update_insn_stream (void);
+
+    // Fill the m_inc/dec_chain fields of the sequence elements.
+    void calculate_adjacency_info (void);
+
+    // Check whether REG is used in any element after START.
+    bool reg_used_in_sequence (rtx reg, const_iterator start) const;
+
+    // Check whether REG is used in any of the sequence's accesses.
+    bool
+    reg_used_in_sequence (rtx reg) const
+    {
+      return reg_used_in_sequence (reg, begin ());
+    }
+
+    // The total cost of the accesses in the sequence.
+    int cost (void) const;
+
+    // Re-calculate the cost.
+    void update_cost (delegate& d);
+
+    // Check whether the cost of the sequence is already minimal and
+    // can't be improved further.
+    bool cost_already_minimal (void) const;
+
+    // Update the alternatives of the sequence's accesses.
+    void update_access_alternatives (delegate& d, bool force_validation,
+                                     bool disable_validation,
+                                     bool adjust_costs = false);
+
+    // Insert a new element into the sequence.  Return an iterator pointing
+    // to the newly inserted element.
+    iterator insert_element (const ref_counting_ptr<sequence_element>& el,
+			     iterator insert_before);
+
+    // If the EL is unique, insert it into the sequence and return an iterator
+    // pointing to it.  If it already has a duplicate in the sequence, don't
+    // insert it and return an iterator to the already inserted duplicate
+    // instead.
+    // The place of the element is determined by its insn.
+    iterator insert_unique (const ref_counting_ptr<sequence_element>& el);
+
+    // Remove an element from the sequence.  Return an iterator pointing
+    // to the next element.
+    iterator remove_element (iterator el, bool clear_deps = true);
+
+    // Find the value that REG was last set to, starting the search from
+    // START_INSN.
+    find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn);
+
+    // The first insn and basic block in the sequence.
+    const_iterator start_insn_element (void) const;
+
+    rtx_insn* start_insn (void) const;
+    basic_block start_bb (void) const;
+
+    // A map containing all the address regs used in the sequence
+    // and the number of elements that use them.
+    addr_reg_map& addr_regs (void) { return m_addr_regs; }
+
+    // Return the sequence elements that INSN contains.
+    std::pair<insn_map::iterator, insn_map::iterator>
+    elements_in_insn (rtx_insn* insn) { return m_insn_el_map.equal_range (insn); }
+
+    // A structure for retrieving the starting addresses that could be
+    // used to arrive at a given destination address.
+    start_addr_list& start_addresses (void)  { return m_start_addr_list; }
+
+    bool empty (void) const { return m_els.empty (); }
+    size_t size (void) const { return m_els.size (); }
+
+    iterator begin (void) { return iterator (m_els.begin ()); }
+    iterator end (void) { return iterator (m_els.end ()); }
+
+    const_iterator begin (void) const { return const_iterator (m_els.begin ()); }
+    const_iterator end (void) const { return const_iterator (m_els.end ()); }
+
+    reverse_iterator rbegin (void) { return reverse_iterator (m_els.rbegin ()); }
+    reverse_iterator rend (void) { return reverse_iterator (m_els.rend ()); }
+
+    const_reverse_iterator rbegin (void) const { return const_reverse_iterator (m_els.rbegin ()); }
+    const_reverse_iterator rend (void) const { return const_reverse_iterator (m_els.rend ()); }
+
+    // iterator decorator for iterating over different types of elements
+    // in the access sequence.
+    template <typename Match>
+    filter_iterator<iterator, Match> begin (void)
+    {
+      typedef filter_iterator<iterator, Match> iter;
+      return iter (begin (), end ());
+    }
+
+    template <typename Match>
+    filter_iterator<iterator, Match> end (void)
+    {
+      typedef filter_iterator<iterator, Match> iter;
+      return iter (begin (), end ());
+    }
+
+    template <typename Match>
+    filter_iterator<const_iterator, Match> begin (void) const
+    {
+      typedef filter_iterator<const_iterator, Match> iter;
+      return iter (begin (), end ());
+    }
+
+    template <typename Match>
+    filter_iterator<const_iterator, Match> end (void) const
+    {
+      typedef filter_iterator<const_iterator, Match> iter;
+      return iter (begin (), end ());
+    }
+
+  private:
+    static int split_1 (sequence& seq,
+                        const ref_counting_ptr<sequence_element>& el);
+
+    int gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
+                           delegate& dlg,
+                           std::set<reg_mod*>& used_reg_mods,
+                           std::map<rtx, reg_mod*, cmp_by_regno>&
+                             visited_reg_mods,
+                           int lookahead_num, bool record_in_sequence = true);
+
+    std::pair<int, reg_mod*>
+    find_cheapest_start_addr (const addr_expr& end_addr,
+                              iterator el,
+                              disp_t min_disp, disp_t max_disp,
+                              addr_type_t addr_type,
+                              delegate& dlg, std::set<reg_mod*>& used_reg_mods,
+                              std::map<rtx, reg_mod*, cmp_by_regno>&
+                                visited_reg_mods);
+
+    void insert_address_mods (const alternative& alt,
+                              reg_mod* base_start_addr,
+                              reg_mod* index_start_addr,
+                              const addr_expr& base_end_addr,
+                              const addr_expr& index_end_addr,
+                              iterator el, mod_tracker& tracker,
+                              std::set<reg_mod*>& used_reg_mods,
+                              std::map<rtx, reg_mod*, cmp_by_regno>&
+                                visited_reg_mods,
+                              delegate& dlg);
+
+    mod_addr_result
+    try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
+                             disp_t min_disp, disp_t max_disp,
+                             addr_type_t addr_type, machine_mode acc_mode,
+                             iterator el, mod_tracker& tracker,
+                             std::set<reg_mod*>& used_reg_mods,
+                             std::map<rtx, reg_mod*, cmp_by_regno>&
+                               visited_reg_mods,
+                             delegate& dlg);
+
+    reg_mod*
+    insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
+                     rtx curr_addr_rtx, const addr_expr& curr_addr,
+                     const addr_expr& effective_addr,
+                     iterator el, mod_tracker& tracker,
+                     std::set<reg_mod*>& used_reg_mods,
+                     delegate& dlg);
+
+    reg_mod* find_start_addr_for_reg (
+      rtx reg, std::set<reg_mod*>& used_reg_mods,
+      std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods);
+
+    std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
+    template <typename OutputIterator> void
+    find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out);
+
+    // FIXME: m_els is the primary container for the sequence_elements.
+    // use std::auto_ptr for that instead of raw pointers.  actually it should
+    // be std::unique_ptr, but we don't have that (yet).  std::auto_ptr is OK
+    // with node based containers like std::list.
+    // when transferring auto_ptr'ed sequence elements from one sequence list
+    // to another, use std::list::splice to move elements without having to
+    // copy auto_ptr.
+    // if multiple sequence lists need to share the same sequence_element,
+    // need to use ref_counted_ptr (or std::tr1::shared_ptr).
+    std::list<ref_counting_ptr<sequence_element> > m_els;
+    addr_reg_map m_addr_regs;
+    insn_map m_insn_el_map;
+    start_addr_list m_start_addr_list;
+
+  };
+
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // Base class of an (access) sequence element.
 
@@ -635,7 +870,7 @@ public:
     void adjust_cost (int d) { m_cost += d; }
     virtual void
     update_cost (delegate& d ATTRIBUTE_UNUSED, sequence& seq ATTRIBUTE_UNUSED,
-                 sequence_iterator el_it ATTRIBUTE_UNUSED) { }
+                 sequence::iterator el_it ATTRIBUTE_UNUSED) { }
 
     // The insn rtx of this element.  Maybe null if it has been inserted
     // by AMS into the sequence and is not present in the original insn list.
@@ -792,7 +1027,7 @@ NOTE:
     const alternative_set& alternatives (void) const { return m_alternatives; }
 
     void update_access_alternatives (const sequence& seq,
-                                     sequence_const_iterator it,
+                                     sequence::const_iterator it,
                                      delegate& d, bool force_validation,
 				     bool disable_validation);
 
@@ -834,7 +1069,7 @@ NOTE:
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
 
     virtual void update_cost (delegate& d, sequence& seq,
-                              sequence_iterator el_it);
+                              sequence::iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const
@@ -954,7 +1189,7 @@ NOTE:
 
 
     virtual void update_cost (delegate& d, sequence& seq,
-                              sequence_iterator el_it);
+                              sequence::iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
     virtual bool uses_reg (rtx r) const
@@ -1053,7 +1288,7 @@ NOTE:
 
 
     virtual void update_cost (delegate& d, sequence& seq,
-                              sequence_iterator el_it);
+                              sequence::iterator el_it);
 
     virtual bool generate_new_insns (bool insn_sequence_started);
 
@@ -1074,273 +1309,6 @@ NOTE:
     adjacent_chain_info m_dec_chain;
   };
 
-  template <element_type T1, element_type T2 = T1, element_type T3 = T1>
-  struct element_type_matches
-  {
-    bool operator () (const sequence_element& e) const
-    {
-      return e.type () == T1 || e.type () == T2 || e.type () == T3;
-    }
-  };
-
-  struct element_to_optimize;
-
-  typedef std::map<rtx, unsigned, cmp_by_regno> addr_reg_map;
-  typedef std::multimap<rtx_insn*, sequence_iterator> insn_map;
-
-  // A structure used to store the address regs that can be used as a starting
-  // point to arrive at another address during address mod generation.
-  class start_addr_list
-  {
-  public:
-
-    typedef std::list<reg_mod*>::iterator iterator;
-    typedef std::multimap<rtx, reg_mod*, cmp_by_regno> reg_map;
-    template <typename OutputIterator> void
-    get_relevant_addresses (const addr_expr& end_addr, OutputIterator out);
-
-    void add (reg_mod* start_addr);
-    void remove (reg_mod* start_addr);
-
-  private:
-
-    // List of addresses that only have a constant displacement.
-    std::list<reg_mod*> m_const_addresses;
-
-    // A map for storing addresses that have a base and/or index reg.
-    // The key of each stored address is its base or index reg (the
-    // address is stored twice if it has both).
-    reg_map m_reg_addresses;
-  };
-
-  // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-  // The access sequence that contains the memory accesses of some part of
-  // the code (usually a basic block), along with other relevant information
-  // (reg uses, reg mods, etc.).
-  class sequence
-  {
-  public:
-
-    // Split the access sequence pointed to by SEQ into multiple sequences,
-    // grouping the accesses that have common terms in their effective address
-    // together.  Return an iterator to the sequence that comes after the newly
-    // inserted sequences.
-    static std::list<sequence>::iterator
-    split (std::list<sequence>::iterator seq_it,
-           std::list<sequence>& sequences);
-
-    ~sequence (void);
-
-    // Find all mem accesses in the rtx X of the insn I and add them to the
-    // sequence.  TYPE indicates the type of the next mem that we find
-    // (i.e. mem_load, mem_store or mem_operand).
-    void find_mem_accesses (rtx_insn* i, rtx& x,
-                            element_type type = type_mem_load);
-
-    // Add a reg mod for every insn that modifies an address register.
-    void find_addr_reg_mods (void);
-
-    // Add a reg use for every use of an address register that's not a
-    // memory access
-    void find_addr_reg_uses (void);
-
-    // Generate the address modifications needed to arrive at the
-    // addresses in the sequence.
-    void gen_address_mod (delegate& dlg, int base_lookahead);
-
-    // Try to eliminate unnecessary reg -> reg copies.
-    void eliminate_reg_copies (void);
-
-    // Update the original insn stream with the changes in this sequence.
-    void update_insn_stream (void);
-
-    // Fill the m_inc/dec_chain fields of the sequence elements.
-    void calculate_adjacency_info (void);
-
-    // Check whether REG is used in any element after START.
-    bool reg_used_in_sequence (rtx reg, sequence_const_iterator start) const;
-
-    // Check whether REG is used in any of the sequence's accesses.
-    bool
-    reg_used_in_sequence (rtx reg) const
-    {
-      return reg_used_in_sequence (reg, begin ());
-    }
-
-    // The total cost of the accesses in the sequence.
-    int cost (void) const;
-
-    // Re-calculate the cost.
-    void update_cost (delegate& d);
-
-    // Check whether the cost of the sequence is already minimal and
-    // can't be improved further.
-    bool cost_already_minimal (void) const;
-
-    // Update the alternatives of the sequence's accesses.
-    void update_access_alternatives (delegate& d, bool force_validation,
-                                     bool disable_validation,
-                                     bool adjust_costs = false);
-
-    // Insert a new element into the sequence.  Return an iterator pointing
-    // to the newly inserted element.
-    sequence_iterator insert_element (
-                        const ref_counting_ptr<sequence_element>& el,
-                        sequence_iterator insert_before);
-
-    // If the EL is unique, insert it into the sequence and return an iterator
-    // pointing to it.  If it already has a duplicate in the sequence, don't
-    // insert it and return an iterator to the already inserted duplicate
-    // instead.
-    // The place of the element is determined by its insn.
-    sequence_iterator insert_unique (
-                        const ref_counting_ptr<sequence_element>& el);
-
-    // Remove an element from the sequence.  Return an iterator pointing
-    // to the next element.
-    sequence_iterator remove_element (sequence_iterator el,
-                                      bool clear_deps = true);
-
-    // Find the value that REG was last set to, starting the search from
-    // START_INSN.
-    find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn);
-
-    // The first insn and basic block in the sequence.
-    sequence_const_iterator start_insn_element (void) const;
-
-    rtx_insn* start_insn (void) const;
-    basic_block start_bb (void) const;
-
-    // A map containing all the address regs used in the sequence
-    // and the number of elements that use them.
-    addr_reg_map& addr_regs (void) { return m_addr_regs; }
-
-    // Return the sequence elements that INSN contains.
-    std::pair<insn_map::iterator, insn_map::iterator>
-    elements_in_insn (rtx_insn* insn) { return m_insn_el_map.equal_range (insn); }
-
-    // A structure for retrieving the starting addresses that could be
-    // used to arrive at a given destination address.
-    start_addr_list& start_addresses (void)  { return m_start_addr_list; }
-
-    bool empty (void) const { return m_els.empty (); }
-    size_t size (void) const { return m_els.size (); }
-
-    sequence_iterator begin (void) { return sequence_iterator (m_els.begin ()); }
-    sequence_iterator end (void) { return sequence_iterator (m_els.end ()); }
-
-    sequence_const_iterator begin (void) const { return sequence_const_iterator (m_els.begin ()); }
-    sequence_const_iterator end (void) const { return sequence_const_iterator (m_els.end ()); }
-
-    sequence_reverse_iterator rbegin (void) { return sequence_reverse_iterator (m_els.rbegin ()); }
-    sequence_reverse_iterator rend (void) { return sequence_reverse_iterator (m_els.rend ()); }
-
-    sequence_const_reverse_iterator rbegin (void) const { return sequence_const_reverse_iterator (m_els.rbegin ()); }
-    sequence_const_reverse_iterator rend (void) const { return sequence_const_reverse_iterator (m_els.rend ()); }
-
-    // iterator decorator for iterating over different types of elements
-    // in the access sequence.
-    template <typename Match>
-    filter_iterator<sequence_iterator, Match> begin (void)
-    {
-      typedef filter_iterator<sequence_iterator, Match> iter;
-      return iter (begin (), end ());
-    }
-
-    template <typename Match>
-    filter_iterator<sequence_iterator, Match> end (void)
-    {
-      typedef filter_iterator<sequence_iterator, Match> iter;
-      return iter (begin (), end ());
-    }
-
-    template <typename Match>
-    filter_iterator<sequence_const_iterator, Match> begin (void) const
-    {
-      typedef filter_iterator<sequence_const_iterator, Match> iter;
-      return iter (begin (), end ());
-    }
-
-    template <typename Match>
-    filter_iterator<sequence_const_iterator, Match> end (void) const
-    {
-      typedef filter_iterator<sequence_const_iterator, Match> iter;
-      return iter (begin (), end ());
-    }
-
-  private:
-    static int split_1 (sequence& seq,
-                        const ref_counting_ptr<sequence_element>& el);
-
-    int gen_address_mod_1 (filter_iterator<sequence_iterator,
-                                           element_to_optimize> el,
-                           delegate& dlg,
-                           std::set<reg_mod*>& used_reg_mods,
-                           std::map<rtx, reg_mod*, cmp_by_regno>&
-                             visited_reg_mods,
-                           int lookahead_num, bool record_in_sequence = true);
-
-    std::pair<int, reg_mod*>
-    find_cheapest_start_addr (const addr_expr& end_addr,
-                              sequence_iterator el,
-                              disp_t min_disp, disp_t max_disp,
-                              addr_type_t addr_type,
-                              delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                              std::map<rtx, reg_mod*, cmp_by_regno>&
-                                visited_reg_mods);
-
-    void insert_address_mods (const alternative& alt,
-                              reg_mod* base_start_addr,
-                              reg_mod* index_start_addr,
-                              const addr_expr& base_end_addr,
-                              const addr_expr& index_end_addr,
-                              sequence_iterator el, mod_tracker& tracker,
-                              std::set<reg_mod*>& used_reg_mods,
-                              std::map<rtx, reg_mod*, cmp_by_regno>&
-                                visited_reg_mods,
-                              delegate& dlg);
-
-    mod_addr_result
-    try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
-                             disp_t min_disp, disp_t max_disp,
-                             addr_type_t addr_type, machine_mode acc_mode,
-                             sequence_iterator el, mod_tracker& tracker,
-                             std::set<reg_mod*>& used_reg_mods,
-                             std::map<rtx, reg_mod*, cmp_by_regno>&
-                               visited_reg_mods,
-                             delegate& dlg);
-
-    reg_mod*
-    insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
-                     rtx curr_addr_rtx, const addr_expr& curr_addr,
-                     const addr_expr& effective_addr,
-                     sequence_iterator el, mod_tracker& tracker,
-                     std::set<reg_mod*>& used_reg_mods,
-                     delegate& dlg);
-
-    reg_mod* find_start_addr_for_reg (
-      rtx reg, std::set<reg_mod*>& used_reg_mods,
-      std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods);
-
-    std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
-    template <typename OutputIterator> void
-    find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out);
-
-    // FIXME: m_els is the primary container for the sequence_elements.
-    // use std::auto_ptr for that instead of raw pointers.  actually it should
-    // be std::unique_ptr, but we don't have that (yet).  std::auto_ptr is OK
-    // with node based containers like std::list.
-    // when transferring auto_ptr'ed sequence elements from one sequence list
-    // to another, use std::list::splice to move elements without having to
-    // copy auto_ptr.
-    // if multiple sequence lists need to share the same sequence_element,
-    // need to use ref_counted_ptr (or std::tr1::shared_ptr).
-    std::list<ref_counting_ptr<sequence_element> > m_els;
-    addr_reg_map m_addr_regs;
-    insn_map m_insn_el_map;
-    start_addr_list m_start_addr_list;
-
-  };
 
   // a delegate for the ams pass.  usually implemented by the target.
   struct delegate
@@ -1349,7 +1317,7 @@ NOTE:
     virtual void
     mem_access_alternatives (alternative_set& alt,
 			     const sequence& seq,
-			     sequence_const_iterator acc,
+			     sequence::const_iterator acc,
 			     bool& validate_alternatives) = 0;
 
     // adjust the costs of the specified alternative of the specified
@@ -1358,13 +1326,13 @@ NOTE:
     virtual void
     adjust_alternative_costs (alternative& alt,
 			      const sequence& seq,
-                              sequence_const_iterator acc) = 0;
+                              sequence::const_iterator acc) = 0;
 
     // provide the number of subsequent accesses that should be taken into
     // account when trying to minimize the costs of the specified access.
     virtual int
     adjust_lookahead_count (const sequence& as,
-			    sequence_const_iterator acc) = 0;
+			    sequence::const_iterator acc) = 0;
 
     // provide the cost for setting the specified address register to
     // an rtx expression.
@@ -1373,7 +1341,7 @@ NOTE:
     virtual int
     addr_reg_mod_cost (const_rtx reg, const_rtx val,
 		       const sequence& seq,
-		       sequence_const_iterator acc) = 0;
+		       sequence::const_iterator acc) = 0;
 
     // provide the cost for cloning the address register, which is usually
     // required when splitting an access sequence.  if (address) register
@@ -1383,7 +1351,7 @@ NOTE:
     virtual int
     addr_reg_clone_cost (const_rtx reg,
 			 const sequence& seq,
-			 sequence_const_iterator acc) = 0;
+			 sequence::const_iterator acc) = 0;
   };
 
   // Used to keep track of shared address (sub)expressions

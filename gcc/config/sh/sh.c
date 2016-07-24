@@ -848,24 +848,24 @@ static struct ams2_delegate : public sh_ams2::delegate
   virtual void
   mem_access_alternatives (sh_ams2::alternative_set& alt,
                            const sh_ams2::sequence& seq,
-                           sh_ams2::sequence_const_iterator acc,
+                           sh_ams2::sequence::const_iterator acc,
                            bool& validate_alternatives);
   virtual void
   adjust_alternative_costs (sh_ams2::alternative& alt,
                             const sh_ams2::sequence& seq,
-                            sh_ams2::sequence_const_iterator acc);
+                            sh_ams2::sequence::const_iterator acc);
   virtual int
   adjust_lookahead_count (const sh_ams2::sequence& as,
-                          sh_ams2::sequence_const_iterator acc);
+                          sh_ams2::sequence::const_iterator acc);
 
   virtual int
   addr_reg_mod_cost (const_rtx reg, const_rtx val,
                      const sh_ams2::sequence& seq,
-                     sh_ams2::sequence_const_iterator acc);
+                     sh_ams2::sequence::const_iterator acc);
   virtual int
   addr_reg_clone_cost (const_rtx reg,
                        const sh_ams2::sequence& seq,
-                       sh_ams2::sequence_const_iterator acc);
+                       sh_ams2::sequence::const_iterator acc);
 } g_ams2_delegate;
 
 static void
@@ -14047,7 +14047,7 @@ addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
 void ams2_delegate::
 mem_access_alternatives (sh_ams2::alternative_set& alt,
 			 const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-			 sh_ams2::sequence_const_iterator acc,
+			 sh_ams2::sequence::const_iterator acc,
 			 bool& validate_alternatives)
 
 {
@@ -14200,14 +14200,14 @@ void
 ams2_delegate::
 adjust_alternative_costs (sh_ams2::alternative& alt ATTRIBUTE_UNUSED,
                           const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                          sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+                          sh_ams2::sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
 }
 
 int
 ams2_delegate::
 adjust_lookahead_count (const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                        sh_ams2::sequence_const_iterator acc)
+                        sh_ams2::sequence::const_iterator acc)
 {
   // If the next 2 or more accesses can be reached with post-inc, look
   // a bit further ahead.
@@ -14220,7 +14220,7 @@ adjust_lookahead_count (const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
 int
 ams2_reg_disp_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams2::disp_t disp,
 		    const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-		    sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
+		    sh_ams2::sequence::const_iterator el ATTRIBUTE_UNUSED)
 {
   // the costs for adding small constants should be higher than
   // QI/HI displacement mode addresses.
@@ -14237,7 +14237,7 @@ int
 ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
                         const_rtx disp_reg ATTRIBUTE_UNUSED,
                         const sh_ams2::sequence& seq,
-                        sh_ams2::sequence_const_iterator el)
+                        sh_ams2::sequence::const_iterator el)
 {
   sh_ams2::addr_expr ea = el->effective_addr ();
 
@@ -14246,7 +14246,7 @@ ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
 
   // increase the costs if the next mem access that uses this
   // could also use reg+reg addressing mode instead.
-  sh_ams2::sequence_const_iterator next_el = el;
+  sh_ams2::sequence::const_iterator next_el = el;
   ++next_el;
 
   const sh_ams2::mem_access* next_acc =
@@ -14274,7 +14274,7 @@ ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
 int
 ams2_reg_scale_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams2::scale_t scale,
                      const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                     sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
+                     sh_ams2::sequence::const_iterator el ATTRIBUTE_UNUSED)
 {
   // multiplying by powers of 2 can be done cheaper with shifts.
   if ((scale & (scale - 1)) == 0)
@@ -14287,7 +14287,7 @@ int
 ams2_const_load_cost (const_rtx reg ATTRIBUTE_UNUSED,
                       sh_ams2::disp_t value,
                       const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-                      sh_ams2::sequence_const_iterator el ATTRIBUTE_UNUSED)
+                      sh_ams2::sequence::const_iterator el ATTRIBUTE_UNUSED)
 {
   if (CONST_OK_FOR_I08 (value))
     return 2;
@@ -14299,7 +14299,7 @@ int
 ams2_delegate::
 addr_reg_mod_cost (const_rtx reg, const_rtx val,
                    const sh_ams2::sequence& seq,
-                   sh_ams2::sequence_const_iterator acc)
+                   sh_ams2::sequence::const_iterator acc)
 {
   // modifying the GBR is impossible.
   if (sh_ams2::get_regno (reg) == GBR_REG)
@@ -14336,7 +14336,7 @@ int
 ams2_delegate::
 addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
 		     const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
-		     sh_ams2::sequence_const_iterator acc ATTRIBUTE_UNUSED)
+		     sh_ams2::sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
   // FIXME: maybe cloning the GBR should be cheaper?
   // FIXME: if register pressure is (expected to be) high, increase the cost
