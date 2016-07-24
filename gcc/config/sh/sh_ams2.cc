@@ -4123,6 +4123,11 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 unsigned int
 sh_ams2::execute (function* fun)
 {
+  // running this pass after register allocation doesn't work yet.
+  // all we can do is some analysis and log dumps.
+  if (!can_create_pseudo_p () && dump_file == NULL)
+    return 0;
+
   log_msg ("sh-ams pass (WIP)\n");
   log_options (m_options);
   log_msg ("\n\n");
@@ -4272,6 +4277,23 @@ sh_ams2::execute (function* fun)
 	  log_msg ("continuing anyway\n");
         }
     }
+
+  // running this pass after register allocation doesn't work yet.
+  // stop here before making any modifications.
+  // after register allocation, the things AMS can do are somewhat limited.
+  // things that seem safe to do:
+  //   - replacing addresses with the re-calculated effective address in
+  //     order to eliminate reg-mods.
+  //   - removing said reg-mods if they aren't referenced by anything else.
+  //   - introducing reg-mods that modify an address register "in-place"
+  //     i.e. without requiring a new register, e.g. "reg += const"
+  //
+  // some things to watch out for after register allocation:
+  //   - stack/frame pointer modifications should be kept.  it's OK to merge
+  //     an stack pointer reg-mod with a auto-mod load/store, but the effective
+  //     reg-mod must be kept.
+  if (!can_create_pseudo_p ())
+    return 0;
 
   log_msg ("generating new address modifications\n");
   for (std::list<sequence>::iterator it = sequences.begin ();

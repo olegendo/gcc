@@ -911,6 +911,12 @@ register_sh_passes (void)
                                 sh_ams2::options (sh_ams2_opt)),
 		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 
+  /* Add another AMS pass after register allocation.  It will be a bit more
+     restricted but can improve code around stack frame accesses.  */
+  if (sh_ams2_post_ra_enable)
+    register_pass (new sh_ams2 (g, "sh_ams2_postra", g_ams2_delegate,
+                                sh_ams2::options (sh_ams2_postra_opt)),
+		   PASS_POS_INSERT_AFTER, "pro_and_epilogue", 1);
 }
 
 /* Implement TARGET_OPTION_OVERRIDE macro.  Validate and override 
