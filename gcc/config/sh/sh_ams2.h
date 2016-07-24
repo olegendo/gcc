@@ -70,6 +70,7 @@
 #include <string>
 
 #include "filter_iterator.h"
+#include "deref_iterator.h"
 #include "static_vector.h"
 #include "ref_counted.h"
 
@@ -162,14 +163,17 @@ public:
 
  public:
 
-  typedef std::list<ref_counting_ptr<sequence_element> >::iterator
-    sequence_iterator;
-  typedef std::list<ref_counting_ptr<sequence_element> >::const_iterator
-    sequence_const_iterator;
-  typedef std::list<ref_counting_ptr<sequence_element> >::reverse_iterator
-    sequence_reverse_iterator;
-  typedef std::list<ref_counting_ptr<sequence_element> >::const_reverse_iterator
-    sequence_const_reverse_iterator;
+  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::iterator,
+			  sequence_element > sequence_iterator;
+
+  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_iterator,
+			  const sequence_element > sequence_const_iterator;
+
+  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::reverse_iterator,
+			  sequence_element > sequence_reverse_iterator;
+
+  typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_reverse_iterator,
+			  const sequence_element> sequence_const_reverse_iterator;
 
   static regno_t get_regno (const_rtx x);
 
@@ -713,27 +717,27 @@ NOTE:
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is DIFF.
     static bool distance_equals (
-      const ref_counting_ptr<sequence_element>& first,
-      const ref_counting_ptr<sequence_element>& second,
+      const sequence_element& first,
+      const sequence_element& second,
       disp_t diff);
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is the access size of FIRST.
     static bool adjacent_inc (
-      const ref_counting_ptr<sequence_element>& first,
-      const ref_counting_ptr<sequence_element>& second);
+      const sequence_element& first,
+      const sequence_element& second);
     static bool not_adjacent_inc (
-      const ref_counting_ptr<sequence_element>& first,
-      const ref_counting_ptr<sequence_element>& second);
+      const sequence_element& first,
+      const sequence_element& second);
 
     // Same as adjacent_inc, except that the displacement of SECOND should
     // be the smaller one.
     static bool adjacent_dec (
-      const ref_counting_ptr<sequence_element>& first,
-      const ref_counting_ptr<sequence_element>& second);
+      const sequence_element& first,
+      const sequence_element& second);
     static bool not_adjacent_dec (
-      const ref_counting_ptr<sequence_element>& first,
-      const ref_counting_ptr<sequence_element>& second);
+      const sequence_element& first,
+      const sequence_element& second);
 
     // Update the insn that holds this element or generate a new insn
     // that corresponds to this element.  INSN_SEQUENCE_STARTED indicates
@@ -1065,10 +1069,9 @@ NOTE:
   template <element_type T1, element_type T2 = T1, element_type T3 = T1>
   struct element_type_matches
   {
-    bool operator () (const ref_counting_ptr<sequence_element>& e) const
+    bool operator () (const sequence_element& e) const
     {
-      return e->type () == T1 || e->type () == T2
-	     || e->type () == T3;
+      return e.type () == T1 || e.type () == T2 || e.type () == T3;
     }
   };
 
