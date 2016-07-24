@@ -595,18 +595,17 @@ public:
   class sequence
   {
   public:
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::iterator,
-			    sequence_element > iterator;
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
+			      ::iterator > iterator;
 
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_iterator,
-			    const sequence_element > const_iterator;
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
+			      ::const_iterator > const_iterator;
 
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::reverse_iterator,
-			    sequence_element > reverse_iterator;
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
+			      ::reverse_iterator > reverse_iterator;
 
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >::const_reverse_iterator,
-			    const sequence_element> const_reverse_iterator;
-
+    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
+			      ::const_reverse_iterator > const_reverse_iterator;
 
     typedef std::multimap<rtx_insn*, iterator> insn_map;
 

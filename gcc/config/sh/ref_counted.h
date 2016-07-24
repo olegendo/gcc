@@ -36,6 +36,8 @@ private:
 template <typename T> class ref_counting_ptr
 {
 public:
+  typedef T element_type;
+
   ref_counting_ptr (void) : m_obj (NULL) { }
 
   explicit ref_counting_ptr (T* obj) : m_obj (obj)

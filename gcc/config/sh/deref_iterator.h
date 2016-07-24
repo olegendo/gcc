@@ -5,15 +5,34 @@
 #include <iterator>
 #include <algorithm>
 
-template <typename Iter, typename DereferencedValueType>
+template <typename T> struct dereferenced_type
+{
+  // assuming that T is some kind of smart pointer.
+  typedef typename T::element_type type;
+};
+
+template <typename T> struct dereferenced_type<T*>
+{
+  typedef T type;
+};
+
+template <typename T> struct dereferenced_type<const T*>
+{
+  typedef const T type;
+};
+
+
+template <
+  typename Iter,
+  typename VT = typename dereferenced_type<typename Iter::value_type>::type >
 class deref_iterator
 {
 public:
   typedef typename std::iterator_traits<Iter>::iterator_category iterator_category;
-  typedef DereferencedValueType value_type;
+  typedef VT value_type;
   typedef typename std::iterator_traits<Iter>::difference_type difference_type;
-  typedef DereferencedValueType* pointer;
-  typedef DereferencedValueType& reference;
+  typedef VT* pointer;
+  typedef VT& reference;
 
   deref_iterator (void) { }
 
@@ -61,8 +80,8 @@ public:
   bool operator > (const deref_iterator& rhs) const { return m_i > rhs.m_i; }
   bool operator >= (const deref_iterator& rhs) const { return m_i >= rhs.m_i; }
 
-  reference operator * (void) const { return **m_i; }
-  pointer operator -> (void) const { return &**m_i; }
+  reference operator * (void) const { return (reference)**m_i; }
+  pointer operator -> (void) const { return (pointer)&**m_i; }
 
 private:
   Iter m_i;
