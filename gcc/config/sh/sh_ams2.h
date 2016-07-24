@@ -678,34 +678,22 @@ NOTE:
     the BB where the limit was exceeded.
 */
 
-    const std::set<sequence_element*>&
+    const std::list<sequence_element*>&
     dependencies (void) const { return m_dependencies; }
 
-    std::set<sequence_element*>&
+    std::list<sequence_element*>&
     dependencies (void) { return m_dependencies; }
 
-    const std::set<sequence_element*>&
+    const std::list<sequence_element*>&
     dependent_els (void) const { return m_dependent_els; }
 
-    std::set<sequence_element*>&
+    std::list<sequence_element*>&
     dependent_els (void) { return m_dependent_els; }
 
-    void add_dependency (sequence_element* dep)
-    {
-      m_dependencies.insert (dep);
-    }
-    void remove_dependency (sequence_element* dep)
-    {
-      m_dependencies.erase (dep);
-    }
-    void add_dependent_el (sequence_element* dep)
-    {
-      m_dependent_els.insert (dep);
-    }
-    void remove_dependent_el (sequence_element* dep)
-    {
-      m_dependent_els.erase (dep);
-    }
+    void add_dependency (sequence_element* dep);
+    void remove_dependency (sequence_element* dep);
+    void add_dependent_el (sequence_element* dep);
+    void remove_dependent_el (sequence_element* dep);
 
     // The sequences that use or have previously used this element.
     std::set<sequence*>& sequences (void) { return m_sequences; }
@@ -713,6 +701,9 @@ NOTE:
     // Return true if the element can be removed or changed by an optimization
     // subpass.
     virtual bool can_be_optimized (void) const;
+
+    // Check whether the element uses the register R in any way.
+    virtual bool uses_reg (rtx r ATTRIBUTE_UNUSED) const { return false; }
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is DIFF.
@@ -767,8 +758,8 @@ NOTE:
     addr_expr m_effective_addr;
     bool m_optimization_enabled;
 
-    std::set<sequence_element*> m_dependencies;
-    std::set<sequence_element*> m_dependent_els;
+    std::list<sequence_element*> m_dependencies;
+    std::list<sequence_element*> m_dependent_els;
 
     std::set<sequence*> m_sequences;
   };
@@ -844,6 +835,13 @@ NOTE:
     virtual void update_cost (delegate& d, sequence& seq,
                               sequence_iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
+
+    virtual bool uses_reg (rtx r) const
+    {
+      return (current_addr ().is_invalid ()
+              && (regs_equal (current_addr ().base_reg (), r)
+                  || regs_equal (current_addr ().index_reg (), r)));
+    }
 
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m, rtx addr_rtx)
@@ -958,6 +956,13 @@ NOTE:
                               sequence_iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
+    virtual bool uses_reg (rtx r) const
+    {
+      return (!current_addr ().is_invalid ()
+              && (regs_equal (current_addr ().base_reg (), r)
+                  || regs_equal (current_addr ().index_reg (), r)));
+    }
+
   private:
     rtx m_reg;
     rtx m_value;
@@ -1050,6 +1055,8 @@ NOTE:
                               sequence_iterator el_it);
 
     virtual bool generate_new_insns (bool insn_sequence_started);
+
+    virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
 
   private:
     // if a mem access is not to be optimized, it is converted into a
@@ -1149,6 +1156,16 @@ NOTE:
     // Fill the m_inc/dec_chain fields of the sequence elements.
     void calculate_adjacency_info (void);
 
+    // Check whether REG is used in any element after START.
+    bool reg_used_in_sequence (rtx reg, sequence_const_iterator start) const;
+
+    // Check whether REG is used in any of the sequence's accesses.
+    bool
+    reg_used_in_sequence (rtx reg) const
+    {
+      return reg_used_in_sequence (reg, begin ());
+    }
+
     // The total cost of the accesses in the sequence.
     int cost (void) const;
 
@@ -1205,15 +1222,20 @@ NOTE:
     // used to arrive at a given destination address.
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
 
-    std::list<ref_counting_ptr<sequence_element> >& elements (void)
-      {
-        return m_els;
-      }
+    bool empty (void) const { return m_els.empty (); }
+    size_t size (void) const { return m_els.size (); }
 
-    const std::list<ref_counting_ptr<sequence_element> >& elements (void) const
-      {
-        return m_els;
-      }
+    sequence_iterator begin (void) { return sequence_iterator (m_els.begin ()); }
+    sequence_iterator end (void) { return sequence_iterator (m_els.end ()); }
+
+    sequence_const_iterator begin (void) const { return sequence_const_iterator (m_els.begin ()); }
+    sequence_const_iterator end (void) const { return sequence_const_iterator (m_els.end ()); }
+
+    sequence_reverse_iterator rbegin (void) { return sequence_reverse_iterator (m_els.rbegin ()); }
+    sequence_reverse_iterator rend (void) { return sequence_reverse_iterator (m_els.rend ()); }
+
+    sequence_const_reverse_iterator rbegin (void) const { return sequence_const_reverse_iterator (m_els.rbegin ()); }
+    sequence_const_reverse_iterator rend (void) const { return sequence_const_reverse_iterator (m_els.rend ()); }
 
     // iterator decorator for iterating over different types of elements
     // in the access sequence.
@@ -1221,28 +1243,28 @@ NOTE:
     filter_iterator<sequence_iterator, Match> begin (void)
     {
       typedef filter_iterator<sequence_iterator, Match> iter;
-      return iter (m_els.begin (), m_els.end ());
+      return iter (begin (), end ());
     }
 
     template <typename Match>
     filter_iterator<sequence_iterator, Match> end (void)
     {
       typedef filter_iterator<sequence_iterator, Match> iter;
-      return iter (m_els.end (), m_els.end ());
+      return iter (begin (), end ());
     }
 
     template <typename Match>
     filter_iterator<sequence_const_iterator, Match> begin (void) const
     {
       typedef filter_iterator<sequence_const_iterator, Match> iter;
-      return iter (m_els.begin (), m_els.end ());
+      return iter (begin (), end ());
     }
 
     template <typename Match>
     filter_iterator<sequence_const_iterator, Match> end (void) const
     {
       typedef filter_iterator<sequence_const_iterator, Match> iter;
-      return iter (m_els.end (), m_els.end ());
+      return iter (begin (), end ());
     }
 
   private:

@@ -6,15 +6,15 @@
 #include <algorithm>
 
 template <typename Iter, typename Predicate>
-class filter_iterator
-  : public std::iterator<std::forward_iterator_tag,
-  			 typename std::iterator_traits<Iter>::value_type,
-  			 typename std::iterator_traits<Iter>::difference_type,
-  			 typename std::iterator_traits<Iter>::pointer,
-			 typename std::iterator_traits<Iter>::reference>,
-    private Predicate
+class filter_iterator : private Predicate
 {
 public:
+  typedef std::forward_iterator_tag iterator_category;
+  typedef typename std::iterator_traits<Iter>::value_type value_type;
+  typedef typename std::iterator_traits<Iter>::difference_type difference_type;
+  typedef typename std::iterator_traits<Iter>::pointer pointer;
+  typedef typename std::iterator_traits<Iter>::reference reference;
+
   filter_iterator (void) { }
 
   filter_iterator (Iter i, Iter iend, const Predicate& p = Predicate ())
@@ -29,11 +29,9 @@ public:
   Predicate& predicate (void) { return *this; }
   const Predicate& predicate (void) const { return *this; }
 
-  operator Iter (void) const { return m_i; }
+  template <typename T> operator T (void) const { return m_i; }
 
-  // FIXME: the base iterator wouldn't be needed if conversions to const
-  // iterator and to const iterator of Iter worked.
-  const Iter& base_iterator (void) const { return m_i; }
+  Iter base (void) const { return m_i; }
 
   void swap (filter_iterator& other)
   {
@@ -86,21 +84,26 @@ public:
   bool operator == (const filter_iterator& rhs) const { return m_i == rhs.m_i; }
   bool operator != (const filter_iterator& rhs) const { return m_i != rhs.m_i; }
 
-  bool operator == (const Iter& rhs) const { return m_i == rhs; }
-  bool operator != (const Iter& rhs) const { return m_i != rhs; }
+  template <typename I> bool operator == (const I& i) const { return m_i == i; }
+  template <typename I> bool operator != (const I& i) const { return m_i != i; }
 
-  typename std::iterator_traits<Iter>::reference
-  operator * (void) const { return *m_i; }
+  reference operator * (void) const { return *m_i; }
 
   // If Iter is a raw pointer we can't invoke m_i.operator -> on it.
-  typename std::iterator_traits<Iter>::pointer
-  operator -> (void) const { return &*m_i; }
-
-  // FIXME: conversion to const_iterator is not working.
+  pointer operator -> (void) const { return &*m_i; }
 
 private:
   Iter m_i;
   Iter m_end;
 };
+
+namespace std
+{
+template <typename T, typename S> void
+swap (filter_iterator<T, S>& i, filter_iterator<T, S>& j)
+{
+  i.swap (j);
+}
+}
 
 #endif // includeguard_gcc_sh_filter_iterator_includeguard

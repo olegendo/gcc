@@ -14250,7 +14250,7 @@ ams2_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
   ++next_el;
 
   const sh_ams2::mem_access* next_acc =
-	next_el != seq.elements ().end () && next_el->is_mem_access ()
+	next_el != seq.end () && next_el->is_mem_access ()
 	? (const sh_ams2::mem_access*)&*next_el
 	: NULL;
 

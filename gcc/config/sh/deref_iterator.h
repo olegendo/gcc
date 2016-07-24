@@ -17,11 +17,17 @@ public:
 
   deref_iterator (void) { }
 
-  // this allows constructing a const_iterator from Iter.
-  template <typename ConstIter> deref_iterator (ConstIter ci) : m_i (ci) { }
+  explicit deref_iterator (Iter i) : m_i (i) { }
 
-  operator Iter (void) const { return m_i; }
-  const Iter& base (void) const { return m_i; }
+  template <typename T> operator T (void) const { return m_i; }
+
+  template <typename II, typename DD>
+  operator deref_iterator<II, DD> (void) const
+  {
+    return deref_iterator<II, DD> (m_i);
+  }
+
+  Iter base (void) const { return m_i; }
 
   void swap (deref_iterator& other) { std::swap (m_i, other.m_i); }
 
@@ -50,24 +56,13 @@ public:
 
   bool operator == (const deref_iterator& rhs) const { return m_i == rhs.m_i; }
   bool operator != (const deref_iterator& rhs) const { return m_i != rhs.m_i; }
-
-  bool operator == (const Iter& rhs) const { return m_i == rhs; }
-  bool operator != (const Iter& rhs) const { return m_i != rhs; }
-
   bool operator < (const deref_iterator& rhs) const { return m_i < rhs.m_i; }
-  bool operator < (const Iter& rhs) const { return m_i < rhs; }
-
   bool operator <= (const deref_iterator& rhs) const { return m_i < rhs.m_i; }
-  bool operator <= (const Iter& rhs) const { return m_i < rhs; }
-
   bool operator > (const deref_iterator& rhs) const { return m_i > rhs.m_i; }
-  bool operator > (const Iter& rhs) const { return m_i > rhs; }
-
   bool operator >= (const deref_iterator& rhs) const { return m_i >= rhs.m_i; }
-  bool operator >= (const Iter& rhs) const { return m_i >= rhs; }
 
-  DereferencedValueType& operator * (void) const { return **m_i; }
-  DereferencedValueType* operator -> (void) const { return &**m_i; }
+  reference operator * (void) const { return **m_i; }
+  pointer operator -> (void) const { return &**m_i; }
 
 private:
   Iter m_i;
