@@ -674,22 +674,34 @@ NOTE:
     the BB where the limit was exceeded.
 */
 
-    const std::list<sequence_element*>&
+    const std::set<sequence_element*>&
     dependencies (void) const { return m_dependencies; }
 
-    std::list<sequence_element*>&
+    std::set<sequence_element*>&
     dependencies (void) { return m_dependencies; }
 
-    const std::list<sequence_element*>&
+    const std::set<sequence_element*>&
     dependent_els (void) const { return m_dependent_els; }
 
-    std::list<sequence_element*>&
+    std::set<sequence_element*>&
     dependent_els (void) { return m_dependent_els; }
 
-    void add_dependency (sequence_element* dep);
-    void remove_dependency (sequence_element* dep);
-    void add_dependent_el (sequence_element* dep);
-    void remove_dependent_el (sequence_element* dep);
+    void add_dependency (sequence_element* dep)
+    {
+      m_dependencies.insert (dep);
+    }
+    void remove_dependency (sequence_element* dep)
+    {
+      m_dependencies.erase (dep);
+    }
+    void add_dependent_el (sequence_element* dep)
+    {
+      m_dependent_els.insert (dep);
+    }
+    void remove_dependent_el (sequence_element* dep)
+    {
+      m_dependent_els.erase (dep);
+    }
 
     // The sequences that use or have previously used this element.
     std::set<sequence*>& sequences (void) { return m_sequences; }
@@ -754,8 +766,8 @@ NOTE:
     addr_expr m_effective_addr;
     bool m_optimization_enabled;
 
-    std::list<sequence_element*> m_dependencies;
-    std::list<sequence_element*> m_dependent_els;
+    std::set<sequence_element*> m_dependencies;
+    std::set<sequence_element*> m_dependent_els;
 
     std::set<sequence*> m_sequences;
   };

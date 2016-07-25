@@ -331,7 +331,7 @@ log_sequence_element (const sh_ams2::sequence_element& e,
       if (!e.dependencies ().empty ())
         {
           log_msg ("\n  dependencies:\n");
-          for (std::list<sh_ams2::sequence_element*>::const_iterator it =
+          for (std::set<sh_ams2::sequence_element*>::const_iterator it =
                  e.dependencies ().begin ();
                it != e.dependencies ().end (); ++it)
             {
@@ -851,32 +851,6 @@ sh_ams2::addr_expr::get_all_subterms (OutputIterator out) const
     }
 }
 
-void
-sh_ams2::sequence_element::add_dependency (sh_ams2::sequence_element* dep)
-{
-  if (std::find_if (m_dependencies.begin (), m_dependencies.end (),
-		    sequence_element::equals (dep)) == m_dependencies.end ())
-    m_dependencies.push_back (dep);
-}
-void
-sh_ams2::sequence_element::remove_dependency (sh_ams2::sequence_element* dep)
-{
-  m_dependencies.remove_if (sequence_element::equals (dep));
-}
-
-void
-sh_ams2::sequence_element::add_dependent_el (sh_ams2::sequence_element* dep)
-{
-  if (std::find_if (m_dependent_els.begin (), m_dependent_els.end (),
-		    sequence_element::equals (dep)) == m_dependent_els.end ())
-    m_dependent_els.push_back (dep);
-}
-void
-sh_ams2::sequence_element::remove_dependent_el (sh_ams2::sequence_element* dep)
-{
-  m_dependent_els.remove_if (sequence_element::equals (dep));
-}
-
 // Return true if the element can be removed or changed by an optimization
 // subpass.
 bool
@@ -885,7 +859,7 @@ sh_ams2::sequence_element::can_be_optimized (void) const
   if (!optimization_enabled () || effective_addr ().is_invalid ())
     return false;
 
-  for (std::list<sequence_element*>::const_iterator it
+  for (std::set<sequence_element*>::const_iterator it
          = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
     {
       if (!(*it)->can_be_optimized ())
@@ -1052,7 +1026,7 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
 
   // Find the reg-mod of the reused register.
   reg_mod* reused_rm = NULL;
-  for (std::list<sh_ams2::sequence_element*>::iterator it =
+  for (std::set<sh_ams2::sequence_element*>::iterator it =
          dependencies ().begin (); it != dependencies ().end (); ++it)
     {
       if (reg_mod* rm = dyn_cast<reg_mod*> (*it))
@@ -1065,7 +1039,7 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
   gcc_assert (reused_rm != NULL);
 
   // Find the first element that also uses the reused register.
-  for (std::list<sh_ams2::sequence_element*>::iterator it =
+  for (std::set<sh_ams2::sequence_element*>::iterator it =
          reused_rm->dependent_els ().begin ();
        it != reused_rm->dependent_els ().end (); ++it)
     {
@@ -1402,7 +1376,7 @@ sh_ams2::sequence::split_1 (sequence& seq,
   if (prev_size < seq.elements ().size ())
     ++insert_count;
 
-  for (std::list<sequence_element*>::iterator it = el->dependencies ().begin ();
+  for (std::set<sequence_element*>::iterator it = el->dependencies ().begin ();
        it != el->dependencies ().end (); ++it)
     insert_count += split_1 (seq, ref_counting_ptr<sequence_element> (*it));
   return insert_count;
@@ -3019,14 +2993,14 @@ sh_ams2::sequence::remove_element (sh_ams2::sequence_iterator el,
   // Update the element's dependencies.
   if (clear_deps)
     {
-      for (std::list<sequence_element*>::iterator deps
+      for (std::set<sequence_element*>::iterator deps
              = (*el)->dependencies ().begin ();
            deps != (*el)->dependencies ().end (); ++deps)
         (*deps)->remove_dependent_el (el->get ());
 
       (*el)->dependencies ().clear ();
 
-      for (std::list<sequence_element*>::iterator dep_els
+      for (std::set<sequence_element*>::iterator dep_els
              = (*el)->dependent_els ().begin ();
            dep_els != (*el)->dependent_els ().end (); ++dep_els)
         (*dep_els)->remove_dependency (el->get ());
@@ -3538,7 +3512,7 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
           for (insn_map::iterator els = els_in_insn.first;
                els != els_in_insn.second; ++els)
             {
-              for (std::list<sequence_element*>::iterator deps =
+              for (std::set<sequence_element*>::iterator deps =
                      (*els->second)->dependencies ().begin ();
                    deps != (*els->second)->dependencies ().end (); ++deps)
                 {
