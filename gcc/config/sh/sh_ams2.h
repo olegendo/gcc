@@ -710,9 +710,6 @@ NOTE:
     // subpass.
     virtual bool can_be_optimized (void) const;
 
-    // Check whether the element uses the register R in any way.
-    virtual bool uses_reg (rtx r ATTRIBUTE_UNUSED) const { return false; }
-
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is DIFF.
     static bool distance_equals (
@@ -844,13 +841,6 @@ NOTE:
                               sequence_iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
-    virtual bool uses_reg (rtx r) const
-    {
-      return (current_addr ().is_invalid ()
-              && (regs_equal (current_addr ().base_reg (), r)
-                  || regs_equal (current_addr ().index_reg (), r)));
-    }
-
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m, rtx addr_rtx)
     : sequence_element (t, i), m_current_addr (), m_current_addr_rtx (addr_rtx),
@@ -964,13 +954,6 @@ NOTE:
                               sequence_iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
-    virtual bool uses_reg (rtx r) const
-    {
-      return (!current_addr ().is_invalid ()
-              && (regs_equal (current_addr ().base_reg (), r)
-                  || regs_equal (current_addr ().index_reg (), r)));
-    }
-
   private:
     rtx m_reg;
     rtx m_value;
@@ -1063,8 +1046,6 @@ NOTE:
                               sequence_iterator el_it);
 
     virtual bool generate_new_insns (bool insn_sequence_started);
-
-    virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
 
   private:
     // if a mem access is not to be optimized, it is converted into a
@@ -1164,16 +1145,6 @@ NOTE:
 
     // Fill the m_inc/dec_chain fields of the sequence elements.
     void calculate_adjacency_info (void);
-
-    // Check whether REG is used in any element after START.
-    bool reg_used_in_sequence (rtx reg, sequence_const_iterator start) const;
-
-    // Check whether REG is used in any of the sequence's accesses.
-    bool
-    reg_used_in_sequence (rtx reg) const
-    {
-      return reg_used_in_sequence (reg, elements ().begin ());
-    }
 
     // The total cost of the accesses in the sequence.
     int cost (void) const;

@@ -1803,14 +1803,10 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     {
       reg_mod* rm = as_a<reg_mod*> (els->get ());
       if (rm->insn () == NULL && rm->current_addr ().is_valid ()
-          && rm->current_addr ().regs_empty ())
+          && rm->current_addr ().regs_empty () && rm->dependent_els ().empty ())
 	{
-	  if (!reg_used_in_sequence (rm->reg (),
-                                     stdx::next ((sequence_iterator)els)))
-	    {
-	      els = remove_element (els);
-	      continue;
-            }
+          els = remove_element (els);
+          continue;
         }
       ++els;
     }
@@ -3020,18 +3016,6 @@ sh_ams2::sequence::cost (void) const
        i != elements ().end () && cost != infinite_costs; ++i)
     cost += (*i)->cost ();
   return cost;
-}
-
-// Check whether REG is used in any element after START.
-bool
-sh_ams2::sequence
-::reg_used_in_sequence (rtx reg, sequence_const_iterator start) const
-{
-  for (sequence_const_iterator i = start; i != elements ().end (); ++i)
-    if ((*i)->uses_reg (reg))
-      return true;
-
-  return false;
 }
 
 // Fill the m_inc/dec_chain fields of the elements in the sequence.
