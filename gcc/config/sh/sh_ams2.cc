@@ -1814,6 +1814,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
       for (sequence_iterator it = prev_el; it != els; ++it)
         if (reg_mod* rm = dyn_cast<reg_mod*> (it->get ()))
           visited_reg_mods[rm->reg ()] = rm;
+      prev_el = els;
 
       gen_address_mod_1 (els, dlg, used_reg_mods, visited_reg_mods,
                          base_lookahead
