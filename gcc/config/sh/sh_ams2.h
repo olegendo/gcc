@@ -736,7 +736,7 @@ public:
     filter_iterator<iterator, Match> end (void)
     {
       typedef filter_iterator<iterator, Match> iter;
-      return iter (begin (), end ());
+      return iter (end (), end ());
     }
 
     template <typename Match>
@@ -750,7 +750,7 @@ public:
     filter_iterator<const_iterator, Match> end (void) const
     {
       typedef filter_iterator<const_iterator, Match> iter;
-      return iter (begin (), end ());
+      return iter (end (), end ());
     }
 
   private:
