@@ -2241,8 +2241,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
         {
           // Make sure that the copy's insn gets placed right after the insn of
           // the current access.
-          access_sequence::iterator insert_before
-            = stdx::next ((access_sequence::iterator) accs);
+          access_sequence::iterator insert_before = stdx::next (accs.base ());
           while (insert_before != accesses ().end ()
                  && insert_before->insn () == accs->insn ())
             ++insert_before;
@@ -2264,7 +2263,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
        accs_end = end<access_to_optimize> (); accs != accs_end;)
     {
       gen_min_mod (accs, dlg,
-                   base_lookahead + dlg.adjust_lookahead_count (*this, (iterator)accs),
+                   base_lookahead + dlg.adjust_lookahead_count (*this, accs.base ()),
                    true);
       acc_opt_iter next_acc = accs;
       ++next_acc;
@@ -2284,7 +2283,7 @@ sh_ams::access_sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 	  && accs->original_address ().has_no_index_reg ())
 	{
 	  if (!reg_used_in_sequence (accs->address_reg (),
-				     stdx::next ((iterator)accs)))
+				     stdx::next (accs.base ())))
 	    {
 	      accs = remove_access (accs);
 	      continue;
@@ -4450,7 +4449,7 @@ sh_ams::execute (function* fun)
 	  for (access::alternative_set::iterator
 		alt = m->alternatives ().begin ();
 	       alt != m->alternatives ().end (); ++alt)
-	    m_delegate.adjust_alternative_costs (*alt, *as, m.base_iterator ());
+	    m_delegate.adjust_alternative_costs (*alt, *as, m.base ());
       }
 
       as->update_cost (m_delegate);

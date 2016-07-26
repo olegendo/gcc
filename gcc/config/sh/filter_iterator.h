@@ -4,6 +4,7 @@
 
 #include <iterator>
 #include <algorithm>
+#include <utility>
 
 template <typename Iter, typename Predicate>
 class filter_iterator : private Predicate
@@ -24,6 +25,36 @@ public:
 
     m_i = i;
     m_end = iend;
+  }
+
+  template <typename II, typename III> explicit filter_iterator (II i, III iend)
+  : Predicate ()
+  {
+    Iter ii (i);
+    Iter ii_end (iend);
+
+    for (; ii != ii_end && !predicate () (*ii); ++ii);
+
+    m_i = ii;
+    m_end = ii_end;
+  }
+
+  template <typename II> explicit
+  filter_iterator (const std::pair<II, II>& i_iend)
+  : Predicate ()
+  {
+    Iter ii (i_iend.first);
+    Iter ii_end (i_iend.second);
+
+    for (; ii != ii_end && !predicate () (*ii); ++ii);
+
+    m_i = ii;
+    m_end = ii_end;
+  }
+
+  template <typename II> explicit filter_iterator (II iend)
+  : Predicate (), m_i (iend), m_end (iend)
+  {
   }
 
   Predicate& predicate (void) { return *this; }

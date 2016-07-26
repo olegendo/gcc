@@ -70,7 +70,7 @@
 #include <string>
 
 #include "filter_iterator.h"
-#include "deref_iterator.h"
+#include "trv_iterator.h"
 #include "static_vector.h"
 #include "ref_counted.h"
 
@@ -595,17 +595,18 @@ public:
   class sequence
   {
   public:
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
-			      ::iterator > iterator;
+    typedef trv_iterator<deref<std::list<ref_counting_ptr<sequence_element> >
+			       ::iterator> > iterator;
 
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
-			      ::const_iterator > const_iterator;
+    typedef trv_iterator<deref<std::list<ref_counting_ptr<sequence_element> >
+			       ::const_iterator> > const_iterator;
 
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
-			      ::reverse_iterator > reverse_iterator;
+    typedef trv_iterator<deref<std::list<ref_counting_ptr<sequence_element> >
+			       ::reverse_iterator> > reverse_iterator;
 
-    typedef deref_iterator< std::list<ref_counting_ptr<sequence_element> >
-			      ::const_reverse_iterator > const_reverse_iterator;
+    typedef trv_iterator<deref<std::list<ref_counting_ptr<sequence_element> >
+			       ::const_reverse_iterator> > const_reverse_iterator;
+
 
     typedef std::multimap<rtx_insn*, iterator> insn_map;
 
@@ -1369,6 +1370,12 @@ NOTE:
   // If SEQ and EL is not null, trace back the effective addresses of the
   // registers in X (starting from EL) and insert a reg mod into the sequence
   // for every address modifying insn that was used.
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
+				     sequence* seq, sequence_element& el)
+  {
+    return rtx_to_addr_expr (x, mem_mode, seq, &el);
+  }
+
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
                                      sequence* seq, sequence_element* el);
 

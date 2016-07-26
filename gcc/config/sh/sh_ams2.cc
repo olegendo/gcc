@@ -1379,8 +1379,8 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 
   // Add to the split sequences those reg-mods that modify one of their
   // address regs, along with their dependencies.
-  for (deref_iterator<std::vector<sequence*>::iterator> s (new_seqs.begin ()),
-       s_end (new_seqs.end ()); s != s_end; ++s)
+  for (trv_iterator<deref<std::vector<sequence*>::iterator> >
+	s (new_seqs.begin ()), s_end (new_seqs.end ()); s != s_end; ++s)
     {
       // Since adding new elements might add more address regs,
       // repeat until no new elements have been added.
@@ -1391,8 +1391,7 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
                  els_end = seq.end<reg_mod_match> (); els != els_end; ++els)
             {
               reg_mod* rm = as_a<reg_mod*> (&*els);
-              if (s->addr_regs ().find (rm->reg ()) !=
-                  s->addr_regs ().end ())
+              if (s->addr_regs ().find (rm->reg ()) != s->addr_regs ().end ())
                 insert_count +=
                   split_1 (*s, ref_counting_ptr<sequence_element> (rm));
             }
@@ -2548,8 +2547,9 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
                                              std::back_inserter (start_addrs));
   reg_mod* found_addr = NULL;
 
-  for (deref_iterator<start_addr_list::iterator> addrs (start_addrs.begin ()),
-       addrs_end (start_addrs.end ()); addrs != addrs_end; ++addrs)
+  for (trv_iterator<deref<start_addr_list::iterator> >
+	addrs (start_addrs.begin ()), addrs_end (start_addrs.end ());
+	addrs != addrs_end; ++addrs)
     {
       std::map<rtx, reg_mod*, cmp_by_regno>::iterator visited_addr =
         visited_reg_mods.find (addrs->reg ());
@@ -4326,9 +4326,10 @@ sh_ams2::execute (function* fun)
 
   log_msg ("\nremoving unused reg-mods\n");
   std::multimap<rtx_insn*, sequence*> insns_to_delete;
-  for (deref_iterator<std::list<ref_counting_ptr<sequence_element> >
-		      ::iterator> i (original_reg_mods.begin ()),
-       i_end (original_reg_mods.end ()); i != i_end; )
+  for (trv_iterator<deref<
+	std::list<ref_counting_ptr<sequence_element> >::iterator> >
+       i (original_reg_mods.begin ()), i_end (original_reg_mods.end ());
+       i != i_end; )
     {
       if (i->insn () == NULL || !i->dependent_els ().empty ())
         {
