@@ -4176,7 +4176,7 @@ sh_ams2::execute (function* fun)
         }
     }
 
-  std::vector<ref_counting_ptr<sequence_element> > original_reg_mods;
+  std::list<ref_counting_ptr<sequence_element> > original_reg_mods;
   log_msg ("\nprocessing extracted sequences\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
        it != sequences.end ();)
@@ -4326,7 +4326,7 @@ sh_ams2::execute (function* fun)
 
   log_msg ("\nremoving unused reg-mods\n");
   std::multimap<rtx_insn*, sequence*> insns_to_delete;
-  for (deref_iterator<std::vector<ref_counting_ptr<sequence_element> >
+  for (deref_iterator<std::list<ref_counting_ptr<sequence_element> >
 		      ::iterator> i (original_reg_mods.begin ()),
        i_end (original_reg_mods.end ()); i != i_end; )
     {
