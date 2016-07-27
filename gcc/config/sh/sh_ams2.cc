@@ -29,6 +29,7 @@
 #include "symtab.h"
 #include "inchash.h"
 #include "tree.h"
+#include "print-tree.h"
 #include "optabs.h"
 #include "flags.h"
 #include "statistics.h"
@@ -331,7 +332,7 @@ log_sequence_element (const sh_ams2::sequence_element& e,
       if (!e.dependencies ().empty ())
         {
           log_msg ("\n  dependencies:\n");
-          for (std::set<sh_ams2::sequence_element*>::const_iterator it =
+          for (sh_ams2::sequence_element::dependency_list::const_iterator it =
                  e.dependencies ().begin ();
                it != e.dependencies ().end (); ++it)
             {
@@ -373,8 +374,9 @@ log_sequence (const sh_ams2::sequence& seq, bool log_alternatives = true,
   if (dump_file == NULL)
     return;
 
-  log_msg ("=====\naccess sequence %p: %s\n\n", (const void*)&seq,
-	   seq.empty () ? "is empty" : "");
+  log_msg ("=====\naccess sequence ");
+  dump_addr (dump_file, "", (const void*)&seq);
+  log_msg (": %s\n\n", seq.empty () ? "is empty" : "");
 
   if (seq.empty ())
     return;
@@ -891,8 +893,8 @@ sh_ams2::sequence_element::can_be_optimized (void) const
   if (!optimization_enabled () || effective_addr ().is_invalid ())
     return false;
 
-  for (std::set<sequence_element*>::const_iterator it
-         = m_dependent_els.begin (); it != m_dependent_els.end (); ++it)
+  for (dependency_list::const_iterator it = m_dependent_els.begin ();
+       it != m_dependent_els.end (); ++it)
     {
       if (!(*it)->can_be_optimized ())
         return false;
@@ -1397,7 +1399,8 @@ sh_ams2::sequence::split_1 (sequence& seq,
   if (prev_size < seq.size ())
     ++insert_count;
 
-  for (std::set<sequence_element*>::iterator it = el->dependencies ().begin ();
+  for (sequence_element::dependency_list::iterator it =
+         el->dependencies ().begin ();
        it != el->dependencies ().end (); ++it)
     insert_count += split_1 (seq, ref_counting_ptr<sequence_element> (*it));
   return insert_count;
@@ -2997,15 +3000,15 @@ sh_ams2::sequence::remove_element (iterator el, bool clear_deps)
   // Update the element's dependencies.
   if (clear_deps)
     {
-      for (std::set<sequence_element*>::iterator deps
-             = el->dependencies ().begin ();
+      for (sequence_element::dependency_list::iterator deps =
+             el->dependencies ().begin ();
            deps != el->dependencies ().end (); ++deps)
         (*deps)->remove_dependent_el (&*el);
 
       el->dependencies ().clear ();
 
-      for (std::set<sequence_element*>::iterator dep_els
-             = el->dependent_els ().begin ();
+      for (sequence_element::dependency_list::iterator dep_els =
+             el->dependent_els ().begin ();
            dep_els != el->dependent_els ().end (); ++dep_els)
         (*dep_els)->remove_dependency (&*el);
 
@@ -3500,7 +3503,7 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
           for (insn_map::iterator els = els_in_insn.first;
                els != els_in_insn.second; ++els)
             {
-              for (std::set<sequence_element*>::iterator deps =
+              for (sequence_element::dependency_list::iterator deps =
                      els->second->dependencies ().begin ();
                    deps != els->second->dependencies ().end (); ++deps)
                 {
@@ -3762,6 +3765,22 @@ operator == (const sequence_element& other) const
     && current_addr () == ((const reg_mod&)other).current_addr ();
 }
 
+bool sh_ams2::reg_mod::
+operator < (const sequence_element& other) const
+{
+  if (!sequence_element::operator == (other))
+      return sequence_element::operator < (other);
+
+  const reg_mod* rm = (const reg_mod*)&other;
+  if (!regs_equal (reg (), rm->reg ()))
+      return REGNO (reg ()) < REGNO (rm->reg ());
+  if (current_addr () != rm->current_addr ())
+    return current_addr () < rm->current_addr ();
+  if (value () != rm->value ())
+      return value () < rm->value ();
+  return false;
+}
+
 bool sh_ams2::reg_barrier::
 operator == (const sequence_element& other) const
 {
@@ -3770,6 +3789,17 @@ operator == (const sequence_element& other) const
          reg (), ((const sh_ams2::reg_barrier&)other).reg ());
 }
 
+bool sh_ams2::reg_barrier::
+operator < (const sequence_element& other) const
+{
+  if (!sequence_element::operator == (other))
+      return sequence_element::operator < (other);
+
+  const reg_barrier* rb = (const reg_barrier*)&other;
+  if (reg () != rb->reg ())
+    return reg () < rb->reg ();
+  return false;
+}
 
 bool sh_ams2::reg_use::
 operator == (const sequence_element& other) const
@@ -3777,6 +3807,18 @@ operator == (const sequence_element& other) const
   return sequence_element::operator == (other)
     && sh_ams2::regs_equal (reg (), ((const reg_use&)other).reg ())
     && current_addr () == ((const reg_use&)other).current_addr ();
+}
+
+bool sh_ams2::reg_use::
+operator < (const sequence_element& other) const
+{
+  if (!sequence_element::operator == (other))
+      return sequence_element::operator < (other);
+
+  const reg_use* ru = (const reg_use*)&other;
+  if (reg () != ru->reg ())
+    return reg () < ru->reg ();
+  return false;
 }
 
 // Return a non_mod_addr if it can be created with the given scale and
@@ -4364,8 +4406,12 @@ sh_ams2::execute (function* fun)
             {
               if (seqs_to_skip.find (*el_seqs) == seqs_to_skip.end ())
                 {
-                  log_msg ("sequence %p won't be modified either\n",
-                           (const void*)*el_seqs);
+                  if (dump_file != NULL)
+                    {
+                      log_msg ("sequence ");
+                      dump_addr (dump_file, "", (const void*)*el_seqs);
+                      log_msg (" won't be modified either\n");
+                    }
                   seqs_to_skip.insert (*el_seqs);
                 }
             }

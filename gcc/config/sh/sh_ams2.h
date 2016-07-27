@@ -297,6 +297,7 @@ public:
 
     bool operator == (const addr_expr& other) const;
     bool operator != (const addr_expr& other) const;
+    bool operator < (const addr_expr& other) const;
 
     std::pair<disp_t, bool> operator - (const addr_expr& other) const;
 
@@ -345,30 +346,7 @@ public:
       bool operator () (const sh_ams2::addr_expr& a,
                         const sh_ams2::addr_expr& b) const
       {
-        if (a.is_invalid () && b.is_invalid ())
-          return false;
-        if (a.is_invalid () || b.is_invalid ())
-          return a.is_invalid ();
-
-        if (a.has_base_reg () && b.has_base_reg ())
-          {
-            if (REGNO (a.base_reg ()) != REGNO (b.base_reg ()))
-              return REGNO (a.base_reg ()) < REGNO (b.base_reg ());
-          }
-        else if (a.has_base_reg () || b.has_base_reg ())
-          return a.has_base_reg ();
-
-        if (a.has_index_reg () && b.has_index_reg ())
-          {
-            if (REGNO (a.index_reg ()) != REGNO (b.index_reg ()))
-              return REGNO (a.index_reg ()) < REGNO (b.index_reg ());
-          }
-        else if (a.has_index_reg () || b.has_index_reg ())
-          return a.has_index_reg ();
-
-        if (a.disp () == b.disp () && a.has_index_reg () && b.has_index_reg ())
-          return a.scale () < b.scale ();
-        return a.disp () < b.disp ();
+        return a < b;
       }
     };
 
@@ -855,6 +833,17 @@ public:
       return type () == other.type () && insn () == other.insn ();
     }
 
+    virtual bool operator < (const sequence_element& other) const
+    {
+      if (type () != other.type ())
+        return type () < other.type ();
+      if ((m_insn == NULL) != (other.insn () == NULL))
+        return m_insn == NULL;
+      if (m_insn != NULL && other.insn () != NULL)
+        return INSN_UID (m_insn) < INSN_UID (other.insn ());
+      return false;
+    }
+
     // Returns the type of the element.  Could also use RTTI for this.
     element_type type (void) const { return m_type; }
 
@@ -913,23 +902,38 @@ NOTE:
     back defs.  if the limit is exceeded a reg_barrier should be placed in
     the BB where the limit was exceeded.
 */
+    struct compare;
+    typedef std::set<sequence_element*, compare>
+      dependency_list;
 
-    const std::list<sequence_element*>&
+    const dependency_list&
     dependencies (void) const { return m_dependencies; }
 
-    std::list<sequence_element*>&
+    dependency_list&
     dependencies (void) { return m_dependencies; }
 
-    const std::list<sequence_element*>&
+    const dependency_list&
     dependent_els (void) const { return m_dependent_els; }
 
-    std::list<sequence_element*>&
+    dependency_list&
     dependent_els (void) { return m_dependent_els; }
 
-    void add_dependency (sequence_element* dep);
-    void remove_dependency (sequence_element* dep);
-    void add_dependent_el (sequence_element* dep);
-    void remove_dependent_el (sequence_element* dep);
+    void add_dependency (sequence_element* dep)
+    {
+      m_dependencies.insert (dep);
+    }
+    void remove_dependency (sequence_element* dep)
+    {
+      m_dependencies.erase (dep);
+    }
+    void add_dependent_el (sequence_element* dep)
+    {
+      m_dependent_els.insert (dep);
+    }
+    void remove_dependent_el (sequence_element* dep)
+    {
+      m_dependent_els.erase (dep);
+    }
 
     // The sequences that use or have previously used this element.
     std::set<sequence*>& sequences (void) { return m_sequences; }
@@ -937,9 +941,6 @@ NOTE:
     // Return true if the element can be removed or changed by an optimization
     // subpass.
     virtual bool can_be_optimized (void) const;
-
-    // Check whether the element uses the register R in any way.
-    virtual bool uses_reg (rtx r ATTRIBUTE_UNUSED) const { return false; }
 
     // Return true if the effective address of FIRST and SECOND only differs in
     // the constant displacement and the difference is DIFF.
@@ -975,6 +976,18 @@ NOTE:
       return insn_sequence_started;
     }
 
+    // Comparison struct for sets and maps containing sequence elements.
+    struct compare
+    {
+      bool operator () (const sequence_element* a,
+                        const sequence_element* b) const
+      {
+        if (flag_dump_noaddr)
+          return *a < *b;
+        return a < b;
+      }
+    };
+
   protected:
     sequence_element (element_type t, rtx_insn* i,
 		      const addr_expr& ea = addr_expr ())
@@ -994,8 +1007,8 @@ NOTE:
     addr_expr m_effective_addr;
     bool m_optimization_enabled;
 
-    std::list<sequence_element*> m_dependencies;
-    std::list<sequence_element*> m_dependent_els;
+    dependency_list m_dependencies;
+    dependency_list m_dependent_els;
 
     std::set<sequence*> m_sequences;
   };
@@ -1071,13 +1084,6 @@ NOTE:
     virtual void update_cost (delegate& d, sequence& seq,
                               sequence::iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
-
-    virtual bool uses_reg (rtx r) const
-    {
-      return (current_addr ().is_invalid ()
-              && (regs_equal (current_addr ().base_reg (), r)
-                  || regs_equal (current_addr ().index_reg (), r)));
-    }
 
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m, rtx addr_rtx)
@@ -1170,6 +1176,7 @@ NOTE:
     }
 
     virtual bool operator == (const sequence_element& other) const;
+    virtual bool operator < (const sequence_element& other) const;
     virtual bool can_be_optimized (void) const;
 
     // The address reg that is being modified / defined.
@@ -1192,13 +1199,6 @@ NOTE:
                               sequence::iterator el_it);
     virtual bool generate_new_insns (bool insn_sequence_started);
 
-    virtual bool uses_reg (rtx r) const
-    {
-      return (!current_addr ().is_invalid ()
-              && (regs_equal (current_addr ().base_reg (), r)
-                  || regs_equal (current_addr ().index_reg (), r)));
-    }
-
   private:
     rtx m_reg;
     rtx m_value;
@@ -1216,6 +1216,7 @@ NOTE:
     reg_barrier (rtx_insn* i) : sequence_element (type_reg_barrier, i) { };
 
     virtual bool operator == (const sequence_element& other) const;
+    virtual bool operator < (const sequence_element& other) const;
 
     // The address reg which is being referenced by this barrier.
     rtx reg (void) const { return m_reg; }
@@ -1260,6 +1261,7 @@ NOTE:
     }
 
     virtual bool operator == (const sequence_element& other) const;
+    virtual bool operator < (const sequence_element& other) const;
 
     virtual const adjacent_chain_info&
     inc_chain (void) const { return m_inc_chain; }
@@ -1292,8 +1294,6 @@ NOTE:
 
     virtual bool generate_new_insns (bool insn_sequence_started);
 
-    virtual bool uses_reg (rtx r) const { return regs_equal (reg (), r); }
-
   private:
     // if a mem access is not to be optimized, it is converted into a
     // reg-use.  in this case maybe it's useful to keep the original element
@@ -1308,7 +1308,6 @@ NOTE:
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
   };
-
 
   // a delegate for the ams pass.  usually implemented by the target.
   struct delegate
@@ -1492,6 +1491,41 @@ sh_ams2::addr_expr::operator == (const addr_expr& other) const
          && regs_equal (index_reg (), other.index_reg ())
          && scale () == other.scale ()
          && disp () == other.disp ();
+}
+
+inline bool
+sh_ams2::addr_expr::operator != (const addr_expr& other) const
+{
+  return !addr_expr::operator == (other);
+}
+
+inline bool
+sh_ams2::addr_expr::operator < (const addr_expr& other) const
+{
+  if (is_invalid () && other.is_invalid ())
+    return false;
+  if (is_invalid () || other.is_invalid ())
+    return is_invalid ();
+
+  if (has_base_reg () && other.has_base_reg ())
+    {
+      if (REGNO (base_reg ()) != REGNO (other.base_reg ()))
+        return REGNO (base_reg ()) < REGNO (other.base_reg ());
+    }
+  else if (has_base_reg () || other.has_base_reg ())
+    return has_base_reg ();
+
+  if (has_index_reg () && other.has_index_reg ())
+    {
+      if (REGNO (index_reg ()) != REGNO (other.index_reg ()))
+        return REGNO (index_reg ()) < REGNO (other.index_reg ());
+    }
+  else if (has_index_reg () || other.has_index_reg ())
+    return has_index_reg ();
+
+  if (disp () == other.disp () && has_index_reg () && other.has_index_reg ())
+    return scale () < other.scale ();
+  return disp () < other.disp ();
 }
 
 inline std::pair<sh_ams2::disp_t, bool>
