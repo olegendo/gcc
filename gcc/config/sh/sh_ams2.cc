@@ -1193,9 +1193,7 @@ sh_ams2::start_addr_list::get_relevant_addresses (const addr_expr& end_addr,
                                                   OutputIterator out)
 {
   // Constant displacements can always be used as start addresses.
-  for (std::list<reg_mod*>::iterator it = m_const_addresses.begin ();
-       it != m_const_addresses.end (); ++it)
-    *out++ = *it;
+  out = std::copy (m_const_addresses.begin (), m_const_addresses.end (), out);
 
   // Addresses containing registers might be used if they have a
   // register in common with the end address.
@@ -1811,6 +1809,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
       for (iterator it = prev_el; it != els; ++it)
         if (reg_mod* rm = dyn_cast<reg_mod*> (&*it))
           visited_reg_mods[rm->reg ()] = rm;
+
       prev_el = els;
 
       gen_address_mod_1 (els, dlg, used_reg_mods, visited_reg_mods,
