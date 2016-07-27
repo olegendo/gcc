@@ -767,7 +767,7 @@ public:
 
     std::pair<int, reg_mod*>
     find_cheapest_start_addr (const addr_expr& end_addr,
-                              iterator el,
+                              iterator el, rtx addr_reg,
                               disp_t min_disp, disp_t max_disp,
                               addr_type_t addr_type,
                               delegate& dlg, std::set<reg_mod*>& used_reg_mods,

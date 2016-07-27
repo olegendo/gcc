@@ -979,7 +979,8 @@ sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
   // FIXME: When selecting an alternative, remember the alternative
   // iterator as the "currently selected alternative".  Then we don't
   // need to find it over and over again.
-  for (alternative_set::const_iterator alt = alternatives ().begin (); ; ++alt)
+  for (alternative_set::const_iterator alt = alternatives ().begin ();
+       alt != alternatives ().end (); ++alt)
     if (matches_alternative (*alt))
       {
 	set_cost (alt->cost ());
@@ -1909,7 +1910,7 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
       int alt_min_cost = alt->cost ();
 
       std::pair<int, reg_mod*> base_start_addr =
-        find_cheapest_start_addr (end_base, el,
+        find_cheapest_start_addr (end_base, el, alt_ae.base_reg (),
                                   alt_ae.disp_min (), alt_ae.disp_max (),
                                   alt_ae.type (), dlg,
                                   used_reg_mods, visited_reg_mods);
@@ -1924,7 +1925,7 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
       if (alt_ae.has_index_reg ())
         {
           index_start_addr
-            = find_cheapest_start_addr (end_index, el,
+            = find_cheapest_start_addr (end_index, el, alt_ae.index_reg (),
                                         alt_ae.disp_min (), alt_ae.disp_max (),
                                         alt_ae.type (), dlg,
                                         used_reg_mods, visited_reg_mods);
@@ -2016,7 +2017,7 @@ struct sh_ams2::mod_addr_result
 // Find the cheapest starting address that can be used to arrive at END_ADDR.
 // Return it along with the cost of the address modifications.
 std::pair<int, sh_ams2::reg_mod*> sh_ams2::sequence::
-find_cheapest_start_addr (const addr_expr& end_addr, iterator el,
+find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
                           disp_t min_disp, disp_t max_disp,
                           addr_type_t addr_type,
                           delegate& dlg, std::set<reg_mod*>& used_reg_mods,
@@ -2046,14 +2047,17 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el,
           || visited_addr->second != *addrs)
         continue;
 
-      int cost = try_insert_address_mods (*addrs, end_addr, min_disp, max_disp,
-                                          addr_type, acc_mode, el, tracker,
-                                          used_reg_mods, visited_reg_mods,
-                                          dlg).cost;
+      mod_addr_result result =
+        try_insert_address_mods (*addrs, end_addr, min_disp, max_disp,
+                                 addr_type, acc_mode, el, tracker,
+                                 used_reg_mods, visited_reg_mods, dlg);
       tracker.reset_changes ();
-      if (cost < min_cost)
+      // If ADDR_REG is not an any_regno placeholder (e.g. in the case of the
+      // GBR + disp alternative), the final address needs to be in ADDR_REG.
+      if (result.cost < min_cost && regs_match (addr_reg,
+                                                result.final_addr->reg ()))
         {
-          min_cost = cost;
+          min_cost = result.cost;
           min_start_addr = *addrs;
         }
     }
