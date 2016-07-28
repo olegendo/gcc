@@ -1448,6 +1448,7 @@ sh_ams2::sequence::find_mem_accesses (rtx_insn* i, rtx& x, element_type type)
       break;
 
     case PARALLEL:
+    case UNSPEC:
       for (int j = 0; j < XVECLEN (x, 0); j++)
         find_mem_accesses (i, XVECEXP (x, 0, j), type);
       break;
@@ -2774,6 +2775,7 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
       break;
 
     case PARALLEL:
+    case UNSPEC:
       for (int i = 0; i < XVECLEN (x, 0); i++)
 	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out);
       break;
