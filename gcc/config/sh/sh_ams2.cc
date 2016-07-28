@@ -2203,6 +2203,7 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
 	      make_ref_counted<reg_mod> ((rtx_insn*)NULL, ru->reg (), NULL_RTX,
 					 new_addr, ru->effective_addr ()), el);
           tracker.inserted_reg_mods ().push_back (inserted_el);
+          tracker.visit_reg_mod ((reg_mod*)&*inserted_el);
 
           // Find and add the dependency for the new reg-mod
           for (iterator it = stdx::prev (inserted_el); ; --it)
