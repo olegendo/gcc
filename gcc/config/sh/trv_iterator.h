@@ -52,10 +52,12 @@ public:
     return r;
   }
 
-  trv_iterator operator + (difference_type n) const { return m_i + n; }
+  trv_iterator operator + (difference_type n) const { return trv_iterator (m_i + n); }
   trv_iterator& operator += (difference_type n) { m_i += n; return *this; }
-  trv_iterator operator - (difference_type n) const { return m_i - n; }
+  trv_iterator operator - (difference_type n) const { return trv_iterator (m_i - n); }
   trv_iterator& operator -= (difference_type n) { m_i -= n; return *this; }
+
+  difference_type operator - (const trv_iterator& rhs) const { return m_i - rhs.m_i; }
 
   bool operator == (const trv_iterator& rhs) const { return m_i == rhs.m_i; }
   bool operator != (const trv_iterator& rhs) const { return m_i != rhs.m_i; }
@@ -154,6 +156,13 @@ struct dereferenced_type<T, typename enable_if<is_iterator<T>::value>::type>
   typedef typename std::iterator_traits<T>::value_type type;
 };
 
+template <typename T> struct remove_ref;
+template <typename T> struct remove_ref<T&> { typedef T type; };
+template <typename T> struct remove_ref<const T&> { typedef const T type; };
+
+template <typename From, typename To> struct transfer_const { typedef To type; };
+template <typename From, typename To> struct transfer_const<const From, To> { typedef const To type; };
+
 } // namespace utils
 
 
@@ -188,12 +197,17 @@ struct deref_iterator = public trv_iterator<deref_trv<Iter, VT>>;
 */
 
 // ---------------------------------------------------------------------------
+// can't use iterator_traits<T>::value_type here because for a const T*
+// it defines value_type as T, not as const T.
+// in addition to that, typename of a const std::pair<T>::first_type = T,
+// not const T, so have to adjust for that, too.
 
-template <typename Iter, typename Pair = typename Iter::value_type>
+template <typename Iter,
+ 	  typename Pair = typename utils::remove_ref<typename std::iterator_traits<Iter>::reference>::type >
 struct pair_1st
 {
   typedef Iter iterator;
-  typedef typename Pair::first_type value_type;
+  typedef typename utils::transfer_const<Pair, typename Pair::first_type>::type value_type;
   typedef value_type* pointer;
   typedef value_type& reference;
 
@@ -201,11 +215,12 @@ struct pair_1st
   pointer trv_pointer (Pair& p) const { return &p.first; }
 };
 
-template <typename Iter, typename Pair = typename Iter::value_type>
+template <typename Iter,
+ 	  typename Pair = typename utils::remove_ref<typename std::iterator_traits<Iter>::reference>::type >
 struct pair_2nd
 {
   typedef Iter iterator;
-  typedef typename Pair::second_type value_type;
+  typedef typename utils::transfer_const<Pair, typename Pair::second_type>::type value_type;
   typedef value_type* pointer;
   typedef value_type& reference;
 
