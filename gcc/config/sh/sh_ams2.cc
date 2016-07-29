@@ -2781,6 +2781,10 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
 	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out);
       break;
 
+    case SUBREG:
+      find_addr_reg_uses_1 (reg, XEXP (x, 0), out);
+      break;
+
     case SET:
       // If an address reg is modified, this should be a reg-mod instead
       // of a reg-use.
