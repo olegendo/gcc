@@ -811,6 +811,8 @@ public:
   class sequence_element : public ref_counted
   {
   public:
+    static const unsigned invalid_id;
+
     virtual ~sequence_element (void)
       {
         m_sequences.clear ();
@@ -833,17 +835,6 @@ public:
       return type () == other.type () && insn () == other.insn ();
     }
 
-    virtual bool operator < (const sequence_element& other) const
-    {
-      if (type () != other.type ())
-        return type () < other.type ();
-      if ((m_insn == NULL) != (other.insn () == NULL))
-        return m_insn == NULL;
-      if (m_insn != NULL && other.insn () != NULL)
-        return INSN_UID (m_insn) < INSN_UID (other.insn ());
-      return false;
-    }
-
     // Returns the type of the element.  Could also use RTTI for this.
     element_type type (void) const { return m_type; }
 
@@ -852,6 +843,10 @@ public:
       return m_type == type_mem_load || m_type == type_mem_store
         || m_type == type_mem_operand;
     }
+
+    // A unique ID used to order the elements in containers like std::set.
+    unsigned id (void) const { return m_id; }
+    void set_id (unsigned new_id) { m_id = new_id; }
 
     // The cost of this element in the sequence.
     int cost (void) const { return m_cost; }
@@ -982,17 +977,15 @@ NOTE:
       bool operator () (const sequence_element* a,
                         const sequence_element* b) const
       {
-        if (flag_dump_noaddr)
-          return *a < *b;
-        return a < b;
+        return a->id () < b->id ();
       }
     };
 
   protected:
     sequence_element (element_type t, rtx_insn* i,
 		      const addr_expr& ea = addr_expr ())
-    : m_type (t), m_cost (0), m_insn (i), m_effective_addr (ea),
-      m_optimization_enabled (true)
+    : m_type (t), m_id (invalid_id), m_cost (0), m_insn (i),
+      m_effective_addr (ea), m_optimization_enabled (true)
     {
     }
 
@@ -1002,6 +995,7 @@ NOTE:
     // Changing the type after construction is not supported.
     const element_type m_type;
 
+    unsigned m_id;
     int m_cost;
     rtx_insn* m_insn;
     addr_expr m_effective_addr;
@@ -1176,7 +1170,6 @@ NOTE:
     }
 
     virtual bool operator == (const sequence_element& other) const;
-    virtual bool operator < (const sequence_element& other) const;
     virtual bool can_be_optimized (void) const;
 
     // The address reg that is being modified / defined.
@@ -1216,7 +1209,6 @@ NOTE:
     reg_barrier (rtx_insn* i) : sequence_element (type_reg_barrier, i) { };
 
     virtual bool operator == (const sequence_element& other) const;
-    virtual bool operator < (const sequence_element& other) const;
 
     // The address reg which is being referenced by this barrier.
     rtx reg (void) const { return m_reg; }
@@ -1261,7 +1253,6 @@ NOTE:
     }
 
     virtual bool operator == (const sequence_element& other) const;
-    virtual bool operator < (const sequence_element& other) const;
 
     virtual const adjacent_chain_info&
     inc_chain (void) const { return m_inc_chain; }

@@ -1111,6 +1111,7 @@ sh_ams2::reg_use::update_cost (delegate& d, sequence& seq,
     seq, el_it));
 }
 
+const unsigned sh_ams2::sequence_element::invalid_id = ~0u;
 const sh_ams2::adjacent_chain_info sh_ams2::sequence_element::g_no_incdec_chain;
 bool sh_ams2::mem_access::allow_new_insns = true;
 
@@ -2869,7 +2870,11 @@ sh_ams2::sequence::iterator
 sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
                                    iterator insert_before)
 {
+  static unsigned next_id = 0;
   iterator i (m_els.insert (insert_before.base (), el));
+
+  if (el->id () == sequence_element::invalid_id)
+    el->set_id (next_id++);
 
   el->sequences ().insert (this);
 
@@ -3780,22 +3785,6 @@ operator == (const sequence_element& other) const
     && current_addr () == ((const reg_mod&)other).current_addr ();
 }
 
-bool sh_ams2::reg_mod::
-operator < (const sequence_element& other) const
-{
-  if (!sequence_element::operator == (other))
-      return sequence_element::operator < (other);
-
-  const reg_mod* rm = (const reg_mod*)&other;
-  if (!regs_equal (reg (), rm->reg ()))
-      return REGNO (reg ()) < REGNO (rm->reg ());
-  if (current_addr () != rm->current_addr ())
-    return current_addr () < rm->current_addr ();
-  if (value () != rm->value ())
-      return value () < rm->value ();
-  return false;
-}
-
 bool sh_ams2::reg_barrier::
 operator == (const sequence_element& other) const
 {
@@ -3804,36 +3793,12 @@ operator == (const sequence_element& other) const
          reg (), ((const sh_ams2::reg_barrier&)other).reg ());
 }
 
-bool sh_ams2::reg_barrier::
-operator < (const sequence_element& other) const
-{
-  if (!sequence_element::operator == (other))
-      return sequence_element::operator < (other);
-
-  const reg_barrier* rb = (const reg_barrier*)&other;
-  if (reg () != rb->reg ())
-    return reg () < rb->reg ();
-  return false;
-}
-
 bool sh_ams2::reg_use::
 operator == (const sequence_element& other) const
 {
   return sequence_element::operator == (other)
     && sh_ams2::regs_equal (reg (), ((const reg_use&)other).reg ())
     && current_addr () == ((const reg_use&)other).current_addr ();
-}
-
-bool sh_ams2::reg_use::
-operator < (const sequence_element& other) const
-{
-  if (!sequence_element::operator == (other))
-      return sequence_element::operator < (other);
-
-  const reg_use* ru = (const reg_use*)&other;
-  if (reg () != ru->reg ())
-    return reg () < ru->reg ();
-  return false;
 }
 
 // Return a non_mod_addr if it can be created with the given scale and
