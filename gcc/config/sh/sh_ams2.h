@@ -1507,25 +1507,22 @@ sh_ams2::addr_expr::operator < (const addr_expr& other) const
   if (is_invalid () || other.is_invalid ())
     return is_invalid ();
 
-  if (has_base_reg () && other.has_base_reg ())
-    {
-      if (REGNO (base_reg ()) != REGNO (other.base_reg ()))
-        return REGNO (base_reg ()) < REGNO (other.base_reg ());
-    }
-  else if (has_base_reg () || other.has_base_reg ())
-    return has_base_reg ();
+  regno_t br0 = get_regno (base_reg ()), br1 = get_regno (other.base_reg ());
+  if (br0 != br1)
+    return br0 > br1;
+
+  regno_t ir0 = get_regno (index_reg ()), ir1 = get_regno (other.index_reg ());
+  if (ir0 != ir1)
+    return ir0 > ir1;
 
   if (has_index_reg () && other.has_index_reg ())
     {
-      if (REGNO (index_reg ()) != REGNO (other.index_reg ()))
-        return REGNO (index_reg ()) < REGNO (other.index_reg ());
+      scale_t s0 = scale (), s1 = other.scale ();
+      if (s0 != s1)
+        return s0 > s1;
     }
-  else if (has_index_reg () || other.has_index_reg ())
-    return has_index_reg ();
 
-  if (disp () == other.disp () && has_index_reg () && other.has_index_reg ())
-    return scale () < other.scale ();
-  return disp () < other.disp ();
+  return disp () > other.disp ();
 }
 
 inline std::pair<sh_ams2::disp_t, bool>
