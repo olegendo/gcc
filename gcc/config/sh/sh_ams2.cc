@@ -2775,14 +2775,14 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
           *out++ = &x;
       break;
 
+    case MEM:
+      // regs inside MEM rtx-es should be stored as mem-accesses.
+      return;
+
     case PARALLEL:
     case UNSPEC:
       for (int i = 0; i < XVECLEN (x, 0); i++)
 	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out);
-      break;
-
-    case SUBREG:
-      find_addr_reg_uses_1 (reg, XEXP (x, 0), out);
       break;
 
     case SET:
@@ -2810,6 +2810,15 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
 
 	  for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
 	    find_addr_reg_uses_1 (reg, XEXP (x, i), out);
+        }
+      else
+        {
+          subrtx_ptr_iterator::array_type array;
+          FOR_EACH_SUBRTX_PTR (it, array, &x, NONCONST)
+            {
+              if (REG_P (**it) && regs_equal (reg, **it))
+                *out++ = *it;
+            }
         }
       break;
     }
