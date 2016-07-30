@@ -598,11 +598,8 @@ public:
 
     ~sequence (void);
 
-    // Find all mem accesses in the rtx X of the insn I and add them to the
-    // sequence.  TYPE indicates the type of the next mem that we find
-    // (i.e. mem_load, mem_store or mem_operand).
-    void find_mem_accesses (rtx_insn* i, rtx& x,
-                            element_type type = type_mem_load);
+    // Find all mem accesses in the insn I and add them to the sequence.
+    void find_mem_accesses (rtx_insn* i);
 
     // Add a reg mod for every insn that modifies an address register.
     void find_addr_reg_mods (void);
@@ -736,6 +733,9 @@ public:
     static int split_1 (sequence& seq,
                         const ref_counting_ptr<sequence_element>& el);
 
+    static bool sort_found_mems (const std::pair<rtx*, element_type>& a,
+                                 const std::pair<rtx*, element_type>& b);
+
     int gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
                            delegate& dlg,
                            std::set<reg_mod*>& used_reg_mods,
@@ -788,6 +788,10 @@ public:
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void
     find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out);
+
+    template <typename OutputIterator> void
+    find_mem_accesses_1 (rtx& x, OutputIterator out,
+                         element_type type = type_mem_load);
 
     // FIXME: m_els is the primary container for the sequence_elements.
     // use std::auto_ptr for that instead of raw pointers.  actually it should
@@ -1066,6 +1070,7 @@ NOTE:
     // The address expression rtx as it is currently being used in the mem
     // rtx in the insn.
     rtx current_addr_rtx (void) const { return m_current_addr_rtx; }
+    void set_current_addr_rtx (const rtx x) { m_current_addr_rtx = x; }
 
     // The address expression that is currently being used.
     // Might be invalid if AMS was not able to understand it.
@@ -1073,6 +1078,7 @@ NOTE:
     void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
     machine_mode mach_mode (void) const { return m_machine_mode; }
+    void set_mach_mode (machine_mode m) { m_machine_mode = m; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
 
     virtual void update_cost (delegate& d, sequence& seq,
@@ -1080,9 +1086,16 @@ NOTE:
     virtual bool generate_new_insns (bool insn_sequence_started);
 
   protected:
-    mem_access (element_type t, rtx_insn* i, machine_mode m, rtx addr_rtx)
-    : sequence_element (t, i), m_current_addr (), m_current_addr_rtx (addr_rtx),
-      m_machine_mode (m)
+    mem_access (element_type t, rtx_insn* i, machine_mode m,
+                const addr_expr& addr, rtx addr_rtx)
+    : sequence_element (t, i), m_current_addr (addr),
+      m_current_addr_rtx (addr_rtx), m_machine_mode (m)
+    {
+    }
+
+    mem_access (element_type t, rtx_insn* i)
+    : sequence_element (t, i), m_current_addr (), m_current_addr_rtx (NULL),
+      m_machine_mode (Pmode)
     {
     }
 
@@ -1103,8 +1116,16 @@ NOTE:
   class mem_load : public mem_access
   {
   public:
-    mem_load (rtx_insn* i, machine_mode m, rtx* mem_ref, rtx addr_rtx)
-    : mem_access (type_mem_load, i, m, addr_rtx), m_mem_ref (mem_ref) { };
+    mem_load (rtx_insn* i, machine_mode m, rtx* mem_ref,
+              const addr_expr& addr, rtx addr_rtx)
+    : mem_access (type_mem_load, i, m, addr, addr_rtx), m_mem_ref (mem_ref)
+    {
+    };
+
+    mem_load (rtx_insn* i, rtx* mem_ref)
+    : mem_access (type_mem_load, i), m_mem_ref (mem_ref)
+    {
+    };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
@@ -1121,8 +1142,16 @@ NOTE:
   class mem_store : public mem_access
   {
   public:
-    mem_store (rtx_insn* i, machine_mode m, rtx* mem_ref, rtx addr_rtx)
-    : mem_access (type_mem_store, i, m, addr_rtx), m_mem_ref (mem_ref) { };
+    mem_store (rtx_insn* i, machine_mode m, rtx* mem_ref,
+               const addr_expr& addr, rtx addr_rtx)
+    : mem_access (type_mem_store, i, m, addr, addr_rtx), m_mem_ref (mem_ref)
+    {
+    };
+
+    mem_store (rtx_insn* i, rtx* mem_ref)
+    : mem_access (type_mem_store, i), m_mem_ref (mem_ref)
+    {
+    };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);
@@ -1143,9 +1172,16 @@ NOTE:
   {
   public:
     mem_operand (rtx_insn* i, machine_mode m,
-                 static_vector<rtx*, 16> mem_refs, rtx addr_rtx)
-      : mem_access (type_mem_operand, i, m, addr_rtx),
-      m_mem_refs (mem_refs) { };
+                 const static_vector<rtx*, 16>& mem_refs,
+                 const addr_expr& addr, rtx addr_rtx)
+    : mem_access (type_mem_operand, i, m, addr, addr_rtx), m_mem_refs (mem_refs)
+    {
+    };
+
+    mem_operand (rtx_insn* i, const static_vector<rtx*, 16>& mem_refs)
+    : mem_access (type_mem_operand, i), m_mem_refs (mem_refs)
+    {
+    };
 
     virtual bool try_replace_addr (const addr_expr& new_addr);
     virtual bool replace_addr (const addr_expr& new_addr);

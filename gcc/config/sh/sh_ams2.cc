@@ -1414,63 +1414,98 @@ sh_ams2::sequence::~sequence (void)
     }
 }
 
-// Find all mem accesses in the rtx X of the insn I and add them to the
-// sequence.  TYPE indicates the type of the next mem that we find
-// (i.e. mem_load, mem_store or mem_operand).
-// FIXME: Handle mem_operands properly.
+// Find all mem accesses in the insn I and add them to the sequence.
 void
-sh_ams2::sequence::find_mem_accesses (rtx_insn* i, rtx& x, element_type type)
+sh_ams2::sequence::find_mem_accesses (rtx_insn* i)
 {
-  static_vector<rtx*, 16> v;
-  ref_counting_ptr<mem_access> acc;
+  std::vector<std::pair<rtx*, element_type> > mems;
+  find_mem_accesses_1 (PATTERN (i), std::back_inserter (mems));
+  std::sort (mems.begin (), mems.end (), sort_found_mems);
 
+  for (std::vector<std::pair<rtx*, element_type> >::iterator
+         it = mems.begin (), prev = mems.begin ();
+       it != mems.end (); ++it)
+    {
+      std::vector<std::pair<rtx*, element_type> >::iterator next =
+        stdx::next (it);
+
+      if (!regs_equal (*it->first, *prev->first))
+        prev = it;
+      if (next == mems.end () || !regs_equal (*it->first, *next->first))
+        {
+          ref_counting_ptr<mem_access> acc;
+          rtx* mem_ref = it->first;
+          element_type type = it->second;
+
+          if (it != prev)
+            {
+              static_vector<rtx*, 16> v;
+              for (std::vector<std::pair<rtx*, element_type> >::iterator
+                     refs = prev; refs != next; ++refs)
+                v.push_back (refs->first);
+              acc = make_ref_counted<mem_operand> (i, v);
+            }
+          else if (type == type_mem_load)
+            acc = make_ref_counted<mem_load> (i, mem_ref);
+          else if (type == type_mem_store)
+            acc = make_ref_counted<mem_store> (i, mem_ref);
+          else
+            gcc_unreachable ();
+
+          acc->set_mach_mode (GET_MODE (*mem_ref));
+          acc->set_current_addr_rtx (XEXP (*mem_ref, 0));
+          acc->set_current_addr (rtx_to_addr_expr (XEXP (*mem_ref, 0),
+                                                   GET_MODE (*mem_ref)));
+          insert_element (acc, end ());
+        }
+    }
+}
+
+// The recursive part of find_mem_accesses. Find all mem accesses
+// in X and add them to OUT, along with their type (mem_load or mem_store).
+// TYPE indicates the type of the next mem that we find.
+template <typename OutputIterator> void
+sh_ams2::sequence::find_mem_accesses_1 (rtx& x, OutputIterator out,
+                                        element_type type)
+{
   switch (GET_CODE (x))
     {
     case MEM:
-
-      switch (type)
-        {
-        case type_mem_load:
-          acc = make_ref_counted<mem_load> (i, GET_MODE (x), &x, XEXP (x, 0));
-          break;
-        case type_mem_store:
-          acc = make_ref_counted<mem_store> (i, GET_MODE (x), &x, XEXP (x, 0));
-          break;
-        case type_mem_operand:
-          v.push_back (&x);
-          acc = make_ref_counted<mem_operand> (i, GET_MODE (x), v, XEXP (x, 0));
-          break;
-        default:
-          gcc_unreachable ();
-        }
-
-      acc->set_current_addr (rtx_to_addr_expr (XEXP (x, 0), GET_MODE (x)));
-      insert_element (acc, end ());
-      break;
+      *out++ = std::make_pair (&x, type);
+      return;
 
     case PARALLEL:
     case UNSPEC:
+    case UNSPEC_VOLATILE:
       for (int j = 0; j < XVECLEN (x, 0); j++)
-        find_mem_accesses (i, XVECEXP (x, 0, j), type);
+        find_mem_accesses_1 (XVECEXP (x, 0, j), out, type);
       break;
 
     case SET:
-      find_mem_accesses (i, SET_DEST (x), type_mem_store);
-      find_mem_accesses (i, SET_SRC (x), type_mem_load);
+      find_mem_accesses_1 (SET_DEST (x), out, type_mem_store);
+      find_mem_accesses_1 (SET_SRC (x), out, type_mem_load);
       break;
 
     case CALL:
-      find_mem_accesses (i, XEXP (x, 0), type_mem_load);
+      find_mem_accesses_1 (XEXP (x, 0), out, type_mem_load);
       break;
 
     default:
       if (UNARY_P (x) || ARITHMETIC_P (x))
         {
           for (int j = 0; j < GET_RTX_LENGTH (GET_CODE (x)); j++)
-            find_mem_accesses (i, XEXP (x, j), type);
+            find_mem_accesses_1 (XEXP (x, j), out, type);
         }
       break;
     }
+}
+
+// Comparison function used to sort the found mems in find_mem_accesses.
+bool
+sh_ams2::sequence::sort_found_mems (const std::pair<rtx*, element_type>& a,
+                                    const std::pair<rtx*, element_type>& b)
+{
+  return REGNO (*a.first) < REGNO (*b.first);
 }
 
 // Add a reg mod for every insn that modifies an address register.
@@ -2782,6 +2817,7 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
 
     case PARALLEL:
     case UNSPEC:
+    case UNSPEC_VOLATILE:
       for (int i = 0; i < XVECLEN (x, 0); i++)
 	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out);
       break;
@@ -3736,32 +3772,28 @@ bool
 sh_ams2::mem_operand::replace_addr (const sh_ams2::addr_expr& new_addr)
 {
   rtx new_rtx = new_addr.to_rtx ();
-  bool r = true;
+    start_sequence ();
   for (static_vector<rtx*, 16>::iterator it = m_mem_refs.begin ();
        it != m_mem_refs.end (); ++it)
+    validate_change (insn (), *it, replace_equiv_address (**it, new_rtx), true);
+
+  if (!apply_change_group ())
     {
-      start_sequence ();
-      r &= !validate_change (insn (),
-                             *it, replace_equiv_address (**it, new_rtx), true);
-      if (!r)
-        break;
+      end_sequence ();
+      return false;
     }
 
-  if (!r)
-    return false;
-
-  apply_change_group ();
   rtx_insn* new_insns = get_insns ();
   end_sequence ();
 
-  if (r && !mem_access::allow_new_insns && new_insns != NULL)
+  if (!mem_access::allow_new_insns && new_insns != NULL)
     {
       log_msg ("validate_change produced new insns: \n");
       log_rtx (new_insns);
       abort ();
     }
 
-  if (r && new_insns != NULL)
+  if (new_insns != NULL)
     emit_insn_before (new_insns, insn ());
 
   return true;
@@ -4193,7 +4225,7 @@ sh_ams2::execute (function* fun)
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
             continue;
 
-          seq.find_mem_accesses (i, PATTERN (i));
+          seq.find_mem_accesses (i);
          }
 
       for (mem_acc_iter m_it = seq.begin<mem_match> (),
