@@ -2635,6 +2635,7 @@ sh_ams2::sequence::eliminate_reg_copies (void)
 {
   typedef std::multimap<rtx, reg_copy, cmp_by_regno> reg_copy_map;
   reg_copy_map reg_copies;
+  // FIXME: Use a bitvector instead.
   std::set<rtx_insn*> visited_insns;
   rtx_insn* prev_insn = BB_HEAD (start_bb ());
 
