@@ -73,6 +73,7 @@
 #include "trv_iterator.h"
 #include "static_vector.h"
 #include "ref_counted.h"
+#include "tmp_rtx.h"
 
 class sh_ams2 : public rtl_opt_pass
 {
@@ -740,7 +741,7 @@ public:
                            delegate& dlg,
                            std::set<reg_mod*>& used_reg_mods,
                            std::map<rtx, reg_mod*, cmp_by_regno>&
-                             visited_reg_mods,
+                             visited_reg_mods, unsigned* next_tmp_regno,
                            int lookahead_num, bool record_in_sequence = true);
 
     std::pair<int, reg_mod*>
@@ -750,7 +751,7 @@ public:
                               addr_type_t addr_type,
                               delegate& dlg, std::set<reg_mod*>& used_reg_mods,
                               std::map<rtx, reg_mod*, cmp_by_regno>&
-                                visited_reg_mods);
+                                visited_reg_mods, unsigned* next_tmp_regno);
 
     void insert_address_mods (const alternative& alt,
                               reg_mod* base_start_addr,
@@ -761,7 +762,7 @@ public:
                               std::set<reg_mod*>& used_reg_mods,
                               std::map<rtx, reg_mod*, cmp_by_regno>&
                                 visited_reg_mods,
-                              delegate& dlg);
+                              delegate& dlg, unsigned* next_tmp_regno);
 
     mod_addr_result
     try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
@@ -771,7 +772,7 @@ public:
                              std::set<reg_mod*>& used_reg_mods,
                              std::map<rtx, reg_mod*, cmp_by_regno>&
                                visited_reg_mods,
-                             delegate& dlg);
+                             delegate& dlg, unsigned* next_tmp_regno);
 
     reg_mod*
     insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
@@ -779,7 +780,7 @@ public:
                      const addr_expr& effective_addr,
                      iterator el, mod_tracker& tracker,
                      std::set<reg_mod*>& used_reg_mods,
-                     delegate& dlg);
+                     delegate& dlg, unsigned* next_tmp_regno);
 
     reg_mod* find_start_addr_for_reg (
       rtx reg, std::set<reg_mod*>& used_reg_mods,
@@ -1201,16 +1202,30 @@ NOTE:
   public:
     reg_mod (rtx_insn* i, rtx r, rtx v, const addr_expr& a = addr_expr (),
 	     const addr_expr& ea = addr_expr (), mem_access* ma = NULL)
-    : sequence_element (type_reg_mod, i, ea), m_reg (r), m_value (v),
-      m_current_addr (a), m_auto_mod_acc (ma)
+      : sequence_element (type_reg_mod, i, ea), m_tmp_reg (Pmode, ~0u),
+      m_reg (r), m_value (v), m_current_addr (a), m_auto_mod_acc (ma)
+    {
+    }
+
+    reg_mod (rtx_insn* i, unsigned tmp_regno, machine_mode tmp_mode, rtx v,
+             const addr_expr& a = addr_expr (),
+	     const addr_expr& ea = addr_expr (), mem_access* ma = NULL)
+      : sequence_element (type_reg_mod, i, ea), m_tmp_reg (tmp_mode, tmp_regno),
+      m_reg (m_tmp_reg), m_value (v), m_current_addr (a), m_auto_mod_acc (ma)
     {
     }
 
     virtual bool operator == (const sequence_element& other) const;
     virtual bool can_be_optimized (void) const;
 
+    // A temporary reg RTX that isn't garbage-collected. Used for storing
+    // the address reg of reg-mods that only exist temporarily (e.g. during
+    // address mod generation).
+    const tmp_rtx<REG>& tmp_reg (void) const { return m_tmp_reg; }
+
     // The address reg that is being modified / defined.
     rtx reg (void) const { return m_reg; }
+    void set_reg (const rtx reg) { m_reg = reg; }
 
     // The rtx the reg is being set to.
     rtx value (void) const { return m_value; }
@@ -1230,6 +1245,7 @@ NOTE:
     virtual bool generate_new_insns (bool insn_sequence_started);
 
   private:
+    tmp_rtx<REG> m_tmp_reg;
     rtx m_reg;
     rtx m_value;
     addr_expr m_current_addr;
