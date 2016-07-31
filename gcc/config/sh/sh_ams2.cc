@@ -63,6 +63,8 @@
 
 #include "sh-protos.h"
 
+#include "tmp_rtx.h"
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 // Helper functions
 
@@ -1008,26 +1010,30 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
 
   // Scaling costs
   if (ae.has_no_base_reg () && ae.has_index_reg () && ae.scale () != 1)
-    cost += d.addr_reg_mod_cost (reg (), gen_rtx_MULT (Pmode, ae.index_reg (),
-						       GEN_INT (ae.scale ())),
-				 seq, el_it);
+    cost += d.addr_reg_mod_cost (reg (),
+			tmp_rtx<MULT> (Pmode, ae.index_reg (),
+				       tmp_rtx<CONST_INT> (ae.scale ())),
+			seq, el_it);
 
   // Costs for adding or subtracting another reg
   else if (ae.has_no_disp () && std::abs (ae.scale ()) == 1
            && ae.has_base_reg () && ae.has_index_reg ())
-    cost += d.addr_reg_mod_cost (reg (), gen_rtx_PLUS (Pmode, ae.index_reg (),
-						       ae.base_reg ()),
+    cost += d.addr_reg_mod_cost (reg (),
+				 tmp_rtx<PLUS> (Pmode, ae.index_reg (),
+						   ae.base_reg ()),
 				 seq, el_it);
 
   // Constant displacement costs
   else if (ae.has_base_reg () && ae.has_no_index_reg () && ae.has_disp ())
-    cost += d.addr_reg_mod_cost (reg (), gen_rtx_PLUS (Pmode, ae.base_reg (),
-						       GEN_INT (ae.disp ())),
+    cost += d.addr_reg_mod_cost (reg (),
+				 tmp_rtx<PLUS> (Pmode, ae.base_reg (),
+						tmp_rtx<CONST_INT> (ae.disp ())),
 				 seq, el_it);
 
   // Constant loading costs
   else if (ae.has_no_base_reg () && ae.has_no_index_reg ())
-    cost += d.addr_reg_mod_cost (reg (), GEN_INT (ae.disp ()), seq, el_it);
+    cost += d.addr_reg_mod_cost (reg (), tmp_rtx<CONST_INT> (ae.disp ()),
+				 seq, el_it);
 
   // If none of the previous branches were taken, the reg-mod
   // is a (reg <- reg) copy, and doesn't have any modification cost.
@@ -1104,10 +1110,8 @@ sh_ams2::reg_use::update_cost (delegate& d, sequence& seq,
 
   // Get the cost of the constant displacement.
   set_cost (d.addr_reg_mod_cost (
-    gen_reg_rtx (GET_MODE (m_reg)),
-    gen_rtx_PLUS (GET_MODE (m_reg),
-                  m_current_addr.base_reg (),
-                  GEN_INT (m_current_addr.disp ())),
+    m_reg, tmp_rtx<PLUS> (GET_MODE (m_reg), m_current_addr.base_reg (),
+			  tmp_rtx<CONST_INT> (m_current_addr.disp ())),
     seq, el_it));
 }
 
@@ -2105,6 +2109,8 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
   // the reg directly.
   if (end_addr.regs_empty ())
     {
+      // FIXME: use a wrapper for regs.  lower them to real rtx regs before
+      // committing the changes.
       rtx const_reg = gen_reg_rtx (acc_mode);
 
       reg_mod* const_load = as_a<reg_mod*> (&*insert_element (
@@ -2118,7 +2124,8 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
                                           addr_type, acc_mode, el,
                                           tracker, used_reg_mods,
                                           visited_reg_mods, dlg).cost;
-      cost += dlg.addr_reg_mod_cost (const_reg, GEN_INT (end_addr.disp ()),
+      cost += dlg.addr_reg_mod_cost (const_reg,
+				     tmp_rtx<CONST_INT> (end_addr.disp ()),
                                      *this, begin ());
 
       tracker.reset_changes ();
@@ -2549,6 +2556,8 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
       tracker.use_changed_reg_mods ().push_back (used_rm);
     }
 
+  // FIXME: use a wrapper for regs.  lower them to real rtx regs before
+  // committing the changes.
   iterator i = insert_element (
 	make_ref_counted<reg_mod> ((rtx_insn*)NULL, gen_reg_rtx (acc_mode),
 				   NULL_RTX, curr_addr, effective_addr), el);
@@ -3246,7 +3255,7 @@ sh_ams2::mem_access::update_access_alternatives (const sequence& seq,
       // Alternatives might have reg placeholders such as any_regno.
       // When validating the change in the insn we need to have real pseudos.
       // To avoid creating a lot of pseudos, use this one.
-      rtx tmp_reg = gen_rtx_REG (Pmode, LAST_VIRTUAL_REGISTER + 1);
+      tmp_rtx<REG> tmp_reg (Pmode, LAST_VIRTUAL_REGISTER + 1);
 
       addr_expr tmp_addr;
 
