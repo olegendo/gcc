@@ -2368,8 +2368,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
       scale_t scale = sr.quot;
 
       start_addr = insert_addr_mod (start_addr, acc_mode,
-                                    gen_rtx_MULT (acc_mode, start_addr->reg (),
-                                                  GEN_INT (scale)),
+                                    tmp_rtx<MULT> (acc_mode, start_addr->reg (),
+                                                   tmp_rtx<CONST_INT> (scale)),
                                     non_mod_addr (invalid_regno,
                                                   start_addr->reg (),
                                                   scale, 0),
@@ -2399,8 +2399,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
 
       reg_mod* new_addr
         = insert_addr_mod (index_reg_addr, acc_mode,
-                           gen_rtx_PLUS (acc_mode, start_addr->reg (),
-                                         index_reg_addr->reg ()),
+                           tmp_rtx<PLUS> (acc_mode, start_addr->reg (),
+                                          index_reg_addr->reg ()),
                            non_mod_addr (start_addr->reg (),
                                          index_reg_addr->reg (),
                                          -1, 0),
@@ -2439,8 +2439,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
 
       reg_mod* new_addr
         = insert_addr_mod (base_reg_addr, acc_mode,
-                           gen_rtx_PLUS (acc_mode, base_reg_addr->reg (),
-                                         start_addr->reg ()),
+                           tmp_rtx<PLUS> (acc_mode, base_reg_addr->reg (),
+                                          start_addr->reg ()),
                            non_mod_addr (base_reg_addr->reg (),
                                          start_addr->reg (), 1, 0),
                            non_mod_addr (c_end_addr.base_reg (),
@@ -2493,8 +2493,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
         disp = alt_disp;
 
       start_addr = insert_addr_mod (start_addr, acc_mode,
-                                    gen_rtx_PLUS (acc_mode, start_addr->reg (),
-                                                  GEN_INT (disp)),
+                                    tmp_rtx<PLUS> (acc_mode, start_addr->reg (),
+                                                   tmp_rtx<CONST_INT> (disp)),
                                     non_mod_addr (start_addr->reg (),
                                                   invalid_regno, 1, disp),
                                     non_mod_addr (c_end_addr.base_reg (),
