@@ -787,7 +787,8 @@ public:
 
     std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void
-    find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out);
+    find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out,
+                          bool check_every_rtx = false);
 
     template <typename OutputIterator> void
     find_mem_accesses_1 (rtx& x, OutputIterator out,

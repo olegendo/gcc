@@ -2809,9 +2809,11 @@ sh_ams2::sequence::update_insn_stream (void)
 }
 
 // The recursive part of find_addr_reg_uses. Find all references to REG
-// in X and add them to OUT.
+// in X and add them to OUT. CHECK_EVERY_RTX indicates whether all
+// sub-rtxes of X should be traversed.
 template <typename OutputIterator> void
-sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
+sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out,
+                                         bool check_every_rtx)
 {
   switch (GET_CODE (x))
     {
@@ -2828,7 +2830,7 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
     case UNSPEC:
     case UNSPEC_VOLATILE:
       for (int i = 0; i < XVECLEN (x, 0); i++)
-	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out);
+	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out, check_every_rtx);
       break;
 
     case SET:
@@ -2837,7 +2839,7 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
       if (m_addr_regs.find (SET_DEST (x)) != m_addr_regs.end ())
         return;
 
-      find_addr_reg_uses_1 (reg, SET_SRC (x), out);
+      find_addr_reg_uses_1 (reg, SET_SRC (x), out, true);
       break;
 
     default:
@@ -2855,9 +2857,9 @@ sh_ams2::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out)
             }
 
 	  for (int i = 0; i < GET_RTX_LENGTH (GET_CODE (x)); i++)
-	    find_addr_reg_uses_1 (reg, XEXP (x, i), out);
+	    find_addr_reg_uses_1 (reg, XEXP (x, i), out, check_every_rtx);
         }
-      else
+      else if (check_every_rtx)
         {
           subrtx_ptr_iterator::array_type array;
           FOR_EACH_SUBRTX_PTR (it, array, &x, NONCONST)
