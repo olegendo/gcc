@@ -1879,12 +1879,6 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
       // with permanent ones.
       if (rm->reg () == rm->tmp_reg ())
         {
-          addr_reg_map::iterator reg_in_map = m_addr_regs.find (rm->reg ());
-          if (reg_in_map->second <= 1)
-            m_addr_regs.erase (reg_in_map);
-          else
-            --reg_in_map->second;
-
           rtx new_reg = gen_reg_rtx (GET_MODE (rm->reg ()));
           reg_replacements[rm->reg ()] = new_reg;
           rm->set_reg (new_reg);
@@ -3006,7 +3000,10 @@ sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
   // Update the address reg and the start address list.
   if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
     {
-      ++m_addr_regs[rm->reg ()];
+      // Only permanent registers are placed into the
+      // address regs list.
+      if (rm->reg () != rm->tmp_reg ())
+          ++m_addr_regs[rm->reg ()];
       m_start_addr_list.add (rm);
     }
 
@@ -3130,10 +3127,13 @@ sh_ams2::sequence::remove_element (iterator el, bool clear_deps)
   // Update the address reg and the start address list.
   if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
     {
-      addr_reg_map::iterator addr_reg = m_addr_regs.find (rm->reg ());
-      --addr_reg->second;
-      if (addr_reg->second == 0)
-        m_addr_regs.erase (addr_reg);
+      if (rm->reg () != rm->tmp_reg ())
+        {
+          addr_reg_map::iterator addr_reg = m_addr_regs.find (rm->reg ());
+          --addr_reg->second;
+          if (addr_reg->second == 0)
+            m_addr_regs.erase (addr_reg);
+        }
 
       m_start_addr_list.remove (rm);
     }
