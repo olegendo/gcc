@@ -1180,16 +1180,17 @@ private:
 class sh_ams2::find_reg_value_result
 {
 public:
+  rtx reg;
   rtx value;
   rtx_insn* insn;
   mem_access* acc;
   reg_mod* rm;
 
-  find_reg_value_result (rtx v, rtx_insn* i, mem_access* a = NULL)
-  : value (v), insn (i), acc (a), rm (NULL) { }
+  find_reg_value_result (rtx r, rtx v, rtx_insn* i, mem_access* a = NULL)
+  : reg (r), value (v), insn (i), acc (a), rm (NULL) { }
 
   find_reg_value_result (reg_mod* r, rtx_insn* i)
-  : value (NULL), insn (i), acc (NULL), rm (r) { }
+  : reg (r->reg ()), value (NULL), insn (i), acc (NULL), rm (r) { }
 };
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
@@ -1543,7 +1544,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
 		: rtx_to_addr_expr (prev.value);
 
               new_reg_mod = as_a<reg_mod*> (&*insert_unique (
-		    make_ref_counted<reg_mod> (prev.insn, reg, prev.value,
+		    make_ref_counted<reg_mod> (prev.insn, prev.reg, prev.value,
                                                reg_current_addr)));
 
               addr_expr reg_effective_addr =
@@ -1610,7 +1611,8 @@ sh_ams2::sequence::find_addr_reg_uses (void)
               addr_expr use_expr = rtx_to_addr_expr (*use_ref);
 
 	      reg_use* new_reg_use = as_a<reg_use*> (&*insert_unique (
-		    make_ref_counted<reg_use> (i, *regs, use_ref, use_expr)));
+		    make_ref_counted<reg_use> (i, use_expr.base_reg (),
+                                               use_ref, use_expr)));
 
 	      addr_expr effective_addr = rtx_to_addr_expr (*regs, Pmode, this,
 							   new_reg_use);
@@ -3627,11 +3629,9 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
   for (i = start_insn; i != NULL_RTX; i = prev_nonnote_insn_bb (i))
     {
       if (BARRIER_P (i))
-	return find_reg_value_result (NULL_RTX, i);
+	return find_reg_value_result (reg, NULL_RTX, i);
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
-      if (reg_set_p (reg, i) && CALL_P (i))
-	return find_reg_value_result (NULL_RTX, i);
 
       std::pair<insn_map::iterator, insn_map::iterator> els_in_insn =
         elements_in_insn (i);
@@ -3671,12 +3671,13 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
                       dyn_cast<mem_access*> (&*els->second))
                     {
                       rtx mem_addr = acc->current_addr_rtx ();
+                      rtx mem_reg = XEXP (mem_addr, 0);
                       rtx_code code = GET_CODE (mem_addr);
 
                       if (GET_RTX_CLASS (code) == RTX_AUTOINC
-                          && REG_P (XEXP (mem_addr, 0))
-                          && regs_equal (XEXP (mem_addr, 0), reg))
-                        return find_reg_value_result (mem_addr, i, acc);
+                          && REG_P (mem_reg) && regs_equal (mem_reg, reg))
+                        return find_reg_value_result (mem_reg, mem_addr,
+                                                      i, acc);
                     }
                 }
               gcc_unreachable ();
@@ -3684,19 +3685,20 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
           else
             {
               // The reg is modified in some unspecified way, e.g. a clobber.
-              return find_reg_value_result (NULL_RTX, i);
+              return find_reg_value_result (reg, NULL_RTX, i);
             }
         }
       else
         {
           if (GET_CODE (r.first) == SET)
-            return find_reg_value_result (SET_SRC (r.first), i);
+            return find_reg_value_result (SET_DEST (r.first),
+                                          SET_SRC (r.first), i);
           else
-            return find_reg_value_result (NULL_RTX, i);
+            return find_reg_value_result (reg, NULL_RTX, i);
         }
     }
 
-  return find_reg_value_result (reg, i);
+  return find_reg_value_result (reg, reg, i);
 }
 
 // The recursive part of find_reg_value. If REG is modified in INSN,
@@ -3717,6 +3719,10 @@ sh_ams2::sequence::find_reg_value_1 (rtx reg, const_rtx insn)
       return std::make_pair (NULL_RTX, false);
     }
 
+  rtx r = const_cast<rtx> (set_of (reg, insn));
+  if (r != NULL)
+    return std::make_pair (r, true);
+
   if (INSN_P (insn)
       && (FIND_REG_INC_NOTE (insn, reg)
           || (CALL_P (insn)
@@ -3727,8 +3733,7 @@ sh_ams2::sequence::find_reg_value_1 (rtx reg, const_rtx insn)
                   || find_reg_fusage (insn, CLOBBER, reg)))))
     return std::make_pair (NULL_RTX, true);
 
-  rtx r = const_cast<rtx> (set_of (reg, insn));
-  return std::make_pair (r, r != NULL);
+  return std::make_pair (NULL_RTX, false);
 }
 
 bool
@@ -4078,7 +4083,8 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 
 	  // Insert the modifying insn into the sequence as a reg mod.
 	  reg_mod* new_reg_mod = as_a<reg_mod*> (&*seq->insert_unique (
-		make_ref_counted<reg_mod> (mod_insn, x, value, reg_curr_addr)));
+		make_ref_counted<reg_mod> (mod_insn, prev_val.reg, value,
+                                           reg_curr_addr)));
 
 	  el->add_dependency (new_reg_mod);
 	  new_reg_mod->add_dependent_el (el);
