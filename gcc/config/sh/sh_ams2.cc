@@ -1423,15 +1423,15 @@ sh_ams2::sequence::~sequence (void)
 void
 sh_ams2::sequence::find_mem_accesses (rtx_insn* i)
 {
-  std::vector<std::pair<rtx*, element_type> > mems;
+  static_vector<std::pair<rtx*, element_type>, 16> mems;
   find_mem_accesses_1 (PATTERN (i), std::back_inserter (mems));
   std::sort (mems.begin (), mems.end (), sort_found_mems);
 
-  for (std::vector<std::pair<rtx*, element_type> >::iterator
+  for (static_vector<std::pair<rtx*, element_type>, 16>::iterator
          it = mems.begin (), prev = mems.begin ();
        it != mems.end (); ++it)
     {
-      std::vector<std::pair<rtx*, element_type> >::iterator next =
+      static_vector<std::pair<rtx*, element_type>, 16>::iterator next =
         stdx::next (it);
 
       if (!regs_equal (*it->first, *prev->first))
@@ -1445,8 +1445,8 @@ sh_ams2::sequence::find_mem_accesses (rtx_insn* i)
           if (it != prev)
             {
               static_vector<rtx*, 16> v;
-              for (std::vector<std::pair<rtx*, element_type> >::iterator
-                     refs = prev; refs != next; ++refs)
+              for (static_vector<std::pair<rtx*, element_type>, 16>
+                     ::iterator refs = prev; refs != next; ++refs)
                 v.push_back (refs->first);
               acc = make_ref_counted<mem_operand> (i, v);
             }
