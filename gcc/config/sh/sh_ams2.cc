@@ -4521,6 +4521,13 @@ sh_ams2::execute (function* fun)
         }
       else if (i->insn ())
         {
+          if (!NONJUMP_INSN_P (i->insn ()))
+            {
+              log_msg ("reg-mod's insn is a jump or call\n");
+              log_msg ("keeping insn\n");
+              goto next;
+            }
+
           // Also keep the insn if it has other sequence elements in it.
           for (std::set<sequence*>::iterator seqs = i->sequences ().begin ();
                seqs != i->sequences ().end (); ++seqs)
