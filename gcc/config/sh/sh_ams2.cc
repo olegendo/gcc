@@ -3734,7 +3734,7 @@ sh_ams2::sequence::find_reg_value_1 (rtx reg, const_rtx insn)
     }
 
   rtx r = const_cast<rtx> (set_of (reg, insn));
-  if (r != NULL)
+  if (r != NULL && regs_equal (SET_DEST (r), reg))
     return std::make_pair (r, true);
 
   if (INSN_P (insn)
