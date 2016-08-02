@@ -588,6 +588,7 @@ public:
 
 
     typedef std::multimap<rtx_insn*, iterator> insn_map;
+    typedef std::multimap<rtx_insn*, sequence_element*> glob_insn_map;
 
     // Split the access sequence pointed to by SEQ into multiple sequences,
     // grouping the accesses that have common terms in their effective address
@@ -595,7 +596,12 @@ public:
     // inserted sequences.
     static std::list<sequence>::iterator
     split (std::list<sequence>::iterator seq_it,
-           std::list<sequence>& sequences);
+           std::list<sequence>& sequences,
+           glob_insn_map& g_insn_el_map);
+
+    sequence (glob_insn_map& m): m_glob_insn_el_map (m)
+    {
+    }
 
     ~sequence (void);
 
@@ -807,6 +813,9 @@ public:
     std::list<ref_counting_ptr<sequence_element> > m_els;
     addr_reg_map m_addr_regs;
     insn_map m_insn_el_map;
+
+    // A reference to the global insn->element map.
+    glob_insn_map& m_glob_insn_el_map;
     start_addr_list m_start_addr_list;
 
   };

@@ -1265,7 +1265,8 @@ sh_ams2::start_addr_list::remove (reg_mod* start_addr)
 // inserted sequences.
 std::list<sh_ams2::sequence>::iterator
 sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
-                          std::list<sequence>& sequences)
+                          std::list<sequence>& sequences,
+                          glob_insn_map& g_insn_el_map)
 {
   typedef std::map<sequence_element*, sequence*> element_to_seq_map;
   typedef std::map<addr_expr, shared_term, addr_expr::compare> shared_term_map;
@@ -1345,7 +1346,8 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 	  {
 	    if (!term.new_seq ())
               {
-                term.set_new_seq (&(*sequences.insert (seq_it, sequence ())));
+                term.set_new_seq (
+                  &(*sequences.insert (seq_it, sequence (g_insn_el_map))));
                 new_seqs.push_back (term.new_seq ());
               }
 	    element_new_seqs[*el] = term.new_seq ();
@@ -2997,7 +2999,10 @@ sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
 
   // Update the insn -> element map.
   if (el->insn ())
+    {
       m_insn_el_map.insert (std::make_pair (el->insn (), i));
+      m_glob_insn_el_map.insert (std::make_pair (el->insn (), &*i));
+    }
 
   // Update the address reg and the start address list.
   if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
@@ -3122,6 +3127,15 @@ sh_ams2::sequence::remove_element (iterator el, bool clear_deps)
 	if (it->second == el)
 	  {
 	    m_insn_el_map.erase (it);
+	    break;
+	  }
+      std::pair<glob_insn_map::iterator, glob_insn_map::iterator> glob_range
+        = m_glob_insn_el_map.equal_range (el->insn ());
+      for (glob_insn_map::iterator it = glob_range.first;
+           it != glob_range.second; ++it)
+	if (it->second == &*el)
+	  {
+	    m_glob_insn_el_map.erase (it);
 	    break;
 	  }
     }
@@ -4298,6 +4312,9 @@ sh_ams2::execute (function* fun)
 
   std::list<sequence> sequences;
 
+  // A map that shows which sequence elements an insn contains.
+  sequence::glob_insn_map insn_el_map;
+
   log_msg ("extracting access sequences\n");
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
@@ -4308,7 +4325,7 @@ sh_ams2::execute (function* fun)
       log_msg ("finding mem accesses\n");
 
       // Create a new sequence from the mem accesses in this BB.
-      sequences.push_back (sequence ());
+      sequences.push_back (sequence (insn_el_map));
       sequence& seq = sequences.back ();
 
       FOR_BB_INSNS (bb, i)
@@ -4370,7 +4387,7 @@ sh_ams2::execute (function* fun)
 
       log_msg ("split_access_sequence\n");
       if (m_options.split_sequences)
-        it = sequence::split (it, sequences);
+        it = sequence::split (it, sequences, insn_el_map);
       else
         ++it;
     }
@@ -4529,24 +4546,21 @@ sh_ams2::execute (function* fun)
             }
 
           // Also keep the insn if it has other sequence elements in it.
-          for (std::set<sequence*>::iterator seqs = i->sequences ().begin ();
-               seqs != i->sequences ().end (); ++seqs)
+          std::pair<sequence::glob_insn_map::iterator,
+                    sequence::glob_insn_map::iterator> els_in_insn =
+            insn_el_map.equal_range (i->insn ());
+          for (sequence::glob_insn_map::iterator els = els_in_insn.first;
+               els != els_in_insn.second; ++els)
             {
-              std::pair<sequence::insn_map::iterator, sequence::insn_map::iterator>
-                els_in_insn = (*seqs)->elements_in_insn (i->insn ());
-              for (sequence::insn_map::iterator els = els_in_insn.first;
-                   els != els_in_insn.second; ++els)
+              if (els->second != &*i
+                  // For unspecified reg-uses it doesn't matter
+                  // whether the insn exists, so we can remove it.
+                  && (els->second->type () != type_reg_use
+                      || ((reg_use*)&*els->second)->reg_ref () != NULL))
                 {
-                  if (&*els->second != &*i
-                      // For unspecified reg-uses it doesn't matter
-                      // whether the insn exists, so we can remove it.
-                      && (els->second->type () != type_reg_use
-                          || ((reg_use*)&*els->second)->reg_ref () != NULL))
-                    {
-                      log_msg ("reg-mod's insn has other elements\n");
-                      log_msg ("keeping insn\n");
-                      goto next;
-                    }
+                  log_msg ("reg-mod's insn has other elements\n");
+                  log_msg ("keeping insn\n");
+                  goto next;
                 }
             }
           for (std::set<sequence*>::iterator seqs = i->sequences ().begin ();
