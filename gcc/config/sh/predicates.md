@@ -479,6 +479,16 @@
        (and (match_test "! TARGET_SHMEDIA")
 	    (match_operand 0 "arith_reg_operand"))))
 
+;; Retuens true if OP can be used as a memory operand in the stack
+;; protector patterns.  Because of multiple loads/stores in the patterns,
+;; it's difficult to guarantee that R0 will be available as a load/store
+;; target/source register.  Thus generally avoid such modes that would have
+;; a strong R0 constraint in some way.
+(define_predicate "stack_protector_mem_operand"
+  (ior (match_operand 0 "displacement_mem_operand")
+       (match_operand 0 "simple_mem_operand")
+       (match_operand 0 "post_inc_mem")))
+
 ;; Returns 1 if OP can be source of a simple move operation. Same as
 ;; general_operand, but a LABEL_REF is valid, PRE_DEC is invalid as
 ;; are subregs of system registers.

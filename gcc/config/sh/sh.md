@@ -16517,8 +16517,8 @@ label:
 ;; -------------------------------------------------------------------------
 
 (define_expand "stack_protect_set"
-  [(set (match_operand 0 "memory_operand" "")
-	(match_operand 1 "memory_operand" ""))]
+  [(set (match_operand 0 "stack_protector_mem_operand")
+	(match_operand 1 "stack_protector_mem_operand"))]
   ""
 {
   if (TARGET_SHMEDIA)
@@ -16535,8 +16535,10 @@ label:
 })
 
 (define_insn "stack_protect_set_si"
-  [(set (match_operand:SI 0 "memory_operand" "=m")
-	(unspec:SI [(match_operand:SI 1 "memory_operand" "m")] UNSPEC_SP_SET))
+  [(set (match_operand:SI 0 "stack_protector_mem_operand" "=SraSdd>")
+	(unspec:SI [
+	   (match_operand:SI 1 "stack_protector_mem_operand" "SraSdd>")]
+	 UNSPEC_SP_SET))
    (set (match_scratch:SI 2 "=&r") (const_int 0))]
   "!TARGET_SHMEDIA"
 {
@@ -16545,7 +16547,8 @@ label:
 	 "	mov	#0,%2";
 }
   [(set_attr "type" "other")
-   (set_attr "length" "6")])
+   (set_attr "length" "6")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "stack_protect_set_si_media"
   [(set (match_operand:SI 0 "memory_operand" "=m")
@@ -16574,9 +16577,9 @@ label:
    (set_attr "length" "12")])
 
 (define_expand "stack_protect_test"
-  [(match_operand 0 "memory_operand" "")
-   (match_operand 1 "memory_operand" "")
-   (match_operand 2 "" "")]
+  [(match_operand 0 "stack_protector_mem_operand")
+   (match_operand 1 "stack_protector_mem_operand")
+   (match_operand 2)]
   ""
 {
   if (TARGET_SHMEDIA)
@@ -16609,9 +16612,10 @@ label:
 
 (define_insn "stack_protect_test_si"
   [(set (reg:SI T_REG)
-	(unspec:SI [(match_operand:SI 0 "memory_operand" "m")
-		    (match_operand:SI 1 "memory_operand" "m")]
-		   UNSPEC_SP_TEST))
+	(unspec:SI [
+	   (match_operand:SI 0 "stack_protector_mem_operand" "SraSdd>")
+	   (match_operand:SI 1 "stack_protector_mem_operand" "SraSdd>")]
+	 UNSPEC_SP_TEST))
   (set (match_scratch:SI 2 "=&r") (const_int 0))
   (set (match_scratch:SI 3 "=&r") (const_int 0))]
   "!TARGET_SHMEDIA"
@@ -16623,7 +16627,8 @@ label:
 	 "	mov	#0,%3";
 }
   [(set_attr "type" "other")
-   (set_attr "length" "10")])
+   (set_attr "length" "10")
+   (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "stack_protect_test_si_media"
   [(set (match_operand:SI 0 "register_operand" "=&r")
