@@ -1821,6 +1821,33 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 	    el->set_optimization_disabled ();
 	    break;
 	  }
+
+      // Don't optimize those accesses that use regs with
+      // a different macihine mode.
+      if (el->optimization_enabled ())
+        {
+          machine_mode acc_mode;
+          if (el->is_mem_access ())
+            acc_mode = Pmode;
+          else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
+            acc_mode = GET_MODE (ru->reg ());
+          else
+            continue;
+
+          for (sequence_element::dependency_list::iterator deps =
+                 el->dependencies ().begin ();
+               deps != el->dependencies ().end (); ++deps)
+            {
+              if (reg_mod* rm = dyn_cast<reg_mod*> (*deps))
+                {
+                  if (GET_MODE (rm->reg ()) != acc_mode)
+                    {
+                      el->set_optimization_disabled ();
+                      break;
+                    }
+                }
+            }
+        }
     }
 
   // Remove the sequence's original reg-mods.
