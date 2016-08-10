@@ -987,7 +987,7 @@ sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
        alt != alternatives ().end (); ++alt)
     if (matches_alternative (*alt))
       {
-	set_cost (alt->cost ());
+        set_cost (alt->cost ());
 	return;
       }
 
@@ -1046,16 +1046,39 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
 
   set_cost (cost);
 
-  // Cloning costs:
   if (ae.regs_empty ())
     return;
-
   rtx reused_reg = *(ae.regs_begin ());
-
   // There's no cloning cost for reg-mods that set the reg to itself.
   if (regs_equal (reused_reg, reg ()))
     return;
+  add_cloning_cost (reused_reg, d, seq, el_it);
+}
 
+void
+sh_ams2::reg_use::update_cost (delegate& d, sequence& seq,
+                               sequence::iterator el_it)
+{
+  set_cost (0);
+  if (m_current_addr.is_invalid ())
+    return;
+
+  // Get the cost of the constant displacement.
+  if (m_current_addr.has_disp ())
+    set_cost (d.addr_reg_mod_cost (
+      m_reg, tmp_rtx<PLUS> (GET_MODE (m_reg), m_current_addr.base_reg (),
+                            tmp_rtx<CONST_INT> (m_current_addr.disp ())),
+      seq, el_it));
+
+  if (!current_addr ().regs_empty ())
+    add_cloning_cost (*current_addr ().regs_begin (), d, seq, el_it);
+}
+
+void
+sh_ams2::sequence_element::add_cloning_cost (rtx reused_reg,
+                                             delegate& d, sequence& seq,
+                                             sequence::iterator el_it)
+{
   // Find the reg-mod of the reused register.
   reg_mod* reused_rm = NULL;
   for (std::set<sh_ams2::sequence_element*>::iterator it =
@@ -1076,12 +1099,12 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
        it != reused_rm->dependent_els ().end (); ++it)
     {
       reg_mod* rm = dyn_cast<reg_mod*> (*it);
-
       if (rm == NULL || rm->current_addr ().is_invalid ()
-	  || rm->current_addr ().regs_empty ())
-	continue;
+          || rm->current_addr ().regs_empty ())
+        continue;
+      const addr_expr& addr = rm->current_addr ();
 
-      rtx dep_reused_reg = *(rm->current_addr ().regs_begin ());
+      rtx dep_reused_reg = *(addr.regs_begin ());
 
       if (regs_equal (reused_reg, dep_reused_reg))
         {
@@ -1095,24 +1118,6 @@ sh_ams2::reg_mod::update_cost (delegate& d, sequence& seq,
           return;
         }
     }
-  gcc_unreachable ();
-}
-
-void
-sh_ams2::reg_use::update_cost (delegate& d, sequence& seq,
-                               sequence::iterator el_it)
-{
-  if (m_current_addr.is_invalid () || m_current_addr.has_no_disp ())
-    {
-      set_cost (0);
-      return;
-    }
-
-  // Get the cost of the constant displacement.
-  set_cost (d.addr_reg_mod_cost (
-    m_reg, tmp_rtx<PLUS> (GET_MODE (m_reg), m_current_addr.base_reg (),
-			  tmp_rtx<CONST_INT> (m_current_addr.disp ())),
-    seq, el_it));
 }
 
 const unsigned sh_ams2::sequence_element::invalid_id = ~0u;

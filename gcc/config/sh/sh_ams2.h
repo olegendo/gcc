@@ -875,6 +875,9 @@ public:
     virtual void
     update_cost (delegate& d ATTRIBUTE_UNUSED, sequence& seq ATTRIBUTE_UNUSED,
                  sequence::iterator el_it ATTRIBUTE_UNUSED) { }
+    virtual void
+    add_cloning_cost (rtx reused_reg, delegate& d, sequence& seq,
+                      sequence::iterator el_it);
 
     // The insn rtx of this element.  Maybe null if it has been inserted
     // by AMS into the sequence and is not present in the original insn list.
