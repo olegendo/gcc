@@ -1266,7 +1266,8 @@ sh_ams2::start_addr_list::remove (reg_mod* start_addr)
 std::list<sh_ams2::sequence>::iterator
 sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
                           std::list<sequence>& sequences,
-                          glob_insn_map& g_insn_el_map)
+                          glob_insn_map& g_insn_el_map,
+                          unsigned& next_element_id)
 {
   typedef std::map<sequence_element*, sequence*> element_to_seq_map;
   typedef std::map<addr_expr, shared_term, addr_expr::compare> shared_term_map;
@@ -1347,7 +1348,8 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 	    if (!term.new_seq ())
               {
                 term.set_new_seq (
-                  &(*sequences.insert (seq_it, sequence (g_insn_el_map))));
+                  &(*sequences.insert (seq_it, sequence (g_insn_el_map,
+                                                         next_element_id))));
                 new_seqs.push_back (term.new_seq ());
               }
 	    element_new_seqs[*el] = term.new_seq ();
@@ -3016,11 +3018,10 @@ sh_ams2::sequence::iterator
 sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
                                    iterator insert_before)
 {
-  static unsigned next_id = 0;
   iterator i (m_els.insert (insert_before.base (), el));
 
   if (el->id () == sequence_element::invalid_id)
-    el->set_id (next_id++);
+    el->set_id (m_next_id++);
 
   el->sequences ().insert (this);
 
@@ -4342,6 +4343,9 @@ sh_ams2::execute (function* fun)
   // A map that shows which sequence elements an insn contains.
   sequence::glob_insn_map insn_el_map;
 
+  // Stores the ID of the next element that gets inserted into a sequence.
+  unsigned next_element_id = 0;
+
   log_msg ("extracting access sequences\n");
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
@@ -4352,7 +4356,7 @@ sh_ams2::execute (function* fun)
       log_msg ("finding mem accesses\n");
 
       // Create a new sequence from the mem accesses in this BB.
-      sequences.push_back (sequence (insn_el_map));
+      sequences.push_back (sequence (insn_el_map, next_element_id));
       sequence& seq = sequences.back ();
 
       FOR_BB_INSNS (bb, i)
@@ -4414,7 +4418,7 @@ sh_ams2::execute (function* fun)
 
       log_msg ("split_access_sequence\n");
       if (m_options.split_sequences)
-        it = sequence::split (it, sequences, insn_el_map);
+        it = sequence::split (it, sequences, insn_el_map, next_element_id);
       else
         ++it;
     }

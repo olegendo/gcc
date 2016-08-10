@@ -597,9 +597,11 @@ public:
     static std::list<sequence>::iterator
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences,
-           glob_insn_map& g_insn_el_map);
+           glob_insn_map& g_insn_el_map,
+           unsigned& next_element_id);
 
-    sequence (glob_insn_map& m): m_glob_insn_el_map (m)
+    sequence (glob_insn_map& m, unsigned i): m_glob_insn_el_map (m),
+      m_next_id (i)
     {
     }
 
@@ -816,6 +818,9 @@ public:
 
     // A reference to the global insn->element map.
     glob_insn_map& m_glob_insn_el_map;
+    // Reference to the variable holding the ID of the next
+    // element that gets inserted.
+    unsigned& m_next_id;
     start_addr_list m_start_addr_list;
 
   };
