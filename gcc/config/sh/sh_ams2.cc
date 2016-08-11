@@ -1830,28 +1830,31 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 	  }
 
       // Don't optimize those accesses that use regs with
-      // a different macihine mode.
-      if (el->optimization_enabled ())
-        {
-          machine_mode acc_mode;
-          if (el->is_mem_access ())
-            acc_mode = Pmode;
-          else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-            acc_mode = GET_MODE (ru->reg ());
-          else
-            continue;
+      // a different machine mode.
+      machine_mode acc_mode;
+      if (el->is_mem_access ())
+        acc_mode = Pmode;
+      else if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
+        acc_mode = GET_MODE (rm->reg ());
+      else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
+        acc_mode = GET_MODE (ru->reg ());
+      else
+        continue;
 
-          for (sequence_element::dependency_list::iterator deps =
-                 el->dependencies ().begin ();
-               deps != el->dependencies ().end (); ++deps)
+      for (sequence_element::dependency_list::iterator deps =
+             el->dependencies ().begin ();
+           deps != el->dependencies ().end (); ++deps)
+        {
+          if (reg_mod* rm = dyn_cast<reg_mod*> (*deps))
             {
-              if (reg_mod* rm = dyn_cast<reg_mod*> (*deps))
+              if (GET_MODE (rm->reg ()) != acc_mode)
                 {
-                  if (GET_MODE (rm->reg ()) != acc_mode)
-                    {
-                      el->set_optimization_disabled ();
-                      break;
-                    }
+                  el->set_optimization_disabled ();
+                  std::for_each (
+                    el->dependent_els ().begin (), el->dependent_els ().end (),
+                    std::mem_fun (&sequence_element
+                                  ::set_optimization_disabled));
+                  break;
                 }
             }
         }
