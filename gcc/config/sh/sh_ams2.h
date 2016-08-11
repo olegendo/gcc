@@ -884,6 +884,11 @@ public:
     rtx_insn* insn (void) const { return m_insn; }
     void set_insn (rtx_insn* i) { m_insn = i; }
 
+    // The address expression that is currently being used.
+    // Might be invalid if AMS was not able to understand it.
+    const addr_expr& current_addr (void) const { return m_current_addr; }
+    void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
+
     // The effective address expression.
     // Might be invalid if AMS was not able to understand it.
     const addr_expr& effective_addr (void) const { return m_effective_addr; }
@@ -1006,9 +1011,10 @@ NOTE:
 
   protected:
     sequence_element (element_type t, rtx_insn* i,
-		      const addr_expr& ea = addr_expr ())
+		      const addr_expr& ca = addr_expr (),
+                      const addr_expr& ea = addr_expr ())
     : m_type (t), m_id (invalid_id), m_cost (0), m_insn (i),
-      m_effective_addr (ea), m_optimization_enabled (true)
+      m_current_addr (ca), m_effective_addr (ea), m_optimization_enabled (true)
     {
     }
 
@@ -1021,7 +1027,7 @@ NOTE:
     unsigned m_id;
     int m_cost;
     rtx_insn* m_insn;
-    addr_expr m_effective_addr;
+    addr_expr m_current_addr, m_effective_addr;
     bool m_optimization_enabled;
 
     dependency_list m_dependencies;
@@ -1091,11 +1097,6 @@ NOTE:
     rtx current_addr_rtx (void) const { return m_current_addr_rtx; }
     void set_current_addr_rtx (const rtx x) { m_current_addr_rtx = x; }
 
-    // The address expression that is currently being used.
-    // Might be invalid if AMS was not able to understand it.
-    const addr_expr& current_addr (void) const { return m_current_addr; }
-    void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
-
     machine_mode mach_mode (void) const { return m_machine_mode; }
     void set_mach_mode (machine_mode m) { m_machine_mode = m; }
     int access_size (void) const { return GET_MODE_SIZE (m_machine_mode); }
@@ -1107,7 +1108,7 @@ NOTE:
   protected:
     mem_access (element_type t, rtx_insn* i, machine_mode m,
                 const addr_expr& addr, rtx addr_rtx)
-    : sequence_element (t, i), m_current_addr (addr),
+    : sequence_element (t, i, addr),
       m_current_addr_rtx (addr_rtx), m_machine_mode (m)
     {
     }
@@ -1219,16 +1220,16 @@ NOTE:
   public:
     reg_mod (rtx_insn* i, rtx r, rtx v, const addr_expr& a = addr_expr (),
 	     const addr_expr& ea = addr_expr (), mem_access* ma = NULL)
-      : sequence_element (type_reg_mod, i, ea), m_tmp_reg (Pmode, ~0u),
-      m_reg (r), m_value (v), m_current_addr (a), m_auto_mod_acc (ma)
+      : sequence_element (type_reg_mod, i, a, ea), m_tmp_reg (Pmode, ~0u),
+      m_reg (r), m_value (v), m_auto_mod_acc (ma)
     {
     }
 
     reg_mod (rtx_insn* i, unsigned tmp_regno, machine_mode tmp_mode, rtx v,
              const addr_expr& a = addr_expr (),
 	     const addr_expr& ea = addr_expr (), mem_access* ma = NULL)
-      : sequence_element (type_reg_mod, i, ea), m_tmp_reg (tmp_mode, tmp_regno),
-      m_reg (m_tmp_reg), m_value (v), m_current_addr (a), m_auto_mod_acc (ma)
+      : sequence_element (type_reg_mod, i, a, ea), m_tmp_reg (tmp_mode, tmp_regno),
+      m_reg (m_tmp_reg), m_value (v), m_auto_mod_acc (ma)
     {
     }
 
@@ -1246,11 +1247,6 @@ NOTE:
 
     // The rtx the reg is being set to.
     rtx value (void) const { return m_value; }
-
-    // The address expression the reg is being set to.
-    // Might be invalid if AMS was not able to understand it (-> barrier)
-    const addr_expr& current_addr (void) const { return m_current_addr; }
-    void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
 
     // The mem_access for reg-mods that are caused by auto-mod accesses.
     mem_access* auto_mod_acc (void) const { return m_auto_mod_acc; }
@@ -1317,8 +1313,7 @@ NOTE:
 
     reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& a,
              const addr_expr& ea = addr_expr ())
-    : sequence_element (type_reg_use, i, ea), m_reg (reg), m_reg_ref (ref),
-      m_current_addr (a)
+    : sequence_element (type_reg_use, i, a, ea), m_reg (reg), m_reg_ref (ref)
     {
     }
 
@@ -1344,11 +1339,6 @@ NOTE:
     // expression. If NULL, the reg use is unspecified.
     const rtx* reg_ref (void) const { return m_reg_ref; }
     bool set_reg_ref (rtx new_reg);
-
-    // The address expression of the reg_ref. Is either a (reg) or (reg + disp).
-    const addr_expr& current_addr (void) const { return m_current_addr; }
-    void set_current_addr (const addr_expr& addr) { m_current_addr = addr; }
-
 
     virtual void update_cost (delegate& d, sequence& seq,
                               sequence::iterator el_it);

@@ -1930,19 +1930,10 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   // Replace the temporary reg rtx-es in the elements' addresses.
   for (iterator el = begin (); el != end (); ++el)
     {
-      addr_expr addr;
+      addr_expr addr = el->current_addr ();
 
-      // FIXME: Move m_current_addr into the sequence_element class
-      // to avoid branches like this.
       if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
-        {
-          m_start_addr_list.remove (rm);
-          addr = rm->current_addr ();
-        }
-      else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-        addr = ru->current_addr ();
-      else if (mem_access* m = dyn_cast<mem_access*> (&*el))
-        addr = m->current_addr ();
+        m_start_addr_list.remove (rm);
 
       for (addr_expr::regs_iterator ri = addr.regs_begin ();
            ri != addr.regs_end (); ++ri)
@@ -1953,23 +1944,13 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
             *ri = found->second;
         }
 
-      // FIXME: Move m_current_addr into the sequence_element class
-      // to avoid branches like this.
       if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
-        {
-          rm->set_current_addr (addr);
           m_start_addr_list.add (rm);
-        }
       else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-        {
-          if (addr.is_valid ())
-            {
-              ru->set_current_addr (addr);
-              ru->set_reg (addr.base_reg ());
-            }
-        }
-      else if (mem_access* m = dyn_cast<mem_access*> (&*el))
-        m->set_current_addr (addr);
+        if (addr.is_valid ())
+          ru->set_reg (addr.base_reg ());
+
+      el->set_current_addr (addr);
     }
 }
 
@@ -2782,7 +2763,7 @@ sh_ams2::sequence::eliminate_reg_copies (void)
         }
       prev_insn = curr_insn;
 
-      addr_expr addr;
+      addr_expr addr = el->current_addr ();
 
       if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
         {
@@ -2790,8 +2771,6 @@ sh_ams2::sequence::eliminate_reg_copies (void)
           reg_copy_map::iterator copy_in_map = reg_copies.find (rm->reg ());
           if (copy_in_map != reg_copies.end ())
             copy_in_map->second.reg_modified = true;
-
-          addr = rm->current_addr ();
 
           // If this reg-mod is a reg <- reg copy, add it to the
           // copies list.
@@ -2801,12 +2780,6 @@ sh_ams2::sequence::eliminate_reg_copies (void)
               std::make_pair (rm->reg (),
                               reg_copy (addr.base_reg (), rm->reg (), el)));
         }
-      else if (mem_access* m = dyn_cast<mem_access*> (&*el))
-        addr = m->current_addr ();
-      else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-        addr = ru->current_addr ();
-      else
-        continue;
 
       if (addr.is_invalid ())
         continue;
@@ -2831,15 +2804,9 @@ sh_ams2::sequence::eliminate_reg_copies (void)
       log_msg ("new addr: ");
       log_addr_expr (addr);
       log_msg ("\n");
-      if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
-        rm->set_current_addr (addr);
-      else if (mem_access* m = dyn_cast<mem_access*> (&*el))
-        m->set_current_addr (addr);
-      else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-        {
-          ru->set_current_addr (addr);
-          ru->set_reg (addr.base_reg ());
-        }
+      el->set_current_addr (addr);
+      if (reg_use* ru = dyn_cast<reg_use*> (&*el))
+        ru->set_reg (addr.base_reg ());
     }
 
   // Remove all copies from the sequence that aren't used anymore.
