@@ -1270,9 +1270,7 @@ sh_ams2::start_addr_list::remove (reg_mod* start_addr)
 // inserted sequences.
 std::list<sh_ams2::sequence>::iterator
 sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
-                          std::list<sequence>& sequences,
-                          glob_insn_map& g_insn_el_map,
-                          unsigned& next_element_id)
+                          std::list<sequence>& sequences)
 {
   typedef std::map<sequence_element*, sequence*> element_to_seq_map;
   typedef std::map<addr_expr, shared_term, addr_expr::compare> shared_term_map;
@@ -1353,8 +1351,8 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 	    if (!term.new_seq ())
               {
                 term.set_new_seq (
-                  &(*sequences.insert (seq_it, sequence (g_insn_el_map,
-                                                         next_element_id))));
+                  &(*sequences.insert (seq_it, sequence (seq.g_insn_el_map (),
+                                                         seq.next_id ()))));
                 new_seqs.push_back (term.new_seq ());
               }
 	    element_new_seqs[*el] = term.new_seq ();
@@ -4393,7 +4391,7 @@ sh_ams2::execute (function* fun)
 
       log_msg ("split_access_sequence\n");
       if (m_options.split_sequences)
-        it = sequence::split (it, sequences, insn_el_map, next_element_id);
+        it = sequence::split (it, sequences);
       else
         ++it;
     }
