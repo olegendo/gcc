@@ -2988,7 +2988,7 @@ sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
   iterator i (m_els.insert (insert_before.base (), el));
 
   if (el->id () == sequence_element::invalid_id)
-    el->set_id (m_next_id++);
+    el->set_id ((*m_next_id)++);
 
   el->sequences ().insert (this);
 
@@ -4313,7 +4313,7 @@ sh_ams2::execute (function* fun)
       log_msg ("finding mem accesses\n");
 
       // Create a new sequence from the mem accesses in this BB.
-      sequences.push_back (sequence (insn_el_map, next_element_id));
+      sequences.push_back (sequence (insn_el_map, &next_element_id));
       sequence& seq = sequences.back ();
 
       FOR_BB_INSNS (bb, i)

@@ -598,7 +598,7 @@ public:
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences);
 
-    sequence (glob_insn_map& m, unsigned& i): m_glob_insn_el_map (m),
+    sequence (glob_insn_map& m, unsigned* i): m_glob_insn_el_map (m),
       m_next_id (i)
     {
     }
@@ -609,7 +609,7 @@ public:
     glob_insn_map& g_insn_el_map (void) const { return m_glob_insn_el_map; }
 
     // A reference to the the ID of the next element that gets inserted.
-    unsigned& next_id (void) const { return m_next_id; }
+    unsigned* next_id (void) const { return m_next_id; }
 
     // Find all mem accesses in the insn I and add them to the sequence.
     void find_mem_accesses (rtx_insn* i);
@@ -821,7 +821,7 @@ public:
     insn_map m_insn_el_map;
 
     glob_insn_map& m_glob_insn_el_map;
-    unsigned& m_next_id;
+    unsigned* m_next_id;
     start_addr_list m_start_addr_list;
 
   };
