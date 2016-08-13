@@ -1420,6 +1420,8 @@ NOTE:
     // an rtx expression.
     // the cost must be somehow relative to the cost provided for access
     // alternatives.
+    // the cost of cloning regs should be ignored because it's calculated
+    // separately using the addr_reg_clone_cost function.
     virtual int
     addr_reg_mod_cost (const_rtx reg, const_rtx val,
 		       const sequence& seq,
