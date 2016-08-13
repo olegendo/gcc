@@ -4646,6 +4646,9 @@ sh_ams2::execute (function* fun)
   sequences.clear ();
 
 
+  df_note_add_problem ();
+  df_analyze ();
+
   // Unfortunately, passes tend to access global variables to see if they
   // are supposed to actually execute.  Save those variables, set them
   // and restore them afterwards.
