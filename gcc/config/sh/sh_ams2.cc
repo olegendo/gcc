@@ -978,21 +978,13 @@ sh_ams2::mem_access::update_cost (delegate& d ATTRIBUTE_UNUSED,
       return;
     }
 
-  // Find the alternative that the access uses and update
-  // its cost accordingly.
-  // FIXME: When selecting an alternative, remember the alternative
-  // iterator as the "currently selected alternative".  Then we don't
-  // need to find it over and over again.
-  for (alternative_set::const_iterator alt = alternatives ().begin ();
-       alt != alternatives ().end (); ++alt)
-    if (matches_alternative (*alt))
-      {
-        set_cost (alt->cost ());
-	return;
-      }
-
-  gcc_assert (!optimization_enabled ());
-  set_cost (0);
+  if (m_current_alt == alternatives ().end ())
+    {
+      gcc_assert (!optimization_enabled ());
+      set_cost (0);
+    }
+  else
+    set_cost (m_current_alt->cost ());
 }
 
 void
@@ -1060,14 +1052,14 @@ sh_ams2::reg_use::update_cost (delegate& d, sequence& seq,
                                sequence::iterator el_it)
 {
   set_cost (0);
-  if (m_current_addr.is_invalid ())
+  if (current_addr ().is_invalid ())
     return;
 
   // Get the cost of the constant displacement.
-  if (m_current_addr.has_disp ())
+  if (current_addr ().has_disp ())
     set_cost (d.addr_reg_mod_cost (
-      m_reg, tmp_rtx<PLUS> (GET_MODE (m_reg), m_current_addr.base_reg (),
-                            tmp_rtx<CONST_INT> (m_current_addr.disp ())),
+      m_reg, tmp_rtx<PLUS> (GET_MODE (m_reg), current_addr ().base_reg (),
+                            tmp_rtx<CONST_INT> (current_addr ().disp ())),
       seq, el_it));
 
   if (!current_addr ().regs_empty ())
@@ -1677,6 +1669,10 @@ sh_ams2::sequence::find_addr_reg_uses (void)
 class sh_ams2::mod_tracker
 {
 public:
+  typedef std::vector<std::pair <sequence_element*,
+                                 std::pair<addr_expr,
+                                           alternative_set::const_iterator> > >
+    addr_changed_list;
   mod_tracker (sequence& seq, std::set<reg_mod*>& used_reg_mods,
                std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods)
     : m_seq (seq), m_used_reg_mods (used_reg_mods),
@@ -1717,16 +1713,19 @@ public:
       }
     m_visited_changed_reg_mods.clear ();
 
-    for (std::vector<std::pair <sequence_element*, addr_expr> >
-           ::reverse_iterator it = m_addr_changed_els.rbegin ();
+    for (addr_changed_list::reverse_iterator it = m_addr_changed_els.rbegin ();
          it != m_addr_changed_els.rend (); ++it)
       {
-        if (mem_access* ma = dyn_cast<mem_access*> (it->first))
-          ma->set_current_addr (it->second);
-        else if (reg_use* ru = dyn_cast<reg_use*> (it->first))
+        sequence_element* el = it->first;
+        addr_expr& prev_addr = it->second.first;
+        alternative_set::const_iterator prev_alt = it->second.second;
+
+        if (mem_access* ma = dyn_cast<mem_access*> (el))
+          ma->set_current_addr_and_alt (prev_addr, prev_alt);
+        else if (reg_use* ru = dyn_cast<reg_use*> (el))
           {
-            ru->set_reg (it->second.base_reg ());
-            ru->set_current_addr (it->second);
+            ru->set_reg (prev_addr.base_reg ());
+            ru->set_current_addr (prev_addr);
           }
         else
           gcc_unreachable ();
@@ -1780,7 +1779,7 @@ public:
 
   // List of sequence elements whose address changed, along
   // with their previous values.
-  std::vector<std::pair <sequence_element*, addr_expr> >&
+  addr_changed_list&
   addr_changed_els (void) { return m_addr_changed_els; }
 
 private:
@@ -1789,7 +1788,7 @@ private:
   std::vector<sequence::iterator> m_inserted_reg_mods;
   std::vector<reg_mod*> m_use_changed_reg_mods;
   std::vector<std::pair<rtx, reg_mod*> >  m_visited_changed_reg_mods;
-  std::vector<std::pair <sequence_element*, addr_expr> > m_addr_changed_els;
+  addr_changed_list m_addr_changed_els;
   std::set<reg_mod*>& m_used_reg_mods;
   std::map<rtx, reg_mod*, cmp_by_regno>& m_visited_reg_mods;
 };
@@ -2060,7 +2059,7 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
       // removing the inserted address mods.
       if (next_el != end ())
         {
-          insert_address_mods (*alt, base_start_addr.second,
+          insert_address_mods (alt, base_start_addr.second,
                                index_start_addr.second,
                                end_base, end_index, el,
                                tracker, used_reg_mods, visited_reg_mods, dlg,
@@ -2104,7 +2103,7 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
       log_msg ("  min alternative: %d  min costs = %d\n",
                (int)(min_alternative - alternatives->begin ()),
                min_cost);
-      insert_address_mods (*min_alternative,
+      insert_address_mods (min_alternative,
                            min_start_base, min_start_index,
                            min_end_base, min_end_index, el,
                            tracker, used_reg_mods, visited_reg_mods, dlg,
@@ -2229,7 +2228,8 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
 // INDEX_END_ADDR from BASE/INDEX_START_ADDR when using ALT as the access
 // alternative.  Record any changes to the sequence in TRACKER.
 void sh_ams2::sequence::
-insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
+insert_address_mods (alternative_set::const_iterator alt,
+                     reg_mod* base_start_addr,
                      reg_mod* index_start_addr,
                      const addr_expr& base_end_addr,
                      const addr_expr& index_end_addr,
@@ -2252,9 +2252,9 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
   // in the base reg.
   mod_addr_result base_insert_result =
     try_insert_address_mods (base_start_addr, base_end_addr,
-                             alt.address ().disp_min (),
-                             alt.address ().disp_max (),
-                             alt.address ().type (),
+                             alt->address ().disp_min (),
+                             alt->address ().disp_max (),
+                             alt->address ().type (),
                              acc_mode, el, tracker,
                              used_reg_mods, visited_reg_mods, dlg,
                              next_tmp_regno);
@@ -2265,7 +2265,7 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
     .push_back (std::make_pair (base_insert_result.final_addr, &*el));
 
   addr_expr new_addr;
-  if (alt.address ().has_no_index_reg ())
+  if (alt->address ().has_no_index_reg ())
     {
       disp_t disp = ae.disp () - base_insert_result.addr_disp;
       new_addr = non_mod_addr (base_insert_result.final_addr->reg (),
@@ -2278,7 +2278,7 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
       mod_addr_result index_insert_result =
         try_insert_address_mods (index_start_addr, index_end_addr,
                                  0, 0,
-                                 alt.address ().type (),
+                                 alt->address ().type (),
                                  acc_mode, el, tracker,
                                  used_reg_mods, visited_reg_mods, dlg,
                                  next_tmp_regno);
@@ -2292,18 +2292,19 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
                                index_insert_result.final_addr->reg (), 1, 0);
     }
 
-  if (alt.address ().type () == pre_mod)
-    new_addr = pre_mod_addr (new_addr.base_reg (), alt.address ().disp ());
-  else if (alt.address ().type () == post_mod)
-    new_addr = post_mod_addr (new_addr.base_reg (), alt.address ().disp ());
+  if (alt->address ().type () == pre_mod)
+    new_addr = pre_mod_addr (new_addr.base_reg (), alt->address ().disp ());
+  else if (alt->address ().type () == post_mod)
+    new_addr = post_mod_addr (new_addr.base_reg (), alt->address ().disp ());
 
   if (mem_access* m = dyn_cast<mem_access*> (&*el))
     {
       // Update the current address of the mem access with the alternative.
       tracker.addr_changed_els ()
-        .push_back (std::make_pair (m, m->current_addr ()));
-      m->set_current_addr (new_addr);
-      m->set_cost (alt.cost ());
+        .push_back (std::make_pair (m, std::make_pair (m->current_addr (),
+                                                       alt)));
+      m->set_current_addr_and_alt (new_addr, alt);
+      m->set_cost (alt->cost ());
     }
   else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
     {
@@ -2312,8 +2313,9 @@ insert_address_mods (const alternative& alt, reg_mod* base_start_addr,
         {
           // If the expression in which the reg is used is known, modify the
           // reg that'll be used in the expression.
-          tracker.addr_changed_els ()
-            .push_back (std::make_pair (ru, ru->current_addr ()));
+          tracker.addr_changed_els ().push_back (std::make_pair (
+            ru, std::make_pair (ru->current_addr (),
+                                (alternative_set::const_iterator)NULL)));
           ru->set_reg (new_addr.base_reg ());
           ru->set_current_addr (new_addr);
         }
@@ -3448,6 +3450,7 @@ sh_ams2::mem_access::update_access_alternatives (const sequence& seq,
 	       "not optimizing this access\n");
       set_optimization_disabled ();
     }
+  m_current_alt = alt_match;
 }
 
 bool

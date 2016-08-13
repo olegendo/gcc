@@ -765,7 +765,7 @@ public:
                               std::map<rtx, reg_mod*, cmp_by_regno>&
                                 visited_reg_mods, unsigned* next_tmp_regno);
 
-    void insert_address_mods (const alternative& alt,
+    void insert_address_mods (alternative_set::const_iterator alt,
                               reg_mod* base_start_addr,
                               reg_mod* index_start_addr,
                               const addr_expr& base_end_addr,
@@ -1078,6 +1078,19 @@ NOTE:
     // alternatives of the access.
     bool displacement_fits_alternative (disp_t disp) const;
 
+    // The address alternative that is currently being used.
+    const alternative_set::const_iterator& current_alt (void) const
+    {
+      return m_current_alt;
+    }
+
+    void set_current_addr_and_alt (const addr_expr& addr,
+                                   alternative_set::const_iterator alt)
+    {
+      sequence_element::set_current_addr (addr);
+      m_current_alt = alt;
+    }
+
     // Try replacing the current address in the mem(s) of the insn with
     // the specified one.  Returns true if the replacement seems OK or
     // false otherwise.
@@ -1110,23 +1123,24 @@ NOTE:
     mem_access (element_type t, rtx_insn* i, machine_mode m,
                 const addr_expr& addr, rtx addr_rtx)
     : sequence_element (t, i, addr),
-      m_current_addr_rtx (addr_rtx), m_machine_mode (m)
+      m_current_addr_rtx (addr_rtx), m_current_alt (m_alternatives.end ()),
+      m_machine_mode (m)
     {
     }
 
     mem_access (element_type t, rtx_insn* i)
-    : sequence_element (t, i), m_current_addr (), m_current_addr_rtx (NULL),
-      m_machine_mode (Pmode)
+    : sequence_element (t, i), m_current_addr_rtx (NULL),
+      m_current_alt (m_alternatives.end ()), m_machine_mode (Pmode)
     {
     }
 
     // The current address expressions are usually set/updated by the sub-class.
-    addr_expr m_current_addr;
     rtx m_current_addr_rtx;
 
   private:
     bool m_validate_alts;
     alternative_set m_alternatives;
+    alternative_set::const_iterator m_current_alt;
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
     machine_mode m_machine_mode;
@@ -1269,7 +1283,6 @@ NOTE:
     tmp_rtx<REG> m_tmp_reg;
     rtx m_reg;
     rtx m_value;
-    addr_expr m_current_addr;
     mem_access* m_auto_mod_acc;
   };
 
@@ -1368,7 +1381,6 @@ NOTE:
 
     rtx m_reg;
     rtx* m_reg_ref;
-    addr_expr m_current_addr;
 
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
