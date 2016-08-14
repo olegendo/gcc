@@ -334,7 +334,7 @@ log_sequence_element (const sh_ams2::sequence_element& e,
       if (!e.dependencies ().empty ())
         {
           log_msg ("\n  dependencies:\n");
-          for (sh_ams2::sequence_element::dependency_list::const_iterator it =
+          for (sh_ams2::sequence_element::dependency_set::const_iterator it =
                  e.dependencies ().begin ();
                it != e.dependencies ().end (); ++it)
             {
@@ -895,7 +895,7 @@ sh_ams2::sequence_element::can_be_optimized (void) const
   if (!optimization_enabled () || effective_addr ().is_invalid ())
     return false;
 
-  for (dependency_list::const_iterator it = m_dependent_els.begin ();
+  for (dependency_set::const_iterator it = m_dependent_els.begin ();
        it != m_dependent_els.end (); ++it)
     {
       if (!(*it)->can_be_optimized ())
@@ -1399,7 +1399,7 @@ sh_ams2::sequence::split_1 (sequence& seq,
   if (prev_size < seq.size ())
     ++insert_count;
 
-  for (sequence_element::dependency_list::iterator it =
+  for (sequence_element::dependency_set::iterator it =
          el->dependencies ().begin ();
        it != el->dependencies ().end (); ++it)
     insert_count += split_1 (seq, ref_counting_ptr<sequence_element> (*it));
@@ -1832,7 +1832,7 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
       else
         continue;
 
-      for (sequence_element::dependency_list::iterator deps =
+      for (sequence_element::dependency_set::iterator deps =
              el->dependencies ().begin ();
            deps != el->dependencies ().end (); ++deps)
         {
@@ -3152,14 +3152,14 @@ sh_ams2::sequence::remove_element (iterator el, bool clear_deps)
   // Update the element's dependencies.
   if (clear_deps)
     {
-      for (sequence_element::dependency_list::iterator deps =
+      for (sequence_element::dependency_set::iterator deps =
              el->dependencies ().begin ();
            deps != el->dependencies ().end (); ++deps)
         (*deps)->remove_dependent_el (&*el);
 
       el->dependencies ().clear ();
 
-      for (sequence_element::dependency_list::iterator dep_els =
+      for (sequence_element::dependency_set::iterator dep_els =
              el->dependent_els ().begin ();
            dep_els != el->dependent_els ().end (); ++dep_els)
         (*dep_els)->remove_dependency (&*el);
@@ -3650,7 +3650,7 @@ sh_ams2::sequence::find_reg_value (rtx reg, rtx_insn* start_insn)
           for (insn_map::iterator els = els_in_insn.first;
                els != els_in_insn.second; ++els)
             {
-              for (sequence_element::dependency_list::iterator deps =
+              for (sequence_element::dependency_set::iterator deps =
                      els->second->dependencies ().begin ();
                    deps != els->second->dependencies ().end (); ++deps)
                 {

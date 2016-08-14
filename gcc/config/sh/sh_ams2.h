@@ -928,19 +928,18 @@ NOTE:
 */
     struct compare;
 
-// FIXME: this is not a list, rename the type.
-    typedef std::set<sequence_element*, compare> dependency_list;
+    typedef std::set<sequence_element*, compare> dependency_set;
 
-    const dependency_list&
+    const dependency_set&
     dependencies (void) const { return m_dependencies; }
 
-    dependency_list&
+    dependency_set&
     dependencies (void) { return m_dependencies; }
 
-    const dependency_list&
+    const dependency_set&
     dependent_els (void) const { return m_dependent_els; }
 
-    dependency_list&
+    dependency_set&
     dependent_els (void) { return m_dependent_els; }
 
     void add_dependency (sequence_element* dep)
@@ -1032,8 +1031,8 @@ NOTE:
     addr_expr m_current_addr, m_effective_addr;
     bool m_optimization_enabled;
 
-    dependency_list m_dependencies;
-    dependency_list m_dependent_els;
+    dependency_set m_dependencies;
+    dependency_set m_dependent_els;
 
     std::set<sequence*> m_sequences;
   };
