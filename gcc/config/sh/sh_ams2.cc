@@ -1572,6 +1572,15 @@ sh_ams2::sequence::find_addr_reg_uses (void)
   std::map<rtx, reg_mod*, cmp_by_regno> live_addr_regs;
   std::vector<rtx*> reg_use_refs;
 
+    for (reg_mod_iter rm (begin<reg_mod_match> ()),
+       rm_end (end<reg_mod_match> ()); rm != rm_end; ++rm)
+    {
+      if (rm->insn () != NULL)
+        break;
+      visited_addr_regs.insert (rm->reg ());
+      live_addr_regs[rm->reg ()] = &*rm;
+    }
+
   for (rtx_insn* i = start_insn (); i != NULL_RTX; i = next_nonnote_insn_bb (i))
     {
       if (!INSN_P (i) || DEBUG_INSN_P (i))
