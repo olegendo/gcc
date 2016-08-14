@@ -2856,23 +2856,23 @@ sh_ams2::sequence::update_insn_stream (void)
   if (insn_sequence_started)
     {
       rtx_insn* last_insn = BB_END (start_bb ());
-      bool emit_after = NONJUMP_INSN_P (last_insn);
+      bool emit_before = control_flow_insn_p (last_insn);
 
       rtx_insn* new_insns = get_insns ();
       end_sequence ();
 
       log_msg ("emitting new insns = \n");
       log_rtx (new_insns);
-      if (emit_after)
-        log_msg ("\nafter insn\n");
-      else
+      if (emit_before)
         log_msg ("\nbefore insn\n");
+      else
+        log_msg ("\nafter insn\n");
       log_insn (last_insn);
       log_msg ("\n");
-      if (emit_after)
-        emit_insn_after (new_insns, last_insn);
-      else
+      if (emit_before)
         emit_insn_before (new_insns, last_insn);
+      else
+        emit_insn_after (new_insns, last_insn);
     }
 }
 
