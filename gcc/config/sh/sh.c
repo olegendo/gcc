@@ -911,6 +911,11 @@ register_sh_passes (void)
                                 sh_ams2::options (sh_ams2_opt)),
 		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 
+  /* Disable old auto-inc-dec pass.
+  if (sh_ams2_enable)
+    flag_auto_inc_dec = 0;
+  */
+
   /* Add another AMS pass after register allocation.  It will be a bit more
      restricted but can improve code around stack frame accesses.  */
   if (sh_ams2_post_ra_enable)

@@ -927,8 +927,9 @@ NOTE:
     the BB where the limit was exceeded.
 */
     struct compare;
-    typedef std::set<sequence_element*, compare>
-      dependency_list;
+
+// FIXME: this is not a list, rename the type.
+    typedef std::set<sequence_element*, compare> dependency_list;
 
     const dependency_list&
     dependencies (void) const { return m_dependencies; }
