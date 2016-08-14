@@ -1274,8 +1274,6 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 {
   typedef std::map<sequence_element*, sequence*> element_to_seq_map;
   typedef std::map<addr_expr, shared_term, addr_expr::compare> shared_term_map;
-  typedef element_type_matches<type_reg_mod> reg_mod_match;
-  typedef filter_iterator<iterator, reg_mod_match> reg_mod_iter;
 
   // Shows which new sequence each sequence element should go into.
   element_to_seq_map element_new_seqs;
@@ -1379,13 +1377,12 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
       while (1)
         {
           unsigned insert_count = 0;
-          for (reg_mod_iter els = seq.begin<reg_mod_match> (),
-                 els_end = seq.end<reg_mod_match> (); els != els_end; ++els)
+          for (reg_mod_iter rm (seq.begin<reg_mod_match> ()),
+                 rm_end (seq.end<reg_mod_match> ()); rm != rm_end; ++rm)
             {
-              reg_mod* rm = as_a<reg_mod*> (&*els);
               if (s->addr_regs ().find (rm->reg ()) != s->addr_regs ().end ())
                 insert_count +=
-                  split_1 (*s, ref_counting_ptr<sequence_element> (rm));
+                  split_1 (*s, ref_counting_ptr<sequence_element> (&*rm));
             }
           if (insert_count == 0)
             break;
@@ -1802,9 +1799,6 @@ private:
 void
 sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 {
-  typedef element_type_matches<type_reg_mod> reg_mod_match;
-  typedef filter_iterator<iterator, reg_mod_match> reg_mod_iter;
-
   // If a reg has been set more than once, skip the elements that use
   // that reg since we don't know which value they use.
   // FIXME: Find a way to tell apart different versions of the same register.
@@ -1859,21 +1853,21 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     }
 
   // Remove the sequence's original reg-mods.
-  for (reg_mod_iter els = begin<reg_mod_match> (),
-       els_end = end<reg_mod_match> (); els != els_end; )
+  for (reg_mod_iter rm (begin<reg_mod_match> ()),
+       rm_end (end<reg_mod_match> ()); rm != rm_end; )
     {
-      if (els->insn () == NULL || !els->can_be_optimized ())
+      if (rm->insn () == NULL || !rm->can_be_optimized ())
         {
           // If an auto-mod mem access' reg-mod can't be removed, the
           // access shouldn't be changed either.
-          reg_mod* rm = dyn_cast<reg_mod*> (&*els);
           if (rm->auto_mod_acc ())
             rm->auto_mod_acc ()->set_optimization_disabled ();
 
-          ++els;
+          ++rm;
           continue;
         }
-      els = remove_element (els);
+
+      rm = reg_mod_iter (remove_element (rm.base ()), rm_end.base ().base ());
     }
 
   // FIXME: use linear allocator to avoid allocations for temporary set.
@@ -1900,17 +1894,15 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
     }
 
   std::map<rtx, rtx, cmp_by_regno> reg_replacements;
-  for (reg_mod_iter els = begin<reg_mod_match> (),
-       els_end = end<reg_mod_match> (); els != els_end; )
+  for (reg_mod_iter rm (begin<reg_mod_match> ()),
+       rm_end (end<reg_mod_match> ()); rm != rm_end; )
     {
-      reg_mod* rm = as_a<reg_mod*> (&*els);
-
       // Remove the unused reg <- constant copies that might have been
       // added while trying different address calculations.
       if (rm->insn () == NULL && rm->current_addr ().is_valid ()
           && rm->current_addr ().regs_empty () && rm->dependent_els ().empty ())
 	{
-          els = remove_element (els);
+          rm = reg_mod_iter (remove_element (rm.base ()), rm_end.base ().base ());
           continue;
         }
 
@@ -1923,9 +1915,9 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
           rm->set_reg (new_reg);
 
           ++m_addr_regs[rm->reg ()];
-        };
+        }
 
-      ++els;
+      ++rm;
     }
 
   // Replace the temporary reg rtx-es in the elements' addresses.
@@ -4299,13 +4291,6 @@ sh_ams2::execute (function* fun)
   log_msg ("\n\n");
   mem_access::allow_new_insns = m_options.allow_mem_addr_change_new_insns;
 
-  typedef element_type_matches<type_mem_load, type_mem_store,
-                               type_mem_operand> mem_match;
-  typedef filter_iterator<sequence::iterator, mem_match> mem_acc_iter;
-  typedef element_type_matches<type_reg_mod> reg_mod_match;
-  typedef filter_iterator<sequence::iterator, reg_mod_match> reg_mod_iter;
-  typedef element_type_matches<type_reg_use> reg_use_match;
-
 //  df_set_flags (DF_DEFER_INSN_RESCAN); // needed?
 
   df_note_add_problem ();
@@ -4340,12 +4325,11 @@ sh_ams2::execute (function* fun)
           seq.find_mem_accesses (i);
          }
 
-      for (mem_acc_iter m_it = seq.begin<mem_match> (),
-             m_end = seq.end<mem_match> (); m_it != m_end; ++m_it)
+      for (mem_acc_iter m (seq.begin<mem_match> ()),
+	     m_end (seq.end<mem_match> ()); m != m_end; ++m)
         {
-          mem_access* m = (mem_access*)&*m_it;
           m->set_effective_addr (rtx_to_addr_expr (m->current_addr_rtx (),
-                                                   m->mach_mode (), &seq, m));
+                                                   m->mach_mode (), &seq, &*m));
           if (m->effective_addr ().is_invalid ())
             m->set_optimization_disabled ();
         }
@@ -4368,8 +4352,8 @@ sh_ams2::execute (function* fun)
       seq.find_addr_reg_mods ();
 
       // Add the sequence's reg-mods to the original reg-mod list.
-      for (reg_mod_iter rm = seq.begin<reg_mod_match> (),
-             rm_end = seq.end<reg_mod_match> (); rm != rm_end; ++rm)
+      for (reg_mod_iter rm (seq.begin<reg_mod_match> ()),
+             rm_end (seq.end<reg_mod_match> ()); rm != rm_end; ++rm)
         original_reg_mods.push_back (ref_counting_ptr<sequence_element> (&*rm));
 
       log_sequence (seq, false);

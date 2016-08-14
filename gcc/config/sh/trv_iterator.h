@@ -17,8 +17,12 @@ public:
   typedef typename Trv::reference reference;
 
   trv_iterator (void) { }
-  trv_iterator (const Trv& trv) : Trv (trv) { }
+  trv_iterator (const trv_iterator& i) : m_i (i.m_i) { }
 
+  // FIXME: II could be an outer trv_iterator or an inner trv_iterator.
+  // if it's an outer iterator, we can't simply pass it to the base_iterator.
+  // instead, have to try walking down the iterator chain of II and see if
+  // we can get the base_iterator from it that matches this base_iterator.
   template <typename II> explicit trv_iterator (II i) : m_i (i) { }
   template <typename II, typename III> explicit trv_iterator (II i, III ii) : m_i (i, ii) { }
 

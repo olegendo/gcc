@@ -51,12 +51,12 @@ public:
     m_i = ii;
     m_end = ii_end;
   }
-
+/*
   template <typename II> explicit filter_iterator (II iend)
   : Predicate (), m_i (iend), m_end (iend)
   {
   }
-
+*/
   Predicate& predicate (void) { return *this; }
   const Predicate& predicate (void) const { return *this; }
 

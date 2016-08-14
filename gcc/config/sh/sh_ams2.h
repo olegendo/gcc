@@ -1132,6 +1132,13 @@ NOTE:
     machine_mode m_machine_mode;
   };
 
+  typedef element_type_matches<type_mem_load, type_mem_store,
+			       type_mem_operand> mem_match;
+
+  typedef trv_iterator<cast <
+	    filter_iterator<sequence::iterator, mem_match>,
+	    mem_access> > mem_acc_iter;
+
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // A memory load -- an insn with only one mem rtx.
   class mem_load : public mem_access
@@ -1266,6 +1273,12 @@ NOTE:
     mem_access* m_auto_mod_acc;
   };
 
+  typedef element_type_matches<type_reg_mod> reg_mod_match;
+
+  typedef trv_iterator<cast <
+	    filter_iterator<sequence::iterator, reg_mod_match>,
+	    reg_mod> > reg_mod_iter;
+
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // A barrier for AMS which is inserted during dependency/def analysis
   // if AMS doesn't understand the value/calculation of some address register.
@@ -1360,6 +1373,12 @@ NOTE:
     adjacent_chain_info m_inc_chain;
     adjacent_chain_info m_dec_chain;
   };
+
+  typedef element_type_matches<type_reg_use> reg_use_match;
+
+  typedef trv_iterator<cast <
+	    filter_iterator<sequence::iterator, reg_use_match>,
+	    reg_use> > reg_use_iter;
 
   // a delegate for the ams pass.  usually implemented by the target.
   struct delegate
