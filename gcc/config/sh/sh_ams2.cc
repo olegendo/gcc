@@ -2696,9 +2696,13 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
 class sh_ams2::reg_copy
 {
 public:
-  reg_copy (rtx s, rtx d, sequence::iterator e)
-  : src (s), dest (d), el (e), reg_modified (false), can_be_removed (true),
-    use_count (0) {}
+  reg_copy (void) {}
+  reg_copy (rtx s, rtx d, sequence::iterator e) : src (s), dest (d), el (e),
+                                                  reg_modified (false),
+                                                  can_be_removed (true),
+                                                  use_count (0)
+  {
+  }
   rtx src, dest;
   sequence::iterator el;
   bool reg_modified;
@@ -2714,10 +2718,8 @@ public:
 void
 sh_ams2::sequence::eliminate_reg_copies (void)
 {
-  typedef std::multimap<rtx, reg_copy, cmp_by_regno> reg_copy_map;
+  typedef std::map<rtx, reg_copy, cmp_by_regno> reg_copy_map;
   reg_copy_map reg_copies;
-  // FIXME: Use a bitvector instead.
-  std::set<rtx_insn*> visited_insns;
   rtx_insn* prev_insn = BB_HEAD (start_bb ());
 
   for (iterator el = begin (); el != end (); ++el)
@@ -2746,7 +2748,6 @@ sh_ams2::sequence::eliminate_reg_copies (void)
       // and previous elements.
       for (rtx_insn* i = prev_insn; i != curr_insn; i = NEXT_INSN (i))
         {
-          visited_insns.insert (i);
           for (reg_copy_map::iterator it = reg_copies.begin ();
                it != reg_copies.end (); ++it)
             {
@@ -2759,6 +2760,7 @@ sh_ams2::sequence::eliminate_reg_copies (void)
       prev_insn = curr_insn;
 
       addr_expr addr = el->current_addr ();
+      reg_copy* new_copy = NULL;
 
       if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
         {
@@ -2771,9 +2773,11 @@ sh_ams2::sequence::eliminate_reg_copies (void)
           // copies list.
           if (addr.is_valid () && addr.has_no_index_reg ()
               && addr.has_no_disp () && addr.has_base_reg ())
-            reg_copies.insert (
-              std::make_pair (rm->reg (),
-                              reg_copy (addr.base_reg (), rm->reg (), el)));
+            {
+              reg_copies[rm->reg ()] =
+                reg_copy (addr.base_reg (), rm->reg (), el);
+              new_copy = &reg_copies[rm->reg ()];
+            }
         }
 
       if (addr.is_invalid ())
@@ -2789,11 +2793,18 @@ sh_ams2::sequence::eliminate_reg_copies (void)
           if (copy_in_map != reg_copies.end ())
             {
               ++copy_in_map->second.use_count;
-              reg_copy copy = copy_in_map->second;
+              reg_copy& copy = copy_in_map->second;
               if (copy.reg_modified)
-                copy_in_map->second.can_be_removed = false;
+                copy.can_be_removed = false;
               else
-                *ri = copy.src;
+                {
+                  *ri = copy_in_map->second.src;
+
+                  // If the element is a reg-copy, also update the
+                  // corresponding reg_copy struct.
+                  if (new_copy != NULL)
+                    new_copy->src = *ri;
+                }
             }
         }
       log_msg ("new addr: ");
