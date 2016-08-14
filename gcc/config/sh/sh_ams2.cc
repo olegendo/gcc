@@ -3281,23 +3281,19 @@ sh_ams2::sequence::update_access_alternatives (delegate& d,
                                                bool disable_validation,
                                                bool adjust_costs)
 {
-  typedef element_type_matches<type_mem_load, type_mem_store, type_mem_operand>
-    match;
-  typedef filter_iterator<iterator, match> iter;
+  for (mem_acc_iter m (begin<mem_match> ()), m_end (end<mem_match> ());
+       m != m_end; ++m)
+    m->update_access_alternatives (*this, m.base (), d, force_validation,
+				   disable_validation);
 
-  for (iter e = begin<match> (), e_end = end<match> (); e != e_end; ++e)
-    ((mem_access*)&*e)->update_access_alternatives (*this, e,
-				       d, force_validation, disable_validation);
   if (!adjust_costs)
     return;
 
-  for (iter e = begin<match> (), e_end = end<match> (); e != e_end; ++e)
-    {
-      mem_access* m = (mem_access*)&*e;
-      for (alternative_set::iterator alt = m->alternatives ().begin ();
-           alt != m->alternatives ().end (); ++alt)
-        d.adjust_alternative_costs (*alt, *this, e);
-    }
+  for (mem_acc_iter m (begin<mem_match> ()), m_end (end<mem_match> ());
+       m != m_end; ++m)
+    for (alternative_set::iterator alt = m->alternatives ().begin ();
+         alt != m->alternatives ().end (); ++alt)
+      d.adjust_alternative_costs (*alt, *this, m.base ());
 }
 
 // Update the alternatives of the access.
