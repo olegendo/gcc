@@ -14043,6 +14043,43 @@ addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
 // ------------------------------------------------------------------------------
 // New AMS delegate functions
 
+static bool
+is_stack_frame_related_access (sh_ams2::sequence::const_iterator acc)
+{
+  // FIXME: Could also walk the reg values/defs as the SF reg might be
+  // indirectly referenced.
+  const sh_ams2::addr_expr& addr = acc->effective_addr ();
+
+  for (sh_ams2::addr_expr::regs_const_iterator i = addr.regs_begin (),
+       i_end = addr.regs_end (); i != i_end; ++i)
+    if (sh_ams2::get_regno (*i) == FRAME_POINTER_REGNUM)
+      return true;
+
+  return false;
+}
+
+static bool
+fp_accesses_dominate (const sh_ams2::sequence& seq)
+{
+  if (!TARGET_FPU_ANY)
+    return false;
+
+  unsigned int total_count = 0;
+  unsigned int fp_count = 0;
+
+  for (sh_ams2::mem_acc_const_iter i (seq.begin<sh_ams2::mem_match> ()),
+       i_end (seq.end<sh_ams2::mem_match> ()); i != i_end; ++i)
+    {
+      ++total_count;
+      enum mode_class mc = GET_MODE_CLASS (i->mach_mode ());
+      if (mc == MODE_FLOAT || mc == MODE_COMPLEX_FLOAT
+	  || mc == MODE_VECTOR_FLOAT)
+	++fp_count;
+    }
+
+  return fp_count > (total_count - fp_count);
+}
+
 // similar to sh_address_cost, but for the AMS pass.
 void ams2_delegate::
 mem_access_alternatives (sh_ams2::alternative_set& alt,
@@ -14124,22 +14161,33 @@ mem_access_alternatives (sh_ams2::alternative_set& alt,
   // prefer them over displacement alternatives.
   // Also prefer post-inc/pre-dec accesses when the last element of the
   // adjacency chain is a reg_use.
-  const int inc_cost = (acc_size < 4
-		        && acc->inc_chain ().length () >= 3
-                        && !acc->inc_chain ().is_last ())
-                       || (acc->inc_chain ().last ()
-                           && (acc->inc_chain ().last ()->type ()
-                               == sh_ams2::type_reg_use
-                               || acc->inc_chain ().last ()->type ()
-                                  == sh_ams2::type_reg_mod)) ? -2 : 0;
-  const int dec_cost = (acc_size < 4
-		        && acc->dec_chain ().length () >= 3
-                        && !acc->dec_chain ().is_last ())
-                       || (acc->dec_chain ().last ()
-                           && (acc->dec_chain ().last ()->type ()
-                               == sh_ams2::type_reg_use
-                               || acc->dec_chain ().last ()->type ()
-                                  == sh_ams2::type_reg_mod)) ? -2 : 0;
+
+  // Discourage post-inc/pre-dec usage for stack-frame related accesses,
+  // since it results in more register being used.  But not for FP modes
+  // because those have limited addressing modes anyway.
+  // FIXME: Run AMS after RA to clean up address modes around stack frame
+  // accesses.
+  const bool sf_related = is_stack_frame_related_access (acc)
+			   && !fp_accesses_dominate (seq);
+
+  const int inc_cost = sf_related * 4
+		       + ((acc_size < 4
+		           && acc->inc_chain ().length () >= 3
+                           && !acc->inc_chain ().is_last ())
+                          || (acc->inc_chain ().last ()
+                              && (acc->inc_chain ().last ()->type ()
+                                  == sh_ams2::type_reg_use
+                                  || acc->inc_chain ().last ()->type ()
+                                     == sh_ams2::type_reg_mod)) ? -2 : 0);
+  const int dec_cost = sf_related * 4
+		       + ((acc_size < 4
+		           && acc->dec_chain ().length () >= 3
+                           && !acc->dec_chain ().is_last ())
+                          || (acc->dec_chain ().last ()
+                              && (acc->dec_chain ().last ()->type ()
+                                  == sh_ams2::type_reg_use
+                                  || acc->dec_chain ().last ()->type ()
+                                     == sh_ams2::type_reg_mod)) ? -2 : 0);
 
   // If there is no FPU GP regs will be used for storing FP modes, so we
   // allow normal QIHISImode alternatives also for FP modes.
@@ -14301,6 +14349,10 @@ addr_reg_mod_cost (const_rtx reg, const_rtx val,
                    const sh_ams2::sequence& seq,
                    sh_ams2::sequence::const_iterator acc)
 {
+  // FIXME: This hack shouldn't be needed.  See also mem_access_alternatives.
+  if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq))
+    return 12;
+
   // modifying the GBR is impossible.
   if (sh_ams2::get_regno (reg) == GBR_REG)
     return sh_ams2::infinite_costs;
@@ -14338,6 +14390,10 @@ addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
 		     const sh_ams2::sequence& seq ATTRIBUTE_UNUSED,
 		     sh_ams2::sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
+  // FIXME: This hack shouldn't be needed.  See also mem_access_alternatives.
+  if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq))
+    return 12;
+
   // FIXME: maybe cloning the GBR should be cheaper?
   // FIXME: if register pressure is (expected to be) high, increase the cost
   // a bit to avoid addr reg cloning.

@@ -1153,6 +1153,10 @@ NOTE:
 	    filter_iterator<sequence::iterator, mem_match>,
 	    mem_access> > mem_acc_iter;
 
+  typedef trv_iterator<cast <
+	    filter_iterator<sequence::const_iterator, mem_match>,
+	    mem_access> > mem_acc_const_iter;
+
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // A memory load -- an insn with only one mem rtx.
   class mem_load : public mem_access
