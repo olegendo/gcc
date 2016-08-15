@@ -1852,11 +1852,15 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
       for (addr_expr::regs_const_iterator ri =
 	     el->effective_addr ().regs_begin ();
 	   ri != el->effective_addr ().regs_end (); ++ri)
-	if (reg_set_count.find (*ri)->second > 1)
-	  {
-	    el->set_optimization_disabled ();
-	    break;
-	  }
+        {
+          std::map<rtx, int, cmp_by_regno>::iterator found =
+            reg_set_count.find (*ri);
+          if (found != reg_set_count.end () && found->second > 1)
+            {
+              el->set_optimization_disabled ();
+              break;
+            }
+        }
 
       // Don't optimize those accesses that use regs with
       // a different machine mode.
@@ -1913,6 +1917,20 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   typedef filter_iterator<iterator, element_to_optimize> el_opt_iter;
   iterator prev_el = begin ();
   unsigned next_tmp_regno = max_reg_num ();
+
+  if (prev_bb () != NULL)
+    {
+      // Add the previous BB's start addresses to the visited list.
+      std::pair<bb_map::iterator, bb_map::iterator> range =
+        m_bb_seq_map.equal_range (prev_bb ());
+      for (bb_map::iterator it = range.first; it != range.second; ++it)
+        {
+          sequence* seq = it->second;
+          for (reg_mod_iter rm (seq->begin<reg_mod_match> ()),
+                 rm_end (seq->end<reg_mod_match> ()); rm != rm_end; ++rm)
+            visited_reg_mods[rm->reg ()] = &*rm;
+        }
+    }
 
   for (el_opt_iter els = begin<element_to_optimize> (),
        els_end = end<element_to_optimize> (); els != els_end; ++els)
@@ -2194,6 +2212,16 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
   std::vector<reg_mod*> start_addrs;
   start_addresses ().get_relevant_addresses (end_addr,
                                              std::back_inserter (start_addrs));
+  if (prev_bb () != NULL)
+    {
+      // Add the start addresses of the previous BB's sequences.
+      std::pair<bb_map::iterator, bb_map::iterator> range =
+        m_bb_seq_map.equal_range (prev_bb ());
+      for (bb_map::iterator it = range.first; it != range.second; ++it)
+        it->second->start_addresses ().get_relevant_addresses (
+          end_addr, std::back_inserter (start_addrs));
+    }
+
   for (std::vector<reg_mod*>::iterator addrs = start_addrs.begin ();
        addrs != start_addrs.end (); ++addrs)
     {
