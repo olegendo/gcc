@@ -589,6 +589,7 @@ public:
 
     typedef std::multimap<rtx_insn*, iterator> insn_map;
     typedef std::multimap<rtx_insn*, sequence_element*> glob_insn_map;
+    typedef std::multimap<basic_block, sequence*> bb_map;
 
     // Split the access sequence pointed to by SEQ into multiple sequences,
     // grouping the accesses that have common terms in their effective address
@@ -598,15 +599,35 @@ public:
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences);
 
-    sequence (glob_insn_map& m, unsigned* i): m_glob_insn_el_map (m),
-      m_next_id (i)
+    sequence (glob_insn_map& im, bb_map& bm, unsigned* i, basic_block bb)
+    : m_glob_insn_el_map (im), m_bb_seq_map (bm), m_next_id (i),
+      m_start_bb (bb), m_prev_bb (NULL)
     {
+      if (single_pred_p (m_start_bb))
+        {
+          m_prev_bb = single_pred (m_start_bb);
+
+          // Don't use the previous BB if there are no sequences in it.
+          std::pair<bb_map::iterator, bb_map::iterator> range =
+            m_bb_seq_map.equal_range (m_prev_bb);
+          if (range.first == range.second)
+            m_prev_bb = NULL;
+        }
     }
 
     ~sequence (void);
 
     // A reference to the global insn->element map.
     glob_insn_map& g_insn_el_map (void) const { return m_glob_insn_el_map; }
+
+    // A reference to the global bb->sequence map.
+    bb_map& bb_seq_map (void) const { return m_bb_seq_map; }
+
+    // Add this sequence to the bb->sequence map.
+    void add_to_bb_map (void)
+    {
+      m_bb_seq_map.insert (std::make_pair (m_start_bb, this));
+    }
 
     // A reference to the the ID of the next element that gets inserted.
     unsigned* next_id (void) const { return m_next_id; }
@@ -675,15 +696,18 @@ public:
     // to the next element.
     iterator remove_element (iterator el, bool clear_deps = true);
 
-    // Find the value that REG was last set to, starting the search from
-    // START_INSN.
-    find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn);
-
     // The first insn and basic block in the sequence.
     const_iterator start_insn_element (void) const;
 
     rtx_insn* start_insn (void) const;
-    basic_block start_bb (void) const;
+
+    // The basic block of the first insn in the access sequence.
+    basic_block start_bb (void) const { return m_start_bb; }
+
+    // The single basic block that precedes the sequence, or NULL if
+    // there are multiple predecessor BBs.  Also NULL if there's a
+    // previous BB but its sequences get processed after this sequence.
+    basic_block prev_bb (void) const { return m_prev_bb; }
 
     // A map containing all the address regs used in the sequence
     // and the number of elements that use them.
@@ -798,7 +822,6 @@ public:
       rtx reg, std::set<reg_mod*>& used_reg_mods,
       std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods);
 
-    std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
     template <typename OutputIterator> void
     find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out,
                           bool check_every_rtx = false);
@@ -819,9 +842,10 @@ public:
     std::list<ref_counting_ptr<sequence_element> > m_els;
     addr_reg_map m_addr_regs;
     insn_map m_insn_el_map;
-
     glob_insn_map& m_glob_insn_el_map;
+    bb_map& m_bb_seq_map;
     unsigned* m_next_id;
+    basic_block m_start_bb, m_prev_bb;
     start_addr_list m_start_addr_list;
 
   };
@@ -1477,11 +1501,20 @@ NOTE:
     return rtx_to_addr_expr(x, Pmode, NULL, NULL);
   }
 
+  // Find the value that REG was last set to, starting the search from
+  // START_INSN.
+  static find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn,
+                                               basic_block prev_bb,
+                                               sequence::glob_insn_map&
+                                               insn_el_map);
+
   void set_options (const options& opt);
 
 private:
 
   static const pass_data default_pass_data;
+
+  static std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
 
   delegate& m_delegate;
   options m_options;
