@@ -7347,12 +7347,8 @@ label:
 	lds	%1,%0"
   [(set_attr "type" "pcload,move,movi8,store,load,store,load,prget,prset")
    (set (attr "length")
-	(cond [(and (match_operand 0 "displacement_mem_operand")
-		    (not (match_operand 0 "short_displacement_mem_operand")))
-	       (const_int 4)
-	       (and (match_operand 1 "displacement_mem_operand")
-		    (not (match_operand 1 "short_displacement_mem_operand")))
-	       (const_int 4)]
+	(cond [(match_operand 0 "long_displacement_mem_operand") (const_int 4)
+	       (match_operand 1 "long_displacement_mem_operand") (const_int 4)]
 	      (const_int 2)))])
 
 (define_insn "*movqi_media"
@@ -16547,7 +16543,14 @@ label:
 	 "	mov	#0,%2";
 }
   [(set_attr "type" "other")
-   (set_attr "length" "6")
+   (set (attr "length")
+	(cond [(and (match_operand 0 "long_displacement_mem_operand")
+		    (match_operand 1 "long_displacement_mem_operand"))
+	       (const_int 10)
+	       (ior (match_operand 0 "long_displacement_mem_operand")
+		    (match_operand 1 "long_displacement_mem_operand"))
+	       (const_int 8)]
+	      (const_int 6)))
    (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "stack_protect_set_si_media"
@@ -16627,7 +16630,14 @@ label:
 	 "	mov	#0,%3";
 }
   [(set_attr "type" "other")
-   (set_attr "length" "10")
+   (set (attr "length")
+	(cond [(and (match_operand 0 "long_displacement_mem_operand")
+		    (match_operand 1 "long_displacement_mem_operand"))
+	       (const_int 14)
+	       (ior (match_operand 0 "long_displacement_mem_operand")
+		    (match_operand 1 "long_displacement_mem_operand"))
+	       (const_int 12)]
+	      (const_int 10)))
    (set_attr "ams_validate_alternatives" "yes")])
 
 (define_insn "stack_protect_test_si_media"
