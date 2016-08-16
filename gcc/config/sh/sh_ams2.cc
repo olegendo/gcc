@@ -3699,8 +3699,10 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn, basic_block prev_bb,
   rtx_insn* i;
   for (i = start_insn; i != NULL_RTX; i = prev_nonnote_insn_bb (i))
     {
-      if (BARRIER_P (i))
+      if (BARRIER_P (i)
+	  || (NOTE_P (i) && NOTE_KIND (i) == NOTE_INSN_FUNCTION_BEG))
 	return find_reg_value_result (reg, NULL_RTX, i, bb);
+
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
 
