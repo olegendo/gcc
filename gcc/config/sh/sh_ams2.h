@@ -599,23 +599,13 @@ public:
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences);
 
-    sequence (glob_insn_map& im, bb_map& bm, unsigned* i, basic_block bb)
-    : m_glob_insn_el_map (im), m_bb_seq_map (bm), m_next_id (i),
-      m_start_bb (bb), m_prev_bb (NULL)
-    {
-      if (single_pred_p (m_start_bb))
-        {
-          m_prev_bb = single_pred (m_start_bb);
+    sequence (glob_insn_map& im, bb_map& bm, unsigned* i, basic_block bb);
 
-          // Don't use the previous BB if there are no sequences in it.
-          std::pair<bb_map::iterator, bb_map::iterator> range =
-            m_bb_seq_map.equal_range (m_prev_bb);
-          if (range.first == range.second)
-            m_prev_bb = NULL;
-        }
-    }
+    sequence (const sequence& other);
 
     ~sequence (void);
+
+    sequence& operator = (const sequence& other);
 
     // A reference to the global insn->element map.
     glob_insn_map& g_insn_el_map (void) const { return m_glob_insn_el_map; }
@@ -655,15 +645,7 @@ public:
     // Fill the m_inc/dec_chain fields of the sequence elements.
     void calculate_adjacency_info (void);
 
-    // Check whether REG is used in any element after START.
-    bool reg_used_in_sequence (rtx reg, const_iterator start) const;
-
-    // Check whether REG is used in any of the sequence's accesses.
-    bool
-    reg_used_in_sequence (rtx reg) const
-    {
-      return reg_used_in_sequence (reg, begin ());
-    }
+    bool contains (const sequence_element* el) const;
 
     // The total cost of the accesses in the sequence.
     int cost (void) const;
@@ -696,6 +678,9 @@ public:
     // to the next element.
     iterator remove_element (iterator el, bool clear_deps = true);
 
+    // Revert the sequence to a previous state found in PREV_SEQUENCES.
+    void revert (std::map<sequence*, sequence>& prev_sequences);
+
     // The first insn and basic block in the sequence.
     const_iterator start_insn_element (void) const;
 
@@ -717,9 +702,17 @@ public:
     std::pair<insn_map::iterator, insn_map::iterator>
     elements_in_insn (rtx_insn* insn) { return m_insn_el_map.equal_range (insn); }
 
+    std::pair<insn_map::const_iterator, insn_map::const_iterator>
+    elements_in_insn (rtx_insn* insn) const {
+      return m_insn_el_map.equal_range (insn);
+    }
+
     // A structure for retrieving the starting addresses that could be
     // used to arrive at a given destination address.
     start_addr_list& start_addresses (void)  { return m_start_addr_list; }
+
+    // The original sequence that this sequence was copied from.
+    const sequence* original_seq (void) const  { return m_original_seq; }
 
     bool empty (void) const { return m_els.empty (); }
     size_t size (void) const { return m_els.size (); }
@@ -847,7 +840,7 @@ public:
     unsigned* m_next_id;
     basic_block m_start_bb, m_prev_bb;
     start_addr_list m_start_addr_list;
-
+    const sequence* m_original_seq;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -858,10 +851,7 @@ public:
   public:
     static const unsigned invalid_id;
 
-    virtual ~sequence_element (void)
-      {
-        m_sequences.clear ();
-      }
+    virtual ~sequence_element (void);
 
     struct equals
     {

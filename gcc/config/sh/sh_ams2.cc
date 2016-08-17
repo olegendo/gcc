@@ -887,6 +887,22 @@ sh_ams2::addr_expr::get_all_subterms (OutputIterator out) const
     }
 }
 
+sh_ams2::sequence_element::~sequence_element (void)
+{
+  m_sequences.clear ();
+  for (sequence_element::dependency_set::iterator deps =
+         m_dependencies.begin ();
+       deps != m_dependencies.end (); ++deps)
+    (*deps)->remove_dependent_el (this);
+  m_dependencies.clear ();
+
+  for (sequence_element::dependency_set::iterator dep_els =
+         m_dependent_els.begin ();
+       dep_els != m_dependent_els.end (); ++dep_els)
+    (*dep_els)->remove_dependency (this);
+  m_dependent_els.clear ();
+}
+
 // Return true if the element can be removed or changed by an optimization
 // subpass.
 bool
@@ -1415,6 +1431,33 @@ sh_ams2::sequence::split_1 (sequence& seq,
   return insert_count;
 }
 
+sh_ams2::sequence::sequence (glob_insn_map& im, bb_map& bm, unsigned* i,
+                             basic_block bb)
+: m_glob_insn_el_map (im), m_bb_seq_map (bm), m_next_id (i),
+  m_start_bb (bb), m_prev_bb (NULL), m_original_seq (NULL)
+{
+  if (single_pred_p (m_start_bb))
+    {
+      m_prev_bb = single_pred (m_start_bb);
+
+      // Don't use the previous BB if there are no sequences in it.
+      std::pair<bb_map::iterator, bb_map::iterator> range =
+        m_bb_seq_map.equal_range (m_prev_bb);
+      if (range.first == range.second)
+        m_prev_bb = NULL;
+    }
+}
+
+sh_ams2::sequence::sequence (const sequence& other)
+: m_glob_insn_el_map (other.m_glob_insn_el_map),
+  m_bb_seq_map (other.m_bb_seq_map), m_next_id (other.m_next_id),
+  m_start_bb (other.m_start_bb), m_prev_bb (other.m_prev_bb),
+  m_original_seq (&other)
+{
+  for (const_iterator els = other.begin (); els != other.end (); ++els)
+    insert_element (*els.base (), end ());
+}
+
 sh_ams2::sequence::~sequence (void)
 {
   std::pair<bb_map::iterator, bb_map::iterator> range =
@@ -1431,6 +1474,25 @@ sh_ams2::sequence::~sequence (void)
       els->sequences ().erase (this);
       els = remove_element (els, false);
     }
+}
+
+sh_ams2::sequence&
+sh_ams2::sequence::operator = (const sequence& other)
+{
+  m_insn_el_map = other.m_insn_el_map;
+  m_start_bb = other.m_start_bb;
+  m_prev_bb = other.m_prev_bb;
+
+  for (iterator els = begin (); els != end ();)
+    {
+      els->sequences ().erase (this);
+      els = remove_element (els, false);
+    }
+
+  for (const_iterator els = other.begin (); els != other.end (); ++els)
+    insert_element (*els.base (), end ());
+
+  return *this;
 }
 
 // Find all mem accesses in the insn I and add them to the sequence.
@@ -3235,18 +3297,55 @@ sh_ams2::sequence::remove_element (iterator el, bool clear_deps)
            deps != el->dependencies ().end (); ++deps)
         (*deps)->remove_dependent_el (&*el);
 
-      el->dependencies ().clear ();
-
       for (sequence_element::dependency_set::iterator dep_els =
              el->dependent_els ().begin ();
            dep_els != el->dependent_els ().end (); ++dep_els)
         (*dep_els)->remove_dependency (&*el);
-
-      el->dependent_els ().clear ();
     }
 
   return iterator (m_els.erase (el.base ()));
 }
+
+// Revert the sequence to a previous state found in PREV_SEQUENCES.
+void
+sh_ams2::sequence::revert (std::map<sequence*, sequence>& prev_sequences)
+{
+  std::map<sequence*, sequence>::iterator prev_seq =
+                                   prev_sequences.find (this);
+  gcc_assert (prev_seq != prev_sequences.end ());
+  *this = prev_seq->second;
+  prev_sequences.erase (prev_seq);
+
+  // Restore the dependencies that might have been removed
+  // when an element got removed from the sequence.
+  for (iterator el = begin (); el != end (); ++el)
+    {
+      for (sequence_element::dependency_set::iterator deps =
+             el->dependencies ().begin ();
+           deps != el->dependencies ().end (); ++deps)
+        (*deps)->add_dependent_el (&*el);
+      for (sequence_element::dependency_set::iterator dep_els =
+             el->dependent_els ().begin ();
+           dep_els != el->dependent_els ().end (); ++dep_els)
+        (*dep_els)->add_dependency (&*el);
+    }
+}
+
+bool
+sh_ams2::sequence::contains (const sequence_element* el) const
+{
+  gcc_assert (el->insn () != NULL);
+
+  std::pair<insn_map::const_iterator, insn_map::const_iterator> els_in_insn =
+    elements_in_insn (el->insn ());
+  for (insn_map::const_iterator els = els_in_insn.first;
+       els != els_in_insn.second; ++els)
+    if (&*els->second == el)
+      return true;
+
+  return false;
+}
+
 
 // The total cost of the accesses in the sequence.
 int
@@ -4558,6 +4657,8 @@ sh_ams2::execute (function* fun)
       return 0;
     }
 
+  std::map<sequence*, sequence> prev_sequences;
+
   log_msg ("generating new address modifications\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
        it != sequences.end (); ++it)
@@ -4567,6 +4668,9 @@ sh_ams2::execute (function* fun)
 
       log_sequence (seq, true);
       log_msg ("\n\n");
+
+      // Copy the sequence in case we'll want to revert the changes.
+      prev_sequences.insert (std::make_pair (&seq, sequence (seq)));
 
       log_msg ("gen_address_mod\n");
       seq.gen_address_mod (m_delegate, m_options.base_lookahead_count);
@@ -4586,20 +4690,40 @@ sh_ams2::execute (function* fun)
             {
               log_msg ("  not modifying\n");
               seqs_to_skip.insert (&seq);
+              seq.revert (prev_sequences);
             }
 	  else
 	    log_msg ("  modifying anyway\n");
 	}
     }
 
-  log_msg ("\nremoving unused reg-mods\n");
+  log_msg ("\nremoving unused reg-mod insns\n");
   std::multimap<rtx_insn*, sequence*> insns_to_delete;
   for (trv_iterator<deref<
 	std::list<ref_counting_ptr<sequence_element> >::iterator> >
        i (original_reg_mods.begin ()), i_end (original_reg_mods.end ());
        i != i_end; )
     {
-      if (i->insn () == NULL || !i->dependent_els ().empty ())
+      if (i->insn () == NULL)
+        {
+          ++i;
+          continue;
+        }
+
+      // A reg-mod is unused if it's only present in the pre-optimization
+      // sequences.
+      bool found = false;
+      for (std::set<sequence*>::iterator it = i->sequences ().begin ();
+           it != i->sequences ().end (); ++it)
+        {
+          sequence& el_seq = **it;
+          if (el_seq.original_seq () == NULL && el_seq.contains (&*i))
+            {
+              found = true;
+              break;
+            }
+        }
+      if (found)
         {
           ++i;
           continue;
@@ -4618,24 +4742,27 @@ sh_ams2::execute (function* fun)
 
           // In this case, all other sequences that used this reg-mod
           // can't be updated either.
-          for (std::set<sequence*>::iterator el_seqs = i->sequences ().begin ();
-               el_seqs != i->sequences ().end (); ++el_seqs)
+          for (std::set<sequence*>::iterator it = i->sequences ().begin ();
+               it != i->sequences ().end (); ++it)
             {
-              if (seqs_to_skip.find (*el_seqs) == seqs_to_skip.end ())
+              sequence& el_seq = **it;
+              if (el_seq.original_seq () == NULL
+                  && seqs_to_skip.find (&el_seq) == seqs_to_skip.end ())
                 {
                   if (dump_file != NULL)
                     {
                       log_msg ("sequence ");
-                      dump_addr (dump_file, "", (const void*)*el_seqs);
+                      dump_addr (dump_file, "", (const void*)&el_seq);
                       log_msg (" won't be modified either\n");
                     }
-                  seqs_to_skip.insert (*el_seqs);
+                  seqs_to_skip.insert (&el_seq);
+                  el_seq.revert (prev_sequences);
                 }
             }
         }
       else if (i->insn ())
         {
-          if (!NONJUMP_INSN_P (i->insn ()))
+          if (control_flow_insn_p (i->insn ()))
             {
               log_msg ("reg-mod's insn is a jump or call\n");
               log_msg ("keeping insn\n");
@@ -4662,7 +4789,8 @@ sh_ams2::execute (function* fun)
             }
           for (std::set<sequence*>::iterator seqs = i->sequences ().begin ();
                seqs != i->sequences ().end (); ++seqs)
-            insns_to_delete.insert (std::make_pair (i->insn (), *seqs));
+            if ((*seqs)->original_seq () == NULL)
+              insns_to_delete.insert (std::make_pair (i->insn (), *seqs));
         }
     next:
       i = make_of_type (i, original_reg_mods.erase (i));
@@ -4689,9 +4817,11 @@ sh_ams2::execute (function* fun)
             for (it = prev; it != insns_to_delete.end () && it->first == i;
                  ++it)
               {
-                if (seqs_to_skip.find (it->second) == seqs_to_skip.end ())
+                seq = it->second;
+                if (seqs_to_skip.find (seq) == seqs_to_skip.end ())
                   {
-                    seqs_to_skip.insert (it->second);
+                    seqs_to_skip.insert (seq);
+                    seq->revert (prev_sequences);
                     ++insert_count;
                   }
               }
@@ -4713,6 +4843,8 @@ sh_ams2::execute (function* fun)
       while (it != insns_to_delete.end () && it->first == i)
         ++it;
     }
+
+  prev_sequences.clear ();
 
   log_msg ("\nupdating sequence insns\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
