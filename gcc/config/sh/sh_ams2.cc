@@ -2022,14 +2022,17 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   iterator prev_el = begin ();
   unsigned next_tmp_regno = max_reg_num ();
 
-  if (prev_bb () != NULL)
+  // Add the previous BB's start addresses to the visited list.
+  basic_block prev = prev_bb ();
+  while (prev != NULL)
     {
-      // Add the previous BB's start addresses to the visited list.
       std::pair<bb_map::iterator, bb_map::iterator> range =
-        m_bb_seq_map.equal_range (prev_bb ());
+        m_bb_seq_map.equal_range (prev);
+      prev = NULL;
       for (bb_map::iterator it = range.first; it != range.second; ++it)
         {
           sequence* seq = it->second;
+          prev = seq->prev_bb ();
           for (reg_mod_iter rm (seq->begin<reg_mod_match> ()),
                  rm_end (seq->end<reg_mod_match> ()); rm != rm_end; ++rm)
             visited_reg_mods[rm->reg ()] = &*rm;
@@ -2316,14 +2319,20 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
   std::vector<reg_mod*> start_addrs;
   start_addresses ().get_relevant_addresses (end_addr,
                                              std::back_inserter (start_addrs));
-  if (prev_bb () != NULL)
+
+  // Add the start addresses of the previous BB's sequences.
+  basic_block prev = prev_bb ();
+  while (prev != NULL)
     {
-      // Add the start addresses of the previous BB's sequences.
       std::pair<bb_map::iterator, bb_map::iterator> range =
-        m_bb_seq_map.equal_range (prev_bb ());
+        m_bb_seq_map.equal_range (prev);
+      prev = NULL;
       for (bb_map::iterator it = range.first; it != range.second; ++it)
-        it->second->start_addresses ().get_relevant_addresses (
-          end_addr, std::back_inserter (start_addrs));
+        {
+          prev = it->second->prev_bb ();
+          it->second->start_addresses ().get_relevant_addresses (
+            end_addr, std::back_inserter (start_addrs));
+        }
     }
 
   for (std::vector<reg_mod*>::iterator addrs = start_addrs.begin ();
@@ -2806,8 +2815,23 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
                            visited_reg_mods)
 {
   std::list<reg_mod*> start_addrs;
-  start_addresses ().get_relevant_addresses (make_reg_addr (reg),
+  addr_expr end_addr = make_reg_addr (reg);
+  start_addresses ().get_relevant_addresses (end_addr,
                                              std::back_inserter (start_addrs));
+  // Add the start addresses of the previous BB's sequences.
+  basic_block prev = prev_bb ();
+  while (prev != NULL)
+    {
+      std::pair<bb_map::iterator, bb_map::iterator> range =
+        m_bb_seq_map.equal_range (prev);
+      prev = NULL;
+      for (bb_map::iterator it = range.first; it != range.second; ++it)
+        {
+          prev = it->second->prev_bb ();
+          it->second->start_addresses ().get_relevant_addresses (
+            end_addr, std::back_inserter (start_addrs));
+        }
+    }
   reg_mod* found_addr = NULL;
 
   for (trv_iterator<deref<start_addr_list::iterator> >
