@@ -4566,15 +4566,12 @@ sh_ams2::execute (function* fun)
   std::list<ref_counting_ptr<sequence_element> > original_reg_mods;
   log_msg ("\nprocessing extracted sequences\n");
   for (std::list<sequence>::iterator it = sequences.begin ();
-       it != sequences.end ();)
+       it != sequences.end (); ++it)
     {
       sequence& seq = *it;
 
       if (seq.empty () || seq.has_no_insns ())
-        {
-          ++it;
-          continue;
-        }
+        continue;
 
       log_msg ("find_addr_reg_mods\n");
       seq.find_addr_reg_mods ();
@@ -4600,12 +4597,27 @@ sh_ams2::execute (function* fun)
 
       log_sequence (seq, true, true);
       log_msg ("\n\n");
+    }
 
-      log_msg ("split_access_sequence\n");
-      if (m_options.split_sequences)
-        it = sequence::split (it, sequences);
-      else
-        ++it;
+  if (m_options.split_sequences)
+    {
+      log_msg ("splitting sequences\n");
+      for (std::list<sequence>::iterator it = sequences.begin ();
+           it != sequences.end ();)
+        {
+          sequence& seq = *it;
+
+          if (seq.empty () || seq.has_no_insns ())
+            {
+              ++it;
+              continue;
+            }
+
+          log_sequence (seq, false);
+          log_msg ("\n\n");
+          log_msg ("split_access_sequence\n");
+          it = sequence::split (it, sequences);
+        }
     }
 
   std::set<sequence*> seqs_to_skip;
