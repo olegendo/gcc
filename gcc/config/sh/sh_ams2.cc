@@ -4570,7 +4570,7 @@ sh_ams2::execute (function* fun)
     {
       sequence& seq = *it;
 
-      if (seq.empty ())
+      if (seq.empty () || seq.has_no_insns ())
         {
           ++it;
           continue;
@@ -4618,7 +4618,7 @@ sh_ams2::execute (function* fun)
       log_sequence (seq, false);
       log_msg ("\n\n");
 
-      if (seq.empty ())
+      if (seq.empty () || seq.has_no_insns ())
         {
           log_msg ("skipping empty sequence\n");
           continue;

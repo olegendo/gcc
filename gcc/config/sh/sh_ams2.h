@@ -717,6 +717,12 @@ public:
     bool empty (void) const { return m_els.empty (); }
     size_t size (void) const { return m_els.size (); }
 
+    bool has_no_insns (void) const
+    {
+      return std::find_if (begin (), end (),
+                           std::mem_fun_ref (&sequence_element::insn)) == end ();
+    }
+
     iterator begin (void) { return iterator (m_els.begin ()); }
     iterator end (void) { return iterator (m_els.end ()); }
 
