@@ -2285,6 +2285,9 @@ struct sh_ams2::mod_addr_result
   reg_mod* final_addr;
   disp_t addr_disp;
 
+  mod_addr_result (void)
+  : cost (0), final_addr (NULL), addr_disp (0) { }
+
   mod_addr_result (int c)
   : cost (c), final_addr (NULL), addr_disp (0) { }
 
@@ -2437,9 +2440,9 @@ insert_address_mods (alternative_set::const_iterator alt,
                              acc_mode, el, tracker,
                              used_reg_mods, visited_reg_mods, dlg,
                              next_tmp_regno);
-  tracker.create_dependency (base_insert_result.final_addr, &*el);
 
   addr_expr new_addr;
+  mod_addr_result index_insert_result;
   if (alt->address ().has_no_index_reg ())
     {
       disp_t disp = ae.disp () - base_insert_result.addr_disp;
@@ -2450,14 +2453,13 @@ insert_address_mods (alternative_set::const_iterator alt,
     {
       // Insert the modifications needed to arrive at the address
       // in the index reg.
-      mod_addr_result index_insert_result =
+      index_insert_result =
         try_insert_address_mods (index_start_addr, index_end_addr,
                                  0, 0,
                                  alt->address ().type (),
                                  acc_mode, el, tracker,
                                  used_reg_mods, visited_reg_mods, dlg,
                                  next_tmp_regno);
-      tracker.create_dependency (index_insert_result.final_addr, &*el);
       new_addr = non_mod_addr (base_insert_result.final_addr->reg (),
                                index_insert_result.final_addr->reg (), 1, 0);
     }
@@ -2475,6 +2477,9 @@ insert_address_mods (alternative_set::const_iterator alt,
                                                        alt)));
       m->set_current_addr_and_alt (new_addr, alt);
       m->set_cost (alt->cost ());
+      tracker.create_dependency (base_insert_result.final_addr, m);
+      if (alt->address ().has_index_reg ())
+        tracker.create_dependency (index_insert_result.final_addr, m);
     }
   else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
     {
@@ -2488,6 +2493,7 @@ insert_address_mods (alternative_set::const_iterator alt,
                                 (alternative_set::const_iterator)NULL)));
           ru->set_reg (new_addr.base_reg ());
           ru->set_current_addr (new_addr);
+          tracker.create_dependency (base_insert_result.final_addr, ru);
         }
       else
         {
@@ -2497,22 +2503,9 @@ insert_address_mods (alternative_set::const_iterator alt,
             make_ref_counted<reg_mod> ((rtx_insn*)NULL, ru->reg (), NULL_RTX,
                                        new_addr, ru->effective_addr ()),
             el);
-
-          // Find and add the dependency for the new reg-mod
-          for (iterator it = stdx::prev (inserted_el); ; --it)
-            {
-	      if (reg_mod* rm = dyn_cast<reg_mod*> (&*it))
-		if (regs_equal (rm->reg (), new_addr.base_reg ())
-		    || regs_equal (rm->reg (), new_addr.index_reg ()))
-		  {
-		    inserted_el->add_dependency (rm);
-                    tracker.create_dependency (rm, &*inserted_el);
-		    break;
-		  }
-
-              if (it == begin ())
-                gcc_unreachable ();
-            }
+          tracker.create_dependency (&*inserted_el, ru);
+          tracker.create_dependency (base_insert_result.final_addr,
+                                     &*inserted_el);
         }
     }
 }
