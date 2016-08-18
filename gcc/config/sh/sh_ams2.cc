@@ -1452,7 +1452,7 @@ sh_ams2::sequence::sequence (const sequence& other)
 : m_glob_insn_el_map (other.m_glob_insn_el_map),
   m_bb_seq_map (other.m_bb_seq_map), m_next_id (other.m_next_id),
   m_start_bb (other.m_start_bb), m_prev_bb (other.m_prev_bb),
-  m_original_seq (&other)
+  m_original_seq (other.m_original_seq)
 {
   for (const_iterator els = other.begin (); els != other.end (); ++els)
     insert_element (*els.base (), end ());
@@ -4699,7 +4699,9 @@ sh_ams2::execute (function* fun)
       log_msg ("\n\n");
 
       // Copy the sequence in case we'll want to revert the changes.
-      prev_sequences.insert (std::make_pair (&seq, sequence (seq)));
+      sequence copy (seq);
+      copy.set_original_seq (&seq);
+      prev_sequences.insert (std::make_pair (&seq, copy));
 
       log_msg ("gen_address_mod\n");
       seq.gen_address_mod (m_delegate, m_options.base_lookahead_count);

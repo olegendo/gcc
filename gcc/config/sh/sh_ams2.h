@@ -713,6 +713,7 @@ public:
 
     // The original sequence that this sequence was copied from.
     const sequence* original_seq (void) const  { return m_original_seq; }
+    void set_original_seq (sequence* s) { m_original_seq = s; }
 
     bool empty (void) const { return m_els.empty (); }
     size_t size (void) const { return m_els.size (); }
