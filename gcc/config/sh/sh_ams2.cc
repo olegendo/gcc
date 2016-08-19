@@ -2549,6 +2549,12 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
       reg_mod* index_reg_addr
         = find_start_addr_for_reg (c_end_addr.index_reg (),
                                    used_reg_mods, visited_reg_mods);
+      if (index_reg_addr == NULL)
+        {
+          tracker.reset_changes ();
+          return mod_addr_result (infinite_costs);
+        }
+
       bool index_reg_used
         = used_reg_mods.find (index_reg_addr) != used_reg_mods.end ();
 
@@ -2586,6 +2592,12 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
       reg_mod* base_reg_addr
         = find_start_addr_for_reg (c_end_addr.base_reg (),
                                    used_reg_mods, visited_reg_mods);
+      if (base_reg_addr == NULL)
+        {
+          tracker.reset_changes ();
+          return mod_addr_result (infinite_costs);
+        }
+
       bool base_reg_used
         = used_reg_mods.find (base_reg_addr) != used_reg_mods.end ();
 
@@ -2716,6 +2728,7 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
 // Find a starting address whose effective address is the single base reg REG.
 // If there are multiple such addresses, try to return one that wasn't used
 // before (so that there's no cloning cost when using it).
+// Return NULL if no such address was found.
 sh_ams2::reg_mod* sh_ams2::sequence::
 find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
                          std::map<rtx, reg_mod*, cmp_by_regno>&
@@ -2748,7 +2761,6 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
         }
     }
 
-  gcc_assert (found_addr != NULL);
   return found_addr;
 }
 
