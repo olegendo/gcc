@@ -378,7 +378,13 @@ log_sequence (const sh_ams2::sequence& seq, bool log_alternatives = true,
 
   log_msg ("=====\naccess sequence ");
   dump_addr (dump_file, "", (const void*)&seq);
-  log_msg (": %s\n\n", seq.empty () ? "is empty" : "");
+  log_msg (": %s\n", seq.empty () ? "is empty" : "");
+  log_msg ("basic blocks: ");
+  for (std::vector<basic_block>::const_iterator it =
+         seq.basic_blocks ().begin ();
+       it != seq.basic_blocks ().end (); ++it)
+    log_msg ("%d ", (*it)->index);
+  log_msg ("\n\n");
 
   if (seq.empty ())
     return;
@@ -1196,16 +1202,15 @@ public:
   rtx reg;
   rtx value;
   rtx_insn* insn;
-  basic_block bb;
   mem_access* acc;
   reg_mod* rm;
 
-  find_reg_value_result (rtx r, rtx v, rtx_insn* i, basic_block b,
+  find_reg_value_result (rtx r, rtx v, rtx_insn* i,
                          mem_access* a = NULL)
-  : reg (r), value (v), insn (i), bb (b), acc (a), rm (NULL) { }
+  : reg (r), value (v), insn (i), acc (a), rm (NULL) { }
 
-  find_reg_value_result (reg_mod* r, rtx_insn* i, basic_block b)
-  : reg (r->reg ()), value (NULL), insn (i), bb (b), acc (NULL), rm (r) { }
+  find_reg_value_result (reg_mod* r, rtx_insn* i)
+  : reg (r->reg ()), value (NULL), insn (i), acc (NULL), rm (r) { }
 };
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
@@ -1359,12 +1364,10 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
 	    if (!term.new_seq ())
               {
                 term.set_new_seq (
-                  &(*sequences.insert (seq_it, sequence (seq.g_insn_el_map (),
-                                                         seq.bb_seq_map (),
-                                                         seq.next_id (),
-                                                         seq.start_bb ()))));
+                  &(*sequences.insert (
+                    seq_it, sequence (seq.g_insn_el_map (), seq.next_id (),
+                                      seq.basic_blocks ()))));
                 new_seqs.push_back (term.new_seq ());
-                term.new_seq ()->add_to_bb_map ();
               }
 	    element_new_seqs[*el] = term.new_seq ();
 	  }
@@ -1413,10 +1416,6 @@ int
 sh_ams2::sequence::split_1 (sequence& seq,
 			    const ref_counting_ptr<sequence_element>& el)
 {
-  // Don't insert dependencies from other BBs.
-  if (el->insn () != NULL && BLOCK_FOR_INSN (el->insn ()) != seq.start_bb ())
-    return 0;
-
   unsigned insert_count = 0;
   unsigned prev_size = seq.size ();
 
@@ -1431,57 +1430,11 @@ sh_ams2::sequence::split_1 (sequence& seq,
   return insert_count;
 }
 
-sh_ams2::sequence::sequence (glob_insn_map& im, bb_map& bm, unsigned* i,
-                             basic_block bb)
-: m_glob_insn_el_map (im), m_bb_seq_map (bm), m_next_id (i),
-  m_start_bb (bb), m_prev_bb (NULL), m_original_seq (NULL)
-{
-  if (single_pred_p (m_start_bb))
-    {
-      m_prev_bb = single_pred (m_start_bb);
-
-      // Don't use the previous BB if there are no sequences in it.
-      std::pair<bb_map::iterator, bb_map::iterator> range =
-        m_bb_seq_map.equal_range (m_prev_bb);
-      if (range.first == range.second)
-        m_prev_bb = NULL;
-    }
-}
-
-sh_ams2::sequence::sequence (const sequence& other)
-: m_glob_insn_el_map (other.m_glob_insn_el_map),
-  m_bb_seq_map (other.m_bb_seq_map), m_next_id (other.m_next_id),
-  m_start_bb (other.m_start_bb), m_prev_bb (other.m_prev_bb),
-  m_original_seq (other.m_original_seq)
-{
-  for (const_iterator els = other.begin (); els != other.end (); ++els)
-    insert_element (*els.base (), end ());
-}
-
-sh_ams2::sequence::~sequence (void)
-{
-  std::pair<bb_map::iterator, bb_map::iterator> range =
-    m_bb_seq_map.equal_range (start_bb ());
-  for (bb_map::iterator it = range.first; it != range.second; ++it)
-    if (it->second == this)
-      {
-        m_bb_seq_map.erase (it);
-        break;
-      }
-
-  for (iterator els = begin (); els != end ();)
-    {
-      els->sequences ().erase (this);
-      els = remove_element (els, false);
-    }
-}
-
 sh_ams2::sequence&
 sh_ams2::sequence::operator = (const sequence& other)
 {
   m_insn_el_map = other.m_insn_el_map;
-  m_start_bb = other.m_start_bb;
-  m_prev_bb = other.m_prev_bb;
+  m_basic_blocks = other.m_basic_blocks;
 
   for (iterator els = begin (); els != end ();)
     {
@@ -1596,14 +1549,13 @@ sh_ams2::sequence::find_addr_reg_mods (void)
   for (addr_reg_map::iterator it = m_addr_regs.begin ();
        it != m_addr_regs.end (); ++it)
     {
-      rtx_insn* last_insn = BB_END (start_bb ());
+      rtx_insn* last_insn = BB_END (basic_blocks ().back ());
       reg_mod* last_reg_mod = NULL;
-      sequence* curr_seq = this;
       for (rtx reg = it->first; last_insn != NULL; )
 	{
           reg_mod* new_reg_mod;
 	  const find_reg_value_result prev =
-            find_reg_value (reg, last_insn, curr_seq->prev_bb (),
+            find_reg_value (reg, last_insn, basic_blocks ().front (),
                             g_insn_el_map ());
 
           if (prev.rm != NULL)
@@ -1617,19 +1569,11 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                   && regs_equal (prev.value, reg))
                 break;
 
-              // Set the current sequence to the one that contains
-              // the modifying insn.
-              std::pair<bb_map::iterator, bb_map::iterator> range =
-                m_bb_seq_map.equal_range (prev.bb);
-              gcc_assert (range.first != range.second
-                          && stdx::next (range.first) == range.second);
-              curr_seq = range.first->second;
-
 	      addr_expr reg_current_addr = prev.acc
                 ? make_reg_addr (reg)
 		: rtx_to_addr_expr (prev.value);
 
-              new_reg_mod = as_a<reg_mod*> (&*curr_seq->insert_unique (
+              new_reg_mod = as_a<reg_mod*> (&*insert_unique (
                 make_ref_counted<reg_mod> (prev.insn, prev.reg, prev.value,
                                            reg_current_addr)));
 
@@ -1637,11 +1581,11 @@ sh_ams2::sequence::find_addr_reg_mods (void)
 		rtx_to_addr_expr (prev.value,
                                   prev.acc ? prev.acc->mach_mode ()
                                            : Pmode,
-                                  curr_seq, new_reg_mod);
+                                  this, new_reg_mod);
 
               new_reg_mod->set_effective_addr (reg_effective_addr);
               new_reg_mod->set_auto_mod_acc (prev.acc);
-              last_insn = prev_nonnote_insn_bb (prev.insn);
+              last_insn = prev_insn_in_bbs (prev.insn);
             }
 
           if (last_reg_mod != NULL)
@@ -1663,8 +1607,8 @@ sh_ams2::sequence::find_addr_reg_uses (void)
   std::map<rtx, reg_mod*, cmp_by_regno> live_addr_regs;
   std::vector<rtx*> reg_use_refs;
 
-    for (reg_mod_iter rm (begin<reg_mod_match> ()),
-       rm_end (end<reg_mod_match> ()); rm != rm_end; ++rm)
+  for (reg_mod_iter rm (begin<reg_mod_match> ()),
+         rm_end (end<reg_mod_match> ()); rm != rm_end; ++rm)
     {
       if (rm->insn () != NULL)
         break;
@@ -1672,7 +1616,7 @@ sh_ams2::sequence::find_addr_reg_uses (void)
       live_addr_regs[rm->reg ()] = &*rm;
     }
 
-  for (rtx_insn* i = start_insn (); i != NULL_RTX; i = next_nonnote_insn_bb (i))
+  for (rtx_insn* i = start_insn (); i != NULL_RTX; i = next_insn_in_bbs (i))
     {
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
@@ -1747,20 +1691,24 @@ sh_ams2::sequence::find_addr_reg_uses (void)
 	  else
 	    ++it;
 	}
-    }
 
-  // Add unspecified reg uses for regs that are still alive at the
-  // end of the sequence.
-  for (std::map<rtx, reg_mod*, cmp_by_regno>::iterator it =
-         live_addr_regs.begin (); it != live_addr_regs.end (); ++it)
-    {
-      rtx reg = it->first;
-      reg_mod* rm = it->second;
-      reg_use* new_reg_use = as_a<reg_use*> (&*insert_element (
-	make_ref_counted<reg_use> ((rtx_insn*)NULL, reg), end ()));
-      new_reg_use->set_effective_addr (rm->effective_addr ());
-      new_reg_use->add_dependency (rm);
-      rm->add_dependent_el (new_reg_use);
+      if (next_nonnote_insn_bb (i) == NULL)
+        {
+          // Add unspecified reg uses for regs that are still alive
+          // at the end of the current BB.
+          for (std::map<rtx, reg_mod*, cmp_by_regno>::iterator it =
+                 live_addr_regs.begin (); it != live_addr_regs.end (); ++it)
+            {
+              rtx reg = it->first;
+              reg_mod* rm = it->second;
+              reg_use* new_reg_use = as_a<reg_use*> (&*insert_unique (
+                make_ref_counted<reg_use> (i, reg)));
+              new_reg_use->set_effective_addr (rm->effective_addr ());
+              new_reg_use->add_dependency (rm);
+              rm->add_dependent_el (new_reg_use);
+            }
+          live_addr_regs.clear ();
+        }
     }
 }
 
@@ -2021,23 +1969,6 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   typedef filter_iterator<iterator, element_to_optimize> el_opt_iter;
   iterator prev_el = begin ();
   unsigned next_tmp_regno = max_reg_num ();
-
-  // Add the previous BB's start addresses to the visited list.
-  basic_block prev = prev_bb ();
-  while (prev != NULL)
-    {
-      std::pair<bb_map::iterator, bb_map::iterator> range =
-        m_bb_seq_map.equal_range (prev);
-      prev = NULL;
-      for (bb_map::iterator it = range.first; it != range.second; ++it)
-        {
-          sequence* seq = it->second;
-          prev = seq->prev_bb ();
-          for (reg_mod_iter rm (seq->begin<reg_mod_match> ()),
-                 rm_end (seq->end<reg_mod_match> ()); rm != rm_end; ++rm)
-            visited_reg_mods[rm->reg ()] = &*rm;
-        }
-    }
 
   for (el_opt_iter els = begin<element_to_optimize> (),
        els_end = end<element_to_optimize> (); els != els_end; ++els)
@@ -2322,21 +2253,6 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
   std::vector<reg_mod*> start_addrs;
   start_addresses ().get_relevant_addresses (end_addr,
                                              std::back_inserter (start_addrs));
-
-  // Add the start addresses of the previous BB's sequences.
-  basic_block prev = prev_bb ();
-  while (prev != NULL)
-    {
-      std::pair<bb_map::iterator, bb_map::iterator> range =
-        m_bb_seq_map.equal_range (prev);
-      prev = NULL;
-      for (bb_map::iterator it = range.first; it != range.second; ++it)
-        {
-          prev = it->second->prev_bb ();
-          it->second->start_addresses ().get_relevant_addresses (
-            end_addr, std::back_inserter (start_addrs));
-        }
-    }
 
   for (std::vector<reg_mod*>::iterator addrs = start_addrs.begin ();
        addrs != start_addrs.end (); ++addrs)
@@ -2811,20 +2727,6 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
   addr_expr end_addr = make_reg_addr (reg);
   start_addresses ().get_relevant_addresses (end_addr,
                                              std::back_inserter (start_addrs));
-  // Add the start addresses of the previous BB's sequences.
-  basic_block prev = prev_bb ();
-  while (prev != NULL)
-    {
-      std::pair<bb_map::iterator, bb_map::iterator> range =
-        m_bb_seq_map.equal_range (prev);
-      prev = NULL;
-      for (bb_map::iterator it = range.first; it != range.second; ++it)
-        {
-          prev = it->second->prev_bb ();
-          it->second->start_addresses ().get_relevant_addresses (
-            end_addr, std::back_inserter (start_addrs));
-        }
-    }
   reg_mod* found_addr = NULL;
 
   for (trv_iterator<deref<start_addr_list::iterator> >
@@ -2880,7 +2782,7 @@ sh_ams2::sequence::eliminate_reg_copies (void)
 {
   typedef std::map<rtx, reg_copy, cmp_by_regno> reg_copy_map;
   reg_copy_map reg_copies;
-  rtx_insn* prev_insn = BB_HEAD (start_bb ());
+  rtx_insn* prev_insn = BB_HEAD (basic_blocks ().front ());
 
   for (iterator el = begin (); el != end (); ++el)
     {
@@ -2906,7 +2808,7 @@ sh_ams2::sequence::eliminate_reg_copies (void)
 
       // Check if any reg copy got modified in the insns between the current
       // and previous elements.
-      for (rtx_insn* i = prev_insn; i != curr_insn; i = NEXT_INSN (i))
+      for (rtx_insn* i = prev_insn; i != curr_insn; i = next_insn_in_bbs (i))
         {
           for (reg_copy_map::iterator it = reg_copies.begin ();
                it != reg_copies.end (); ++it)
@@ -3026,7 +2928,7 @@ sh_ams2::sequence::update_insn_stream (void)
   // sequence's BB.
   if (insn_sequence_started)
     {
-      rtx_insn* last_insn = BB_END (start_bb ());
+      rtx_insn* last_insn = BB_END (basic_blocks ().back ());
       bool emit_before = control_flow_insn_p (last_insn);
 
       rtx_insn* new_insns = get_insns ();
@@ -3815,11 +3717,12 @@ sh_ams2::reg_mod::generate_new_insns (bool insn_sequence_started)
 }
 
 // Find the value that REG was last set to, starting the search from
-// START_INSN.  Return that value along with the insn in which REG gets
-// modified.  If the value of REG cannot be determined, return NULL.
+// START_INSN and stopping at the last insn of STOP_BB.
+// Return the reg's value along with the insn in which it gets modified.
+// If the value of REG cannot be determined, return NULL.
 // If REG didn't get modified, return the REG itself.
 sh_ams2::find_reg_value_result
-sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn, basic_block prev_bb,
+sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn, basic_block stop_bb,
                          sequence::glob_insn_map& insn_el_map)
 {
   std::vector<mem_access*> mems;
@@ -3832,7 +3735,7 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn, basic_block prev_bb,
     {
       if (BARRIER_P (i)
 	  || (NOTE_P (i) && NOTE_KIND (i) == NOTE_INSN_FUNCTION_BEG))
-	return find_reg_value_result (reg, NULL_RTX, i, bb);
+	return find_reg_value_result (reg, NULL_RTX, i);
 
       if (!INSN_P (i) || DEBUG_INSN_P (i))
 	continue;
@@ -3856,7 +3759,7 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn, basic_block prev_bb,
                   if (reg_mod* rm = dyn_cast<reg_mod*> (*deps))
                     {
                       if (regs_equal (rm->reg (), reg))
-                        return find_reg_value_result (rm, i, bb);
+                        return find_reg_value_result (rm, i);
                     }
                 }
             }
@@ -3882,7 +3785,7 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn, basic_block prev_bb,
                       if (GET_RTX_CLASS (code) == RTX_AUTOINC
                           && REG_P (mem_reg) && regs_equal (mem_reg, reg))
                         return find_reg_value_result (mem_reg, mem_addr,
-                                                      i, bb, acc);
+                                                      i, acc);
                     }
                 }
               gcc_unreachable ();
@@ -3890,25 +3793,25 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn, basic_block prev_bb,
           else
             {
               // The reg is modified in some unspecified way, e.g. a clobber.
-              return find_reg_value_result (reg, NULL_RTX, i, bb);
+              return find_reg_value_result (reg, NULL_RTX, i);
             }
         }
       else
         {
           if (GET_CODE (r.first) == SET)
             return find_reg_value_result (SET_DEST (r.first),
-                                          SET_SRC (r.first), i, bb);
+                                          SET_SRC (r.first), i);
           else
-            return find_reg_value_result (reg, NULL_RTX, i, bb);
+            return find_reg_value_result (reg, NULL_RTX, i);
         }
     }
 
   // If there's a previous basic block, continue the value tracing
   // in that BB.
-  if (prev_bb)
-    return find_reg_value (reg, BB_END (prev_bb), NULL, insn_el_map);
+  if (bb != NULL && stop_bb != bb)
+    return find_reg_value (reg, BB_END (single_pred (bb)), NULL, insn_el_map);
 
-  return find_reg_value_result (reg, reg, i, bb);
+  return find_reg_value_result (reg, reg, i);
 }
 
 // The recursive part of find_reg_value. If REG is modified in INSN,
@@ -4256,8 +4159,9 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
 	  find_reg_value_result prev_val =
-            find_reg_value (x, prev_nonnote_insn_bb (el->insn ()),
-                            seq->prev_bb (), seq->g_insn_el_map ());
+            find_reg_value (x, seq->prev_insn_in_bbs (el->insn ()),
+                            seq->basic_blocks ().front (),
+                            seq->g_insn_el_map ());
 
           // If the found reg modification already has a sequence element,
           // use that element's addresses.
@@ -4272,18 +4176,6 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 
           rtx value = prev_val.value;
           rtx_insn* mod_insn = prev_val.insn;
-          sequence* mod_seq = seq;
-
-          if (prev_val.bb != NULL)
-            {
-              std::pair<sequence::bb_map::iterator,
-                        sequence::bb_map::iterator> range =
-                seq->bb_seq_map ().equal_range (prev_val.bb);
-              // There should be only one sequence for each BB at this point.
-              gcc_assert (range.first != range.second
-                          && stdx::next (range.first) == range.second);
-              mod_seq = range.first->second;
-            }
 
           // Stop expanding the reg if the reg can't be expanded any further.
           if (value != NULL_RTX && REG_P (value) && regs_equal (value, x))
@@ -4291,7 +4183,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
               // Add to the sequence's start a reg mod that sets the reg
               // to itself. This will be used by the address modification
               // generator as a starting address.
-              sequence_element* new_reg_mod = &*mod_seq->insert_unique (
+              sequence_element* new_reg_mod = &*seq->insert_unique (
                     make_ref_counted<reg_mod> ((rtx_insn*)NULL, x, x,
                                                make_reg_addr (x),
                                                make_reg_addr (x)));
@@ -4305,7 +4197,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                                    : rtx_to_addr_expr (value, mem_mode);
 
 	  // Insert the modifying insn into the sequence as a reg mod.
-	  reg_mod* new_reg_mod = as_a<reg_mod*> (&*mod_seq->insert_unique (
+	  reg_mod* new_reg_mod = as_a<reg_mod*> (&*seq->insert_unique (
 		make_ref_counted<reg_mod> (mod_insn, prev_val.reg, value,
                                            reg_curr_addr)));
 
@@ -4316,7 +4208,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 	  // Expand the register's value further.
 	  addr_expr reg_effective_addr = rtx_to_addr_expr (
 		value, prev_val.acc ? prev_val.acc->mach_mode () : mem_mode,
-		mod_seq, new_reg_mod);
+		seq, new_reg_mod);
 
 	  new_reg_mod->set_effective_addr (reg_effective_addr);
 
@@ -4517,11 +4409,10 @@ sh_ams2::execute (function* fun)
   // A map that shows which sequence elements an insn contains.
   sequence::glob_insn_map insn_el_map;
 
-  // A map that shows the sequences inside a basic block.
-  sequence::bb_map bb_seq_map;
-
   // Stores the ID of the next element that gets inserted into a sequence.
   unsigned next_element_id = 0;
+
+  std::map<basic_block, sequence*> seq_bb_map;
 
   log_msg ("extracting access sequences\n");
   basic_block bb;
@@ -4532,25 +4423,42 @@ sh_ams2::execute (function* fun)
       log_msg ("BB #%d:\n", bb->index);
       log_msg ("finding mem accesses\n");
 
-      // Create a new sequence from the mem accesses in this BB.
-      sequences.push_back (sequence (insn_el_map, bb_seq_map,
-                                     &next_element_id, bb));
-      sequence& seq = sequences.back ();
-      seq.add_to_bb_map ();
+      sequence* seq;
+      std::map<basic_block, sequence*>::iterator prev_seq;
 
+      // If this BB has a single predecessor BB, reuse that BB's sequence.
+      if (single_pred_p (bb)
+          && (prev_seq = seq_bb_map.find (single_pred (bb)))
+            != seq_bb_map.end ())
+        {
+          seq = prev_seq->second;
+          seq->basic_blocks ().push_back (bb);
+        }
+      else
+        {
+          // Otherwise, create a new sequence.
+          std::vector<basic_block> bb_vec;
+          bb_vec.push_back (bb);
+          sequences.push_back (
+            sequence (insn_el_map, &next_element_id, bb_vec));
+          seq = &sequences.back ();
+          seq_bb_map.insert (std::make_pair (bb, seq));
+        }
+
+      // Add the mem accesses from this BB to the sequence.
       FOR_BB_INSNS (bb, i)
         {
           if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
             continue;
 
-          seq.find_mem_accesses (i);
+          seq->find_mem_accesses (i);
          }
 
-      for (mem_acc_iter m (seq.begin<mem_match> ()),
-	     m_end (seq.end<mem_match> ()); m != m_end; ++m)
+      for (mem_acc_iter m (seq->begin<mem_match> ()),
+	     m_end (seq->end<mem_match> ()); m != m_end; ++m)
         {
           m->set_effective_addr (rtx_to_addr_expr (m->current_addr_rtx (),
-                                                   m->mach_mode (), &seq, &*m));
+                                                   m->mach_mode (), seq, &*m));
           if (m->effective_addr ().is_invalid ())
             m->set_optimization_disabled ();
         }

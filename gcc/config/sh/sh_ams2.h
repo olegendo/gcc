@@ -589,7 +589,6 @@ public:
 
     typedef std::multimap<rtx_insn*, iterator> insn_map;
     typedef std::multimap<rtx_insn*, sequence_element*> glob_insn_map;
-    typedef std::multimap<basic_block, sequence*> bb_map;
 
     // Split the access sequence pointed to by SEQ into multiple sequences,
     // grouping the accesses that have common terms in their effective address
@@ -599,25 +598,36 @@ public:
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences);
 
-    sequence (glob_insn_map& im, bb_map& bm, unsigned* i, basic_block bb);
+    sequence (glob_insn_map& im, unsigned* i,
+              const std::vector<basic_block>& bbs)
+    : m_glob_insn_el_map (im), m_next_id (i),
+      m_basic_blocks (bbs), m_original_seq (NULL)
+      {
+      }
 
-    sequence (const sequence& other);
+    sequence (const sequence& other)
+    : m_glob_insn_el_map (other.m_glob_insn_el_map),
+      m_next_id (other.m_next_id),
+      m_basic_blocks (other.m_basic_blocks),
+      m_original_seq (other.m_original_seq)
+        {
+          for (const_iterator els = other.begin (); els != other.end (); ++els)
+            insert_element (*els.base (), end ());
+        }
 
-    ~sequence (void);
+    ~sequence (void)
+      {
+        for (iterator els = begin (); els != end ();)
+          {
+            els->sequences ().erase (this);
+            els = remove_element (els, false);
+          }
+      }
 
     sequence& operator = (const sequence& other);
 
     // A reference to the global insn->element map.
     glob_insn_map& g_insn_el_map (void) const { return m_glob_insn_el_map; }
-
-    // A reference to the global bb->sequence map.
-    bb_map& bb_seq_map (void) const { return m_bb_seq_map; }
-
-    // Add this sequence to the bb->sequence map.
-    void add_to_bb_map (void)
-    {
-      m_bb_seq_map.insert (std::make_pair (m_start_bb, this));
-    }
 
     // A reference to the the ID of the next element that gets inserted.
     unsigned* next_id (void) const { return m_next_id; }
@@ -684,15 +694,42 @@ public:
     // The first insn and basic block in the sequence.
     const_iterator start_insn_element (void) const;
 
+    // The insn of the first element.
     rtx_insn* start_insn (void) const;
 
-    // The basic block of the first insn in the access sequence.
-    basic_block start_bb (void) const { return m_start_bb; }
+    // The insn in the sequence's BBs that comes before I.
+    rtx_insn* prev_insn_in_bbs (rtx_insn* i) const
+    {
+      basic_block bb = BLOCK_FOR_INSN (i);
+      i = prev_nonnote_insn_bb (i);
+      if (i == NULL && bb != m_basic_blocks.front ())
+        i = BB_END (single_pred (bb));
+      return i;
+    }
 
-    // The single basic block that precedes the sequence, or NULL if
-    // there are multiple predecessor BBs.  Also NULL if there's a
-    // previous BB but its sequences get processed after this sequence.
-    basic_block prev_bb (void) const { return m_prev_bb; }
+    // The insn in the sequence's BBs that comes after I.
+    rtx_insn* next_insn_in_bbs (rtx_insn* i) const
+    {
+      basic_block bb = BLOCK_FOR_INSN (i);
+      i = next_nonnote_insn_bb (i);
+      if (i == NULL && bb != m_basic_blocks.back ())
+        {
+          std::vector<basic_block>::const_iterator bb_it =
+            std::find (m_basic_blocks.begin (), m_basic_blocks.end (), bb);
+          if (bb_it == m_basic_blocks.end ())
+            return NULL;
+          ++bb_it;
+          i = BB_HEAD (*bb_it);
+        }
+      return i;
+    }
+
+    // The BBs of this sequence.
+    std::vector<basic_block>& basic_blocks (void) { return m_basic_blocks; }
+    const std::vector<basic_block>& basic_blocks (void) const
+    {
+      return m_basic_blocks;
+    }
 
     // A map containing all the address regs used in the sequence
     // and the number of elements that use them.
@@ -843,9 +880,8 @@ public:
     addr_reg_map m_addr_regs;
     insn_map m_insn_el_map;
     glob_insn_map& m_glob_insn_el_map;
-    bb_map& m_bb_seq_map;
     unsigned* m_next_id;
-    basic_block m_start_bb, m_prev_bb;
+    std::vector<basic_block> m_basic_blocks;
     start_addr_list m_start_addr_list;
     const sequence* m_original_seq;
   };
@@ -1501,7 +1537,7 @@ NOTE:
   // Find the value that REG was last set to, starting the search from
   // START_INSN.
   static find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn,
-                                               basic_block prev_bb,
+                                               basic_block stop_bb,
                                                sequence::glob_insn_map&
                                                insn_el_map);
 
