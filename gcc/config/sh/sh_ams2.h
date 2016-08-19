@@ -598,18 +598,14 @@ public:
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences);
 
-    sequence (glob_insn_map& im, unsigned* i,
-              const std::vector<basic_block>& bbs)
-    : m_glob_insn_el_map (im), m_next_id (i),
-      m_basic_blocks (bbs), m_original_seq (NULL)
+    sequence (glob_insn_map& im, unsigned* i)
+    : m_glob_insn_el_map (im), m_next_id (i), m_original_seq (NULL)
       {
       }
 
     sequence (const sequence& other)
     : m_glob_insn_el_map (other.m_glob_insn_el_map),
-      m_next_id (other.m_next_id),
-      m_basic_blocks (other.m_basic_blocks),
-      m_original_seq (other.m_original_seq)
+      m_next_id (other.m_next_id), m_original_seq (other.m_original_seq)
         {
           for (const_iterator els = other.begin (); els != other.end (); ++els)
             insert_element (*els.base (), end ());
@@ -693,43 +689,8 @@ public:
 
     // The first insn and basic block in the sequence.
     const_iterator start_insn_element (void) const;
-
-    // The insn of the first element.
     rtx_insn* start_insn (void) const;
-
-    // The insn in the sequence's BBs that comes before I.
-    rtx_insn* prev_insn_in_bbs (rtx_insn* i) const
-    {
-      basic_block bb = BLOCK_FOR_INSN (i);
-      i = prev_nonnote_insn_bb (i);
-      if (i == NULL && bb != m_basic_blocks.front ())
-        i = BB_END (single_pred (bb));
-      return i;
-    }
-
-    // The insn in the sequence's BBs that comes after I.
-    rtx_insn* next_insn_in_bbs (rtx_insn* i) const
-    {
-      basic_block bb = BLOCK_FOR_INSN (i);
-      i = next_nonnote_insn_bb (i);
-      if (i == NULL && bb != m_basic_blocks.back ())
-        {
-          std::vector<basic_block>::const_iterator bb_it =
-            std::find (m_basic_blocks.begin (), m_basic_blocks.end (), bb);
-          if (bb_it == m_basic_blocks.end ())
-            return NULL;
-          ++bb_it;
-          i = BB_HEAD (*bb_it);
-        }
-      return i;
-    }
-
-    // The BBs of this sequence.
-    std::vector<basic_block>& basic_blocks (void) { return m_basic_blocks; }
-    const std::vector<basic_block>& basic_blocks (void) const
-    {
-      return m_basic_blocks;
-    }
+    basic_block start_bb (void) const;
 
     // A map containing all the address regs used in the sequence
     // and the number of elements that use them.
@@ -881,7 +842,6 @@ public:
     insn_map m_insn_el_map;
     glob_insn_map& m_glob_insn_el_map;
     unsigned* m_next_id;
-    std::vector<basic_block> m_basic_blocks;
     start_addr_list m_start_addr_list;
     const sequence* m_original_seq;
   };
@@ -1537,7 +1497,6 @@ NOTE:
   // Find the value that REG was last set to, starting the search from
   // START_INSN.
   static find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn,
-                                               basic_block stop_bb,
                                                sequence::glob_insn_map&
                                                insn_el_map);
 
