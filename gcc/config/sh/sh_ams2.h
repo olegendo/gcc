@@ -1472,26 +1472,41 @@ NOTE:
 
   // Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
   // from the rtx X.
-  // If SEQ and EL is not null, trace back the effective addresses of the
-  // registers in X (starting from EL) and insert a reg mod into the sequence
+  // If EL is not null, trace back the effective addresses of the
+  // registers in X (starting from EL) and insert a reg mod into SEQ.
   // for every address modifying insn that was used.
+  // If CURR_INSN is not null, trace back the reg values starting from
+  // CURR_INSN, but don't add reg-mods to the sequence.
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
+                                     sequence* seq, sequence_element* el,
+                                     rtx_insn* curr_insn);
+
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 				     sequence* seq, sequence_element& el)
   {
-    return rtx_to_addr_expr (x, mem_mode, seq, &el);
+    return rtx_to_addr_expr (x, mem_mode, seq, &el, el.insn ());
   }
 
-  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode,
-                                     sequence* seq, sequence_element* el);
-
-  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mach_mode)
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
+				     sequence* seq, sequence_element* el)
   {
-    return rtx_to_addr_expr(x, mem_mach_mode, NULL, NULL);
+    return rtx_to_addr_expr (x, mem_mode, seq, el, el->insn ());
+  }
+
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
+                                     sequence* seq, rtx_insn* curr_insn)
+  {
+    return rtx_to_addr_expr (x, mem_mode, seq, NULL, curr_insn);
+  }
+
+  static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode)
+  {
+    return rtx_to_addr_expr(x, mem_mode, NULL, NULL, NULL);
   }
 
   static addr_expr rtx_to_addr_expr (rtx x)
   {
-    return rtx_to_addr_expr(x, Pmode, NULL, NULL);
+    return rtx_to_addr_expr(x, Pmode, NULL, NULL, NULL);
   }
 
   // Find the value that REG was last set to, starting the search from

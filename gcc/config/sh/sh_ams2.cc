@@ -1556,11 +1556,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
             }
           else
             {
-              if (prev.value != NULL_RTX && REG_P (prev.value)
-                  && regs_equal (prev.value, reg))
-                break;
-
-	      addr_expr reg_current_addr = prev.acc
+              addr_expr reg_current_addr = prev.acc
                 ? make_reg_addr (reg)
 		: rtx_to_addr_expr (prev.value);
 
@@ -1568,15 +1564,24 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                 make_ref_counted<reg_mod> (prev.insn, prev.reg, prev.value,
                                            reg_current_addr)));
 
-              addr_expr reg_effective_addr =
-		rtx_to_addr_expr (prev.value,
-                                  prev.acc ? prev.acc->mach_mode ()
-                                           : Pmode,
-                                  this, new_reg_mod);
+              addr_expr reg_effective_addr;
+              if (prev.value != NULL_RTX && REG_P (prev.value)
+                  && regs_equal (prev.value, reg))
+                reg_effective_addr = rtx_to_addr_expr (
+                  prev.value, prev.acc ? prev.acc->mach_mode () : Pmode,
+                   this, last_insn);
+              else
+                reg_effective_addr = rtx_to_addr_expr (
+                  prev.value, prev.acc ? prev.acc->mach_mode () : Pmode,
+                   this, new_reg_mod);
 
               new_reg_mod->set_effective_addr (reg_effective_addr);
               new_reg_mod->set_auto_mod_acc (prev.acc);
               last_insn = prev_nonnote_insn_bb (prev.insn);
+
+              if (prev.value != NULL_RTX && REG_P (prev.value)
+                  && regs_equal (prev.value, reg))
+                break;
             }
 
           if (last_reg_mod != NULL)
@@ -3066,7 +3071,13 @@ sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
       // Only permanent registers are placed into the
       // address regs list.
       if (rm->reg () != rm->tmp_reg ())
+        {
           ++m_addr_regs[rm->reg ()];
+          for (addr_expr::regs_const_iterator ri =
+                 rm->effective_addr ().regs_begin ();
+               ri != rm->effective_addr ().regs_end (); ++ri)
+            ++m_addr_regs[*ri];
+        }
       m_start_addr_list.add (rm);
     }
 
@@ -4046,15 +4057,18 @@ sh_ams2::check_make_non_mod_addr (rtx base_reg, rtx index_reg,
 
 // Extract an addr_expr of the form (base_reg + index_reg * scale + disp)
 // from the rtx X.
-// If SEQ and EL is not null, trace back the effective addresses of the
-// registers in X (starting from EL) and insert a reg mod into the sequence
+// If EL is not null, trace back the effective addresses of the
+// registers in X (starting from EL) and insert a reg mod into SEQ.
 // for every address modifying insn that was used.
+// If CURR_INSN is not null, trace back the reg values starting from
+// CURR_INSN, but don't add reg-mods to the sequence.
 sh_ams2::addr_expr
 sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                            sh_ams2::sequence* seq,
-                           sh_ams2::sequence_element* el)
+                           sh_ams2::sequence_element* el,
+                           rtx_insn* curr_insn)
 {
-  const bool trace_back_addr = seq != NULL && el != NULL;
+  const bool trace_back_addr = seq != NULL && (el != NULL || curr_insn != NULL);
 
   if (x == NULL_RTX)
     return addr_expr ();
@@ -4071,14 +4085,14 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el);
-      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mode, seq, el);
+      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el, curr_insn);
+      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mode, seq, el, curr_insn);
       if (op0.is_invalid () || op1.is_invalid ())
         return addr_expr ();
     }
   else if (code == NEG)
     {
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el, curr_insn);
       if (op1.is_invalid ())
         return addr_expr ();
     }
@@ -4086,7 +4100,8 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
   else if (GET_RTX_CLASS (code) == RTX_AUTOINC)
     {
       addr_type_t mod_type;
-      bool apply_post_disp = (!trace_back_addr || !el->is_mem_access ());
+      bool apply_post_disp =
+        !trace_back_addr || el == NULL || !el->is_mem_access ();
 
       switch (code)
         {
@@ -4109,13 +4124,14 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
         case POST_MODIFY:
           {
             addr_expr a = rtx_to_addr_expr (XEXP (x, apply_post_disp ? 1 : 0),
-                                            mem_mode, seq, el);
+                                            mem_mode, seq, el, curr_insn);
 	    return a.is_invalid () ? addr_expr ()
 				   : post_mod_addr (a.base_reg (), a.disp ());
           }
         case PRE_MODIFY:
           {
-            addr_expr a = rtx_to_addr_expr (XEXP (x, 1), mem_mode, seq, el);
+            addr_expr a = rtx_to_addr_expr (XEXP (x, 1), mem_mode, seq,
+                                            el, curr_insn);
 	    return a.is_invalid () ? addr_expr ()
 				   : pre_mod_addr (a.base_reg (), a.disp ());
           }
@@ -4124,7 +4140,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
           return addr_expr ();
         }
 
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el, curr_insn);
       if (op1.is_invalid ())
         return op1;
 
@@ -4153,15 +4169,18 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
 	  find_reg_value_result prev_val =
-            find_reg_value (x, prev_nonnote_insn_bb (el->insn ()),
+            find_reg_value (x, prev_nonnote_insn_bb (curr_insn),
                             seq->g_insn_el_map ());
 
           // If the found reg modification already has a sequence element,
           // use that element's addresses.
           if (prev_val.rm != NULL)
             {
-              el->add_dependency (prev_val.rm);
-              prev_val.rm->add_dependent_el (el);
+              if (el != NULL)
+                {
+                  el->add_dependency (prev_val.rm);
+                  prev_val.rm->add_dependent_el (el);
+                }
               if (prev_val.rm->effective_addr ().is_invalid ())
                 return make_reg_addr (x);
               return prev_val.rm->effective_addr ();
@@ -4173,40 +4192,63 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
           // Stop expanding the reg if the reg can't be expanded any further.
           if (value != NULL_RTX && REG_P (value) && regs_equal (value, x))
             {
-              // Add to the sequence's start a reg mod that sets the reg
-              // to itself. This will be used by the address modification
-              // generator as a starting address.
-              sequence_element* new_reg_mod = &*seq->insert_unique (
-                    make_ref_counted<reg_mod> ((rtx_insn*)NULL, x, x,
-                                               make_reg_addr (x),
-                                               make_reg_addr (x)));
-              el->add_dependency (new_reg_mod);
-              new_reg_mod->add_dependent_el (el);
-
-              return make_reg_addr (x);
+              // If the current BB has only one predecessor BB, trace back
+              // the reg's effective address through that BB.
+              addr_expr reg_effective_addr = make_reg_addr (x);
+              if (single_pred_p (BLOCK_FOR_INSN (curr_insn)))
+                {
+                  basic_block prev_bb =
+                    single_pred (BLOCK_FOR_INSN (curr_insn));
+                  reg_effective_addr =
+                    rtx_to_addr_expr (
+                      x, prev_val.acc ? prev_val.acc->mach_mode () : mem_mode,
+                      seq, BB_END (prev_bb));
+                }
+              if (el != NULL)
+                {
+                  // Add to the sequence's start a reg mod that sets the reg
+                  // to itself. This will be used by the address modification
+                  // generator as a starting address.
+                  sequence_element* new_reg_mod = &*seq->insert_unique (
+                        make_ref_counted<reg_mod> ((rtx_insn*)NULL, x, x,
+                                                   make_reg_addr (x),
+                                                   reg_effective_addr));
+                  el->add_dependency (new_reg_mod);
+                  new_reg_mod->add_dependent_el (el);
+                }
+              return reg_effective_addr;
             }
 
 	  addr_expr reg_curr_addr = prev_val.acc ? make_reg_addr (x)
                                    : rtx_to_addr_expr (value, mem_mode);
 
-	  // Insert the modifying insn into the sequence as a reg mod.
-	  reg_mod* new_reg_mod = as_a<reg_mod*> (&*seq->insert_unique (
-		make_ref_counted<reg_mod> (mod_insn, prev_val.reg, value,
-                                           reg_curr_addr)));
+          reg_mod* new_reg_mod = NULL;
 
-	  el->add_dependency (new_reg_mod);
-	  new_reg_mod->add_dependent_el (el);
-	  new_reg_mod->set_auto_mod_acc (prev_val.acc);
+          if (el != NULL)
+            {
+              // Insert the modifying insn into the sequence as a reg mod.
+              new_reg_mod = as_a<reg_mod*> (&*seq->insert_unique (
+                    make_ref_counted<reg_mod> (mod_insn, prev_val.reg, value,
+                                               reg_curr_addr)));
+
+              el->add_dependency (new_reg_mod);
+              new_reg_mod->add_dependent_el (el);
+              new_reg_mod->set_auto_mod_acc (prev_val.acc);
+            }
 
 	  // Expand the register's value further.
 	  addr_expr reg_effective_addr = rtx_to_addr_expr (
 		value, prev_val.acc ? prev_val.acc->mach_mode () : mem_mode,
-		seq, new_reg_mod);
+		seq, new_reg_mod, mod_insn);
 
-	  new_reg_mod->set_effective_addr (reg_effective_addr);
+          if (el != NULL)
+            {
+              new_reg_mod->set_effective_addr (reg_effective_addr);
 
-	  if (reg_curr_addr.is_invalid () || reg_effective_addr.is_invalid ())
-	    new_reg_mod->set_optimization_disabled ();
+              if (reg_curr_addr.is_invalid ()
+                  || reg_effective_addr.is_invalid ())
+                new_reg_mod->set_optimization_disabled ();
+            }
 
           // If the expression is something AMS can't handle, use the original
           // reg instead.
