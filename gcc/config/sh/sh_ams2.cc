@@ -2503,8 +2503,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
       && regs_equal (c_start_addr.index_reg (), c_end_addr.index_reg ())
       && c_start_addr.scale () != c_end_addr.scale ())
     {
-      // We can't scale if the address has displacement or a base reg.
-      if (c_start_addr.has_disp () || c_start_addr.has_base_reg ())
+      // We can't scale if the address has a base reg.
+      if (c_start_addr.has_base_reg ())
         return mod_addr_result (infinite_costs);
 
       // We can only scale by integers.
@@ -2516,6 +2516,11 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
 
       scale_t scale = sr.quot;
 
+      // The scaled displacement shouldn't overflow.
+      if (sext_hwi (c_start_addr.disp ()*scale, GET_MODE_PRECISION (Pmode)) !=
+          c_start_addr.disp ()*scale)
+        return mod_addr_result (infinite_costs);
+
       start_addr = insert_addr_mod (start_addr, acc_mode,
                                     tmp_rtx<MULT> (acc_mode, start_addr->reg (),
                                                    tmp_rtx<CONST_INT> (scale)),
@@ -2524,7 +2529,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                                   scale, 0),
                                     non_mod_addr (invalid_regno,
                                                   c_start_addr.index_reg (),
-                                                  c_end_addr.scale (), 0),
+                                                  c_end_addr.scale (),
+                                                  c_start_addr.disp ()*scale),
                                     el, tracker,
                                     used_reg_mods, dlg, next_tmp_regno);
       c_start_addr = start_addr->effective_addr ();
