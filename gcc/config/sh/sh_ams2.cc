@@ -2576,6 +2576,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
           tracker.reset_changes ();
           return mod_addr_result (infinite_costs);
         }
+      disp_t index_disp = index_reg_addr->effective_addr ().is_valid () ?
+        index_reg_addr->effective_addr ().disp () : 0;
 
       bool index_reg_used
         = used_reg_mods.find (index_reg_addr) != used_reg_mods.end ();
@@ -2589,7 +2591,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                                          -1, 0),
                            non_mod_addr (c_start_addr.index_reg (),
                                          c_end_addr.index_reg (),
-                                         -1, c_start_addr.disp ()),
+                                         -1, c_start_addr.disp ()-index_disp),
                            el, tracker, used_reg_mods, dlg, next_tmp_regno);
       tracker.create_dependency (start_addr, new_addr);
       start_addr = new_addr;
@@ -2619,6 +2621,8 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
           tracker.reset_changes ();
           return mod_addr_result (infinite_costs);
         }
+      disp_t base_disp = base_reg_addr->effective_addr ().is_valid () ?
+        base_reg_addr->effective_addr ().disp () : 0;
 
       bool base_reg_used
         = used_reg_mods.find (base_reg_addr) != used_reg_mods.end ();
@@ -2632,7 +2636,7 @@ try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
                            non_mod_addr (c_end_addr.base_reg (),
                                          c_start_addr.index_reg (),
                                          c_start_addr.scale (),
-                                         c_start_addr.disp ()),
+                                         c_start_addr.disp () + base_disp),
                            el, tracker, used_reg_mods, dlg, next_tmp_regno);
       tracker.create_dependency (start_addr, new_addr);
       start_addr = new_addr;
