@@ -1197,14 +1197,33 @@ public:
   rtx value;
   rtx_insn* insn;
   mem_access* acc;
+  machine_mode acc_mode;
+  bool is_auto_mod;
   reg_mod* rm;
 
-  find_reg_value_result (rtx r, rtx v, rtx_insn* i,
-                         mem_access* a = NULL)
-  : reg (r), value (v), insn (i), acc (a), rm (NULL) { }
+  find_reg_value_result (rtx r, rtx v, rtx_insn* i)
+  : reg (r), value (v), insn (i), acc (NULL), acc_mode (Pmode),
+    is_auto_mod (false), rm (NULL)
+  {
+  }
+
+  find_reg_value_result (rtx r, rtx v, rtx_insn* i, machine_mode m)
+  : reg (r), value (v), insn (i), acc (NULL), acc_mode (m),
+    is_auto_mod (true), rm (NULL)
+  {
+  }
+
+  find_reg_value_result (rtx r, rtx v, rtx_insn* i, mem_access* a)
+  : reg (r), value (v), insn (i), acc (a), acc_mode (a->mach_mode ()),
+    is_auto_mod (true), rm (NULL)
+  {
+  }
 
   find_reg_value_result (reg_mod* r, rtx_insn* i)
-  : reg (r->reg ()), value (NULL), insn (i), acc (NULL), rm (r) { }
+  : reg (r->reg ()), value (NULL), insn (i), acc (NULL), acc_mode (Pmode),
+    is_auto_mod (false), rm (r)
+  {
+  }
 };
 
 // Return all the start addresses that could be used to arrive at END_ADDR.
@@ -1556,7 +1575,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
             }
           else
             {
-              addr_expr reg_current_addr = prev.acc
+              addr_expr reg_current_addr = prev.is_auto_mod
                 ? make_reg_addr (reg)
 		: rtx_to_addr_expr (prev.value);
 
@@ -1568,15 +1587,17 @@ sh_ams2::sequence::find_addr_reg_mods (void)
               if (prev.value != NULL_RTX && REG_P (prev.value)
                   && regs_equal (prev.value, reg))
                 reg_effective_addr = rtx_to_addr_expr (
-                  prev.value, prev.acc ? prev.acc->mach_mode () : Pmode,
+                  prev.value, prev.is_auto_mod ? prev.acc_mode  : Pmode,
                    this, last_insn);
               else
-                reg_effective_addr = rtx_to_addr_expr (
-                  prev.value, prev.acc ? prev.acc->mach_mode () : Pmode,
-                   this, new_reg_mod);
+                {
+                  reg_effective_addr = rtx_to_addr_expr (
+                    prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
+                    this, new_reg_mod);
+                  new_reg_mod->set_auto_mod_acc (prev.acc);
+                }
 
               new_reg_mod->set_effective_addr (reg_effective_addr);
-              new_reg_mod->set_auto_mod_acc (prev.acc);
               last_insn = prev_nonnote_insn_bb (prev.insn);
 
               if (prev.value != NULL_RTX && REG_P (prev.value)
@@ -3776,7 +3797,8 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn,
 
       if (!r.second)
         {
-          // Check if there's already a reg-mod in the sequence that modifies REG.
+          // Check if there's already a reg-mod in the sequence that
+          // modifies REG.
           for (sequence::glob_insn_map::iterator els = els_in_insn.first;
                els != els_in_insn.second; ++els)
             {
@@ -3808,12 +3830,30 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn,
                     {
                       rtx mem_addr = acc->current_addr_rtx ();
                       rtx mem_reg = XEXP (mem_addr, 0);
-                      rtx_code code = GET_CODE (mem_addr);
 
-                      if (GET_RTX_CLASS (code) == RTX_AUTOINC
+                      if (GET_RTX_CLASS (GET_CODE (mem_addr)) == RTX_AUTOINC
                           && REG_P (mem_reg) && regs_equal (mem_reg, reg))
                         return find_reg_value_result (mem_reg, mem_addr,
                                                       i, acc);
+                    }
+                }
+
+              // If no access was found, search for the auto-mod
+              // RTX inside the insn.
+              subrtx_var_iterator::array_type array;
+              FOR_EACH_SUBRTX_VAR (it, array, PATTERN (i), NONCONST)
+                {
+                  if (MEM_P (*it))
+                    {
+                      rtx mem = *it;
+                      rtx mem_addr = XEXP (mem, 0);
+                      if (GET_RTX_CLASS (GET_CODE (mem_addr)) == RTX_AUTOINC)
+                        {
+                          rtx mem_reg = XEXP (mem_addr, 0);
+                          if (REG_P (mem_reg) && regs_equal (mem_reg, reg))
+                            return find_reg_value_result (
+                              mem_reg, mem_addr, i, GET_MODE (mem_addr));
+                        }
                     }
                 }
               gcc_unreachable ();
@@ -4219,7 +4259,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                     single_pred (BLOCK_FOR_INSN (curr_insn));
                   reg_effective_addr =
                     rtx_to_addr_expr (
-                      x, prev_val.acc ? prev_val.acc->mach_mode () : mem_mode,
+                      x, prev_val.is_auto_mod ? prev_val.acc_mode : mem_mode,
                       seq, BB_END (prev_bb));
                 }
               if (el != NULL)
@@ -4237,7 +4277,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
               return reg_effective_addr;
             }
 
-	  addr_expr reg_curr_addr = prev_val.acc ? make_reg_addr (x)
+	  addr_expr reg_curr_addr = prev_val.is_auto_mod ? make_reg_addr (x)
                                    : rtx_to_addr_expr (value, mem_mode);
 
           reg_mod* new_reg_mod = NULL;
@@ -4256,7 +4296,7 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 
 	  // Expand the register's value further.
 	  addr_expr reg_effective_addr = rtx_to_addr_expr (
-		value, prev_val.acc ? prev_val.acc->mach_mode () : mem_mode,
+		value, prev_val.is_auto_mod ? prev_val.acc_mode : mem_mode,
 		seq, new_reg_mod, mod_insn);
 
           if (el != NULL)
