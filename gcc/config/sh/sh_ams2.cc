@@ -1446,6 +1446,7 @@ sh_ams2::sequence&
 sh_ams2::sequence::operator = (const sequence& other)
 {
   m_insn_el_map = other.m_insn_el_map;
+  m_original_seq = other.m_original_seq;
 
   for (iterator els = begin (); els != end ();)
     {
