@@ -912,6 +912,10 @@ register_sh_passes (void)
 		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 
   /* Disable old auto-inc-dec pass.
+     FIXME: Could also try to disable the pass_rtl_fwprop_addr before
+     the auto-inc-dec pass, but it's controlled by one global
+     flag_forward_propagate variable, which also affects other fwprop
+     instances ... would need to refactor that pass stuff first.
   if (sh_ams2_enable)
     flag_auto_inc_dec = 0;
   */
