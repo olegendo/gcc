@@ -1517,6 +1517,8 @@ private:
 
   static std::pair<rtx, bool> find_reg_value_1 (rtx reg, const_rtx insn);
 
+  void propagate_reg_reg_copies (function* fun);
+
   delegate& m_delegate;
   options m_options;
 };

@@ -4903,7 +4903,15 @@ sh_ams2::execute (function* fun)
 
 
   df_note_add_problem ();
+  df_chain_add_problem (DF_DU_CHAIN + DF_UD_CHAIN);
   df_analyze ();
+
+  // Eliminate reg-reg copies that AMS might have introduced.
+  // FIXME: Pass a list of reg-reg copies to analyze to avoid walking
+  // over all the insns.
+  // FIXME: On SH this seems to cause more R0 spill failures, thus disabled
+  // and not fully tested.
+  // propagate_reg_reg_copies (fun);
 
   // Unfortunately, passes tend to access global variables to see if they
   // are supposed to actually execute.  Save those variables, set them
@@ -4967,4 +4975,128 @@ sh_ams2::execute (function* fun)
     }
 
   log_return (0, "\n\n");
+}
+
+static int
+non_side_effect_defs_count (rtx reg)
+{
+  int count = 0;
+
+  for (df_ref d = DF_REG_DEF_CHAIN (REGNO (reg)); d != NULL;
+       d = DF_REF_NEXT_REG (d))
+    if (!DF_REF_IS_ARTIFICIAL (d)
+	&& !DF_REF_FLAGS_IS_SET (d, DF_REF_PRE_POST_MODIFY))
+      count += 1;
+
+  return count;
+}
+
+struct df_ref_insn_compare_less
+{
+  bool operator () (df_ref a, df_ref b) const
+  {
+    return DF_REF_INSN (a) < DF_REF_INSN (b);
+  }
+};
+
+struct df_ref_insn_compare_equal
+{
+  bool operator () (df_ref a, df_ref b) const
+  {
+    return DF_REF_INSN (a) == DF_REF_INSN (b);
+  }
+};
+
+static bool
+replace_reg (rtx old_reg, rtx new_reg, rtx_insn* insn)
+{
+  // First replace and validate all rtx'es in the insn pattern.
+  if (validate_replace_rtx_part_nosimplify (old_reg, new_reg, &PATTERN (insn),
+					    insn))
+    {
+      // And if that worked, replace the remaining rtx'es in insn notes etc.
+      replace_rtx (insn, old_reg, new_reg, true);
+      return true;
+    }
+  else
+    return false;
+}
+
+void
+sh_ams2::propagate_reg_reg_copies (function* fun)
+{
+  log_msg ("propagate_reg_reg_copies\n");
+
+  std::vector<df_ref> reg_uses;
+
+  basic_block bb;
+  FOR_EACH_BB_FN (bb, fun)
+    {
+      rtx_insn* i;
+      FOR_BB_INSNS (bb, i)
+	{
+	  if (!INSN_P (i) || !NONDEBUG_INSN_P (i))
+	    continue;
+
+	  // Look for insns that look like this:
+	  //	(set (reg:Pmode aaa) (reg:Pmode bbb))
+	  //	(expr_list:REG_DEAD (reg:Pmode bbb) (nil))
+
+	  // However, ignore sets to hard-regs, assuming that there's a good
+	  // reason why those are hard-regs, like function return values
+	  // or arguments for special lib functions.  We could also look for
+	  // some following insn that uses the hardreg to be sure...
+	  // Also ignore sets of hard-reg sources, as those might propagate
+	  // function arg values into the function body which sometimes is
+	  // not so good.
+	  rtx set = single_set (i);
+	  if (set == NULL)
+	    continue;
+
+	  rtx set_src = SET_SRC (set);
+	  rtx set_dst = SET_DEST (set);
+
+	  if (REG_P (set_src) && REG_P (set_dst) && GET_MODE (set_src) == Pmode
+	      && find_regno_note (i, REG_DEAD, REGNO (set_src)) != NULL
+	      && !HARD_REGISTER_P (set_dst)
+	      && !HARD_REGISTER_P (set_src)
+	      && !REG_FUNCTION_VALUE_P (set_dst)
+	      && non_side_effect_defs_count (set_dst) == 1)
+	    {
+	      log_msg ("found reg-reg copy insn:\n");
+	      log_insn (i);
+
+	      // Replace the set_dst reg with the set_src reg in each insn
+	      // where set_dst is used.  Because the reg can be present
+	      // in multiple places of the same insn, we use a change
+	      // group for each insn.
+	      reg_uses.clear ();
+
+	      for (df_ref d = DF_REG_USE_CHAIN (REGNO (set_dst)); d != NULL;
+		   d = DF_REF_NEXT_REG (d))
+		reg_uses.push_back (d);
+
+	      // FIXME: DF probably already has something for walking the
+	      // insns that contain reg uses, but I can't spot it now ...
+	      std::sort (reg_uses.begin (), reg_uses.end (),
+			 df_ref_insn_compare_less ());
+
+	      std::vector<df_ref>::iterator using_insn_end =
+		std::unique (reg_uses.begin (), reg_uses.end (),
+			     df_ref_insn_compare_equal ());
+
+	      int ng_count = 0;
+
+	      for (std::vector<df_ref>::iterator using_insn = reg_uses.begin ();
+		   using_insn != using_insn_end; ++using_insn)
+		if (!replace_reg (set_dst, set_src, DF_REF_INSN (*using_insn)))
+		  ++ng_count;
+
+	      if (ng_count == 0)
+		set_insn_deleted (i);
+
+	      log_msg ("\n");
+	    }
+	}
+    }
 }
