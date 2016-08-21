@@ -3780,8 +3780,6 @@ sh_ams2::find_reg_value_result
 sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn,
                          sequence::glob_insn_map& insn_el_map)
 {
-  std::vector<mem_access*> mems;
-
   // Go back through the insn list until we find the last instruction
   // that modified the register.
   rtx_insn* i;
