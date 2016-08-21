@@ -3866,6 +3866,16 @@ sh_max_mov_insn_displacement (machine_mode mode, bool consider_sh2a)
     }
 }
 
+/* Determine the maximum possible displacement for a move insn that
+   uses an GBR addressing mode.  */
+int
+sh_max_gbr_mov_insn_displacement (machine_mode mode)
+{
+  const int mode_sz = GET_MODE_SIZE (mode);
+  const int move_sz = std::min (mode_sz, (int)GET_MODE_SIZE (SImode));
+  return (255 * move_sz) - (mode_sz > move_sz ? mode_sz - move_sz : 0);
+}
+
 /* Determine the alignment mask for a move insn of the
    specified mode.  */
 static inline int
@@ -14146,8 +14156,9 @@ mem_access_alternatives (sh_ams2::alternative_set& alt,
 
     if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
       {
-        *alts++ = ams2_alt (1, sh_ams2::make_disp_addr (get_gbr_reg_rtx (), 0,
-                                                        255 * acc_size));
+	const int max_disp = sh_max_gbr_mov_insn_displacement (acc_mode);
+	*alts++ = ams2_alt (1, sh_ams2::make_disp_addr (get_gbr_reg_rtx (), 0,
+						        max_disp));
 	gbr_extra_cost = 2;
       }
   }
