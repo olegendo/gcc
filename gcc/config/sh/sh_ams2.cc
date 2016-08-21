@@ -1580,16 +1580,17 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                 ? make_reg_addr (reg)
 		: rtx_to_addr_expr (prev.value);
 
-              new_reg_mod = as_a<reg_mod*> (&*insert_unique (
+              iterator inserted = insert_unique (
                 make_ref_counted<reg_mod> (prev.insn, prev.reg, prev.value,
-                                           reg_current_addr)));
+                                           reg_current_addr));
+              new_reg_mod = as_a<reg_mod*> (&*inserted);
 
               addr_expr reg_effective_addr;
               if (prev.value != NULL_RTX && REG_P (prev.value)
                   && regs_equal (prev.value, reg))
                 reg_effective_addr = rtx_to_addr_expr (
                   prev.value, prev.is_auto_mod ? prev.acc_mode  : Pmode,
-                   this, last_insn);
+                  this, last_insn);
               else
                 {
                   reg_effective_addr = rtx_to_addr_expr (
@@ -1603,7 +1604,14 @@ sh_ams2::sequence::find_addr_reg_mods (void)
 
               if (prev.value != NULL_RTX && REG_P (prev.value)
                   && regs_equal (prev.value, reg))
-                break;
+                {
+                  // If this reg's value was traced back across BBs and
+                  // found invalid, discard it.
+                  if (reg_effective_addr.is_invalid ())
+                    remove_element (inserted);
+
+                  break;
+                }
             }
 
           if (last_reg_mod != NULL)
@@ -4264,6 +4272,11 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                     rtx_to_addr_expr (
                       x, prev_val.is_auto_mod ? prev_val.acc_mode : mem_mode,
                       seq, BB_END (prev_bb));
+
+                  // Use the unexpanded reg if the traced-back value is
+                  // too complex.
+                  if (reg_effective_addr.is_invalid () && el != NULL)
+                    reg_effective_addr = make_reg_addr (x);
                 }
               if (el != NULL)
                 {
@@ -4311,10 +4324,13 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                 new_reg_mod->set_optimization_disabled ();
             }
 
-          // If the expression is something AMS can't handle, use the original
-          // reg instead.
-	  return reg_effective_addr.is_invalid () ? make_reg_addr (x)
-						  : reg_effective_addr;
+          // If the expression is something AMS can't handle, use the
+          // original reg instead, unless this address was found in the
+          // previous BBs.
+          if (reg_effective_addr.is_invalid () && el != NULL)
+            return make_reg_addr (x);
+
+          return reg_effective_addr;
         }
       return make_reg_addr (x);
 
