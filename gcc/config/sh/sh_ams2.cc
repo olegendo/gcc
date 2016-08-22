@@ -4712,9 +4712,9 @@ sh_ams2::execute (function* fun)
       log_sequence (seq, false, true);
       log_msg ("\n");
 
-      if (new_cost > original_cost)
+      if (new_cost >= original_cost)
 	{
-	  log_msg ("new_cost (%d) > original_cost (%d)",
+	  log_msg ("new_cost (%d) >= original_cost (%d)",
 		   new_cost, original_cost);
 
 	  if (m_options.check_original_cost)
