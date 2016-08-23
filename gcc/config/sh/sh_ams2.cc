@@ -1585,21 +1585,27 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                                            reg_current_addr));
               new_reg_mod = as_a<reg_mod*> (&*inserted);
 
-              addr_expr reg_effective_addr;
-              if (prev.value != NULL_RTX && REG_P (prev.value)
-                  && regs_equal (prev.value, reg))
-                reg_effective_addr = rtx_to_addr_expr (
-                  prev.value, prev.is_auto_mod ? prev.acc_mode  : Pmode,
-                  this, last_insn);
-              else
+              // Find the reg-mod's effective address if it wan't already
+              // in the sequence,
+              if (new_reg_mod->effective_addr ().is_invalid ())
                 {
-                  reg_effective_addr = rtx_to_addr_expr (
-                    prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
-                    this, new_reg_mod);
-                  new_reg_mod->set_auto_mod_acc (prev.acc);
+                  addr_expr reg_effective_addr;
+                  if (prev.value != NULL_RTX && REG_P (prev.value)
+                      && regs_equal (prev.value, reg))
+                    reg_effective_addr = rtx_to_addr_expr (
+                      prev.value, prev.is_auto_mod ? prev.acc_mode  : Pmode,
+                      this, last_insn);
+                  else
+                    {
+                      reg_effective_addr = rtx_to_addr_expr (
+                        prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
+                        this, new_reg_mod);
+                      new_reg_mod->set_auto_mod_acc (prev.acc);
+                    }
+
+                  new_reg_mod->set_effective_addr (reg_effective_addr);
                 }
 
-              new_reg_mod->set_effective_addr (reg_effective_addr);
               last_insn = prev_nonnote_insn_bb (prev.insn);
 
               if (prev.value != NULL_RTX && REG_P (prev.value)
@@ -1607,7 +1613,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
                 {
                   // If this reg's value was traced back across BBs and
                   // found invalid, discard it.
-                  if (reg_effective_addr.is_invalid ())
+                  if (new_reg_mod->effective_addr ().is_invalid ())
                     remove_element (inserted);
 
                   break;
