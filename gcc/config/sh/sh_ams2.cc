@@ -1219,9 +1219,10 @@ public:
   {
   }
 
-  find_reg_value_result (reg_mod* r, rtx_insn* i)
-  : reg (r->reg ()), value (NULL), insn (i), acc (NULL), acc_mode (Pmode),
-    is_auto_mod (false), rm (r)
+  find_reg_value_result (reg_mod* r)
+  : reg (r->reg ()), value (r->value ()), insn (r->insn ()),
+    acc (r->auto_mod_acc ()), acc_mode (GET_MODE (r->reg ())),
+    is_auto_mod (r->auto_mod_acc () != NULL), rm (r)
   {
   }
 };
@@ -3826,7 +3827,7 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn,
                   if (reg_mod* rm = dyn_cast<reg_mod*> (*deps))
                     {
                       if (regs_equal (rm->reg (), reg))
-                        return find_reg_value_result (rm, i);
+                        return find_reg_value_result (rm);
                     }
                 }
             }
@@ -4255,10 +4256,12 @@ sh_ams2::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                 {
                   el->add_dependency (prev_val.rm);
                   prev_val.rm->add_dependent_el (el);
+                  if (prev_val.rm->effective_addr ().is_invalid ())
+                    return make_reg_addr (x);
+                  return prev_val.rm->effective_addr ();
                 }
-              if (prev_val.rm->effective_addr ().is_invalid ())
-                return make_reg_addr (x);
-              return prev_val.rm->effective_addr ();
+              else if (prev_val.rm->insn () == NULL)
+                return prev_val.rm->effective_addr ();
             }
 
           rtx value = prev_val.value;
