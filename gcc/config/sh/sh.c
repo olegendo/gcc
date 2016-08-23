@@ -14083,20 +14083,7 @@ fp_accesses_dominate (const sh_ams2::sequence& seq)
   if (!TARGET_FPU_ANY)
     return false;
 
-  unsigned int total_count = 0;
-  unsigned int fp_count = 0;
-
-  for (sh_ams2::mem_acc_const_iter i (seq.begin<sh_ams2::mem_match> ()),
-       i_end (seq.end<sh_ams2::mem_match> ()); i != i_end; ++i)
-    {
-      ++total_count;
-      enum mode_class mc = GET_MODE_CLASS (i->mach_mode ());
-      if (mc == MODE_FLOAT || mc == MODE_COMPLEX_FLOAT
-	  || mc == MODE_VECTOR_FLOAT)
-	++fp_count;
-    }
-
-  return fp_count > (total_count - fp_count);
+  return seq.fp_acc_count () > (seq.total_acc_count () - seq.fp_acc_count ());
 }
 
 // similar to sh_address_cost, but for the AMS pass.

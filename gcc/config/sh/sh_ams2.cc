@@ -3140,6 +3140,16 @@ sh_ams2::sequence::insert_element (const ref_counting_ptr<sequence_element>& el,
       m_start_addr_list.add (rm);
     }
 
+  // Update the access counters.
+  if (mem_access* m = dyn_cast<mem_access*> (&*el))
+    {
+      ++m_total_acc_count;
+      enum mode_class mc = GET_MODE_CLASS (m->mach_mode ());
+      if (mc == MODE_FLOAT || mc == MODE_COMPLEX_FLOAT
+	  || mc == MODE_VECTOR_FLOAT)
+        ++m_fp_acc_count;
+    }
+
   return i;
 }
 
@@ -3278,6 +3288,20 @@ sh_ams2::sequence::remove_element (iterator el, bool clear_deps)
         }
 
       m_start_addr_list.remove (rm);
+    }
+
+  // Update the access counters.
+  if (mem_access* m = dyn_cast<mem_access*> (&*el))
+    {
+      gcc_assert (m_total_acc_count > 0);
+      --m_total_acc_count;
+      enum mode_class mc = GET_MODE_CLASS (m->mach_mode ());
+      if (mc == MODE_FLOAT || mc == MODE_COMPLEX_FLOAT
+	  || mc == MODE_VECTOR_FLOAT)
+        {
+          gcc_assert (m_fp_acc_count > 0);
+          --m_fp_acc_count;
+        }
     }
 
   // Update the element's dependencies.

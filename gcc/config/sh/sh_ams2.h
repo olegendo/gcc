@@ -599,13 +599,15 @@ public:
            std::list<sequence>& sequences);
 
     sequence (glob_insn_map& im, unsigned* i)
-    : m_glob_insn_el_map (im), m_next_id (i), m_original_seq (NULL)
+    : m_glob_insn_el_map (im), m_next_id (i), m_original_seq (NULL),
+      m_fp_acc_count (0), m_total_acc_count (0)
       {
       }
 
     sequence (const sequence& other)
     : m_glob_insn_el_map (other.m_glob_insn_el_map),
-      m_next_id (other.m_next_id), m_original_seq (other.m_original_seq)
+      m_next_id (other.m_next_id), m_original_seq (other.m_original_seq),
+      m_fp_acc_count (0), m_total_acc_count (0)
         {
           for (const_iterator els = other.begin (); els != other.end (); ++els)
             insert_element (*els.base (), end ());
@@ -667,6 +669,9 @@ public:
     void update_access_alternatives (delegate& d, bool force_validation,
                                      bool disable_validation,
                                      bool adjust_costs = false);
+
+    unsigned fp_acc_count (void) const { return m_fp_acc_count; }
+    unsigned total_acc_count (void) const { return m_total_acc_count; }
 
     // Insert a new element into the sequence.  Return an iterator pointing
     // to the newly inserted element.
@@ -838,6 +843,7 @@ public:
     unsigned* m_next_id;
     start_addr_list m_start_addr_list;
     const sequence* m_original_seq;
+    unsigned m_fp_acc_count, m_total_acc_count;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
