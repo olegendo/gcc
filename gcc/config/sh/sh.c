@@ -866,6 +866,15 @@ static struct ams2_delegate : public sh_ams2::delegate
   addr_reg_clone_cost (const_rtx reg,
                        const sh_ams2::sequence& seq,
                        sh_ams2::sequence::const_iterator acc);
+
+  virtual void
+  clear_custom_data (void)
+  {
+    m_fp_accesses_dominate.clear ();
+  }
+
+  std::map<const sh_ams2::sequence*, bool> m_fp_accesses_dominate;
+
 } g_ams2_delegate;
 
 static void
@@ -14078,12 +14087,32 @@ is_stack_frame_related_access (sh_ams2::sequence::const_iterator acc)
 }
 
 static bool
-fp_accesses_dominate (const sh_ams2::sequence& seq)
+fp_accesses_dominate (const sh_ams2::sequence& seq, ams2_delegate& d)
 {
   if (!TARGET_FPU_ANY)
     return false;
 
-  return seq.fp_acc_count () > (seq.total_acc_count () - seq.fp_acc_count ());
+  std::map<const sh_ams2::sequence*, bool>::iterator found =
+    d.m_fp_accesses_dominate.find (&seq);
+  if (found != d.m_fp_accesses_dominate.end ())
+    return found->second;
+
+  unsigned int total_count = 0;
+  unsigned int fp_count = 0;
+
+  for (sh_ams2::mem_acc_const_iter i (seq.begin<sh_ams2::mem_match> ()),
+       i_end (seq.end<sh_ams2::mem_match> ()); i != i_end; ++i)
+    {
+      ++total_count;
+      enum mode_class mc = GET_MODE_CLASS (i->mach_mode ());
+      if (mc == MODE_FLOAT || mc == MODE_COMPLEX_FLOAT
+	  || mc == MODE_VECTOR_FLOAT)
+	++fp_count;
+    }
+  bool fp_dom = fp_count > (total_count - fp_count);
+  d.m_fp_accesses_dominate[&seq] = fp_dom;
+
+  return fp_dom;
 }
 
 // similar to sh_address_cost, but for the AMS pass.
@@ -14175,7 +14204,7 @@ mem_access_alternatives (sh_ams2::alternative_set& alt,
   // FIXME: Run AMS after RA to clean up address modes around stack frame
   // accesses.
   const bool sf_related = is_stack_frame_related_access (acc)
-			   && !fp_accesses_dominate (seq);
+			   && !fp_accesses_dominate (seq, *this);
 
   const int inc_cost = sf_related * 4
 		       + ((acc_size < 4
@@ -14357,7 +14386,7 @@ addr_reg_mod_cost (const_rtx reg, const_rtx val,
                    sh_ams2::sequence::const_iterator acc)
 {
   // FIXME: This hack shouldn't be needed.  See also mem_access_alternatives.
-  if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq))
+  if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq, *this))
     return 12;
 
   // modifying the GBR is impossible.
@@ -14398,7 +14427,7 @@ addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
 		     sh_ams2::sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
   // FIXME: This hack shouldn't be needed.  See also mem_access_alternatives.
-  if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq))
+  if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq, *this))
     return 12;
 
   // FIXME: maybe cloning the GBR should be cheaper?
