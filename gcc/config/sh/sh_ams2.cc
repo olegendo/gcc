@@ -1221,7 +1221,9 @@ public:
 
   find_reg_value_result (reg_mod* r)
   : reg (r->reg ()), value (r->value ()), insn (r->insn ()),
-    acc (r->auto_mod_acc ()), acc_mode (GET_MODE (r->reg ())),
+    acc (r->auto_mod_acc ()),
+    acc_mode (r->auto_mod_acc () != NULL ? r->auto_mod_acc ()->mach_mode ()
+                                         : Pmode),
     is_auto_mod (r->auto_mod_acc () != NULL), rm (r)
   {
   }
@@ -3870,7 +3872,7 @@ sh_ams2::find_reg_value (rtx reg, rtx_insn* start_insn,
                           rtx mem_reg = XEXP (mem_addr, 0);
                           if (REG_P (mem_reg) && regs_equal (mem_reg, reg))
                             return find_reg_value_result (
-                              mem_reg, mem_addr, i, GET_MODE (mem_addr));
+                              mem_reg, mem_addr, i, GET_MODE (mem));
                         }
                     }
                 }
