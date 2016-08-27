@@ -1916,9 +1916,11 @@ void sh_ams2::mod_tracker::clear (void)
 
 // Generate the address modifications needed to arrive at the
 // addresses in the sequence.
-void
+bool
 sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 {
+  bool success = true;
+
   // If a reg has been set more than once, skip the elements that use
   // that reg since we don't know which value they use.
   // FIXME: Find a way to tell apart different versions of the same register.
@@ -2011,10 +2013,12 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 
       prev_el = els;
 
-      gen_address_mod_1 (els, dlg, used_reg_mods, visited_reg_mods,
-                         &next_tmp_regno,
-                         base_lookahead
-                         + dlg.adjust_lookahead_count (*this, els));
+      int cost = gen_address_mod_1 (
+        els, dlg, used_reg_mods, visited_reg_mods, &next_tmp_regno,
+        base_lookahead + dlg.adjust_lookahead_count (*this, els));
+
+      if (cost == infinite_costs)
+        success = false;
     }
 
   std::map<rtx, rtx, cmp_by_regno> reg_replacements;
@@ -2069,6 +2073,8 @@ sh_ams2::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 
       el->set_current_addr (addr);
     }
+
+  return success;
 }
 
 // Internal function of gen_address_mod. Generate reg-mods needed to arrive at
@@ -2095,6 +2101,7 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
     }
 
   int min_cost = infinite_costs;
+  bool failed_addr_change = false;
   const alternative* min_alternative = NULL;
   reg_mod* min_start_base;
   reg_mod* min_start_index;
@@ -2178,18 +2185,24 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
           alt_min_cost += index_start_addr.first;
         }
 
+      bool success = insert_address_mods (
+        alt, base_start_addr.second, index_start_addr.second,
+        end_base, end_index, el, tracker, used_reg_mods,
+        visited_reg_mods, dlg, next_tmp_regno);
+
+      if (!success)
+        {
+          failed_addr_change = true;
+          tracker.reset_changes ();
+          continue;
+        }
+
       // Calculate the costs of the next element when this alternative is used.
       // This is done by inserting the address modifications of this alternative
       // into the sequence, calling this function on the next element and then
       // removing the inserted address mods.
       if (next_el != end ())
         {
-          insert_address_mods (alt, base_start_addr.second,
-                               index_start_addr.second,
-                               end_base, end_index, el,
-                               tracker, used_reg_mods, visited_reg_mods, dlg,
-                               next_tmp_regno);
-
           // Mark the reg-mods between the current and next element as visited.
           // This will be undone by the mod-tracker later.
           for (iterator it = el; it != next_el; ++it)
@@ -2200,12 +2213,13 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
                                              used_reg_mods, visited_reg_mods,
                                              next_tmp_regno,
                                              lookahead_num-1, false);
-          tracker.reset_changes ();
 
           if (next_cost == infinite_costs)
-            continue;
-          alt_min_cost += next_cost;
+            alt_min_cost = infinite_costs;
+          else
+            alt_min_cost += next_cost;
         }
+      tracker.reset_changes ();
 
       if (alt_min_cost < min_cost)
         {
@@ -2221,18 +2235,22 @@ gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
         }
     }
 
-  gcc_assert (min_cost != infinite_costs);
+  if (min_cost == infinite_costs)
+    {
+      gcc_assert (failed_addr_change);
+      return infinite_costs;
+    }
 
   if (record_in_sequence)
     {
       log_msg ("  min alternative: %d  min costs = %d\n",
                (int)(min_alternative - alternatives->begin ()),
                min_cost);
-      insert_address_mods (min_alternative,
-                           min_start_base, min_start_index,
-                           min_end_base, min_end_index, el,
-                           tracker, used_reg_mods, visited_reg_mods, dlg,
-                           next_tmp_regno);
+      bool success = insert_address_mods (
+        min_alternative, min_start_base, min_start_index,
+        min_end_base, min_end_index, el, tracker,
+        used_reg_mods, visited_reg_mods, dlg, next_tmp_regno);
+      gcc_assert (success);
     }
 
   return min_cost;
@@ -2356,7 +2374,7 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
 // Generate the address modifications needed to arrive at BASE_END_ADDR and
 // INDEX_END_ADDR from BASE/INDEX_START_ADDR when using ALT as the access
 // alternative.  Record any changes to the sequence in TRACKER.
-void sh_ams2::sequence::
+bool sh_ams2::sequence::
 insert_address_mods (alternative_set::const_iterator alt,
                      reg_mod* base_start_addr,
                      reg_mod* index_start_addr,
@@ -2418,6 +2436,27 @@ insert_address_mods (alternative_set::const_iterator alt,
 
   if (mem_access* m = dyn_cast<mem_access*> (&*el))
     {
+      // Check that the new address is actually valid.
+      // Replace the temporary registers with a permanent
+      // placeholder reg first.
+      addr_expr check_addr = new_addr;
+      if (check_addr.base_reg () ==
+            base_insert_result.final_addr->tmp_reg ())
+        check_addr.set_base_reg (m_substitute_reg);
+      if (check_addr.has_index_reg ()
+          && check_addr.index_reg () ==
+               index_insert_result.final_addr->tmp_reg ())
+        check_addr.set_index_reg (m_substitute_reg);
+      if (!m->try_replace_addr (check_addr))
+        {
+          log_msg ("failed to add new addr = ");
+          log_addr_expr (new_addr);
+          log_msg ("\nfor access\n");
+          log_sequence_element (*m);
+          log_msg ("\n");
+          return false;
+        }
+
       // Update the current address of the mem access with the alternative.
       tracker.addr_changed_els ()
         .push_back (std::make_pair (m, std::make_pair (m->current_addr (),
@@ -2455,6 +2494,7 @@ insert_address_mods (alternative_set::const_iterator alt,
                                      &*inserted_el);
         }
     }
+  return true;
 }
 
 // Try to generate the address modifications needed to arrive at END_ADDR
@@ -4716,7 +4756,13 @@ sh_ams2::execute (function* fun)
       prev_sequences.insert (std::make_pair (&seq, copy));
 
       log_msg ("gen_address_mod\n");
-      seq.gen_address_mod (m_delegate, m_options.base_lookahead_count);
+      if (!seq.gen_address_mod (m_delegate, m_options.base_lookahead_count))
+        {
+          log_msg ("gen_address_mod failed,  not modifying\n");
+          seqs_to_skip.insert (&seq);
+          seq.revert (prev_sequences);
+          continue;
+        }
 
       seq.update_cost (m_delegate);
       int new_cost = seq.cost ();

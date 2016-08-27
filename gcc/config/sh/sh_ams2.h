@@ -599,13 +599,16 @@ public:
            std::list<sequence>& sequences);
 
     sequence (glob_insn_map& im, unsigned* i)
-    : m_glob_insn_el_map (im), m_next_id (i), m_original_seq (NULL)
+    : m_glob_insn_el_map (im), m_next_id (i),
+      m_substitute_reg (gen_rtx_REG (Pmode, LAST_VIRTUAL_REGISTER + 1)),
+      m_original_seq (NULL)
       {
       }
 
     sequence (const sequence& other)
     : m_glob_insn_el_map (other.m_glob_insn_el_map),
-      m_next_id (other.m_next_id), m_original_seq (other.m_original_seq)
+      m_next_id (other.m_next_id), m_substitute_reg (other.m_substitute_reg),
+      m_original_seq (other.m_original_seq)
         {
           for (const_iterator els = other.begin (); els != other.end (); ++els)
             insert_element (*els.base (), end ());
@@ -640,7 +643,7 @@ public:
 
     // Generate the address modifications needed to arrive at the
     // addresses in the sequence.
-    void gen_address_mod (delegate& dlg, int base_lookahead);
+    bool gen_address_mod (delegate& dlg, int base_lookahead);
 
     // Try to eliminate unnecessary reg -> reg copies.
     void eliminate_reg_copies (void);
@@ -787,7 +790,7 @@ public:
                               std::map<rtx, reg_mod*, cmp_by_regno>&
                                 visited_reg_mods, unsigned* next_tmp_regno);
 
-    void insert_address_mods (alternative_set::const_iterator alt,
+    bool insert_address_mods (alternative_set::const_iterator alt,
                               reg_mod* base_start_addr,
                               reg_mod* index_start_addr,
                               const addr_expr& base_end_addr,
@@ -836,6 +839,11 @@ public:
     insn_map m_insn_el_map;
     glob_insn_map& m_glob_insn_el_map;
     unsigned* m_next_id;
+
+    // Used in address validating functions instead of real regs
+    // to avoid generating many RTXes.
+    rtx m_substitute_reg;
+
     start_addr_list m_start_addr_list;
     const sequence* m_original_seq;
   };
