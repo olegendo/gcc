@@ -1666,11 +1666,35 @@ sh_ams2::sequence::find_addr_reg_uses (void)
           find_addr_reg_uses_1 (*regs, PATTERN (i),
                                 std::back_inserter (reg_use_refs));
 
-          // If no refs were found and this is a funcall, an
-          // unspecified reg use will be created.
-          if (reg_use_refs.empty () && CALL_P (i)
-              && find_reg_fusage (i, USE, *regs))
-            reg_use_refs.push_back (NULL);
+          // If no refs were found and the reg is used by a funcall,
+          // create an unspecified reg use.
+          if (reg_use_refs.empty () && CALL_P (i))
+            {
+              // Check if the reg is used directly.
+              if (find_reg_fusage (i, USE, *regs))
+                reg_use_refs.push_back (NULL);
+              else
+                {
+                  // Check if the reg is used as part of a mem RTX.
+                  for (rtx link = CALL_INSN_FUNCTION_USAGE (i); link != NULL;
+                       link = XEXP (link, 1))
+                    {
+                      if (GET_CODE (XEXP (link, 0)) != USE
+                          || !MEM_P (XEXP (XEXP (link, 0), 0)))
+                        continue;
+
+                      rtx mem = XEXP (XEXP (link, 0), 0);
+                      subrtx_var_iterator::array_type array;
+                      FOR_EACH_SUBRTX_VAR (it, array, mem, NONCONST)
+                        if (REG_P (*it) && regs_equal (*it, *regs))
+                          {
+                            reg_use_refs.push_back (NULL);
+                            goto cont;
+                          }
+                    }
+                }
+            }
+        cont:
 
           // Create a reg use for each reference that was found.
           for (std::vector<rtx*>::iterator it = reg_use_refs.begin ();
@@ -1680,7 +1704,17 @@ sh_ams2::sequence::find_addr_reg_uses (void)
 
               if (use_ref == NULL)
                 {
-                  insert_unique (make_ref_counted<reg_use> (i, *regs));
+                  reg_use* new_reg_use = as_a<reg_use*> (&*insert_unique (
+                    make_ref_counted<reg_use> (i, *regs)));
+                  std::map<rtx, reg_mod*, cmp_by_regno>::iterator found =
+                    live_addr_regs.find(*regs);
+                  if (found != live_addr_regs.end ())
+                    {
+                      reg_mod* rm = found->second;
+                      new_reg_use->set_effective_addr (rm->effective_addr ());
+                      new_reg_use->add_dependency (rm);
+                      rm->add_dependent_el (new_reg_use);
+                    }
                   continue;
                 }
 
