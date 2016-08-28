@@ -1381,7 +1381,8 @@ sh_ams2::sequence::split (std::list<sequence>::iterator seq_it,
               {
                 term.set_new_seq (
                   &(*sequences.insert (
-                    seq_it, sequence (seq.g_insn_el_map (), seq.next_id ()))));
+                    seq_it, sequence (seq.bb (), seq.g_insn_el_map (),
+                                      seq.next_id ()))));
                 new_seqs.push_back (term.new_seq ());
               }
 	    element_new_seqs[*el] = term.new_seq ();
@@ -1564,7 +1565,7 @@ sh_ams2::sequence::find_addr_reg_mods (void)
   for (addr_reg_map::iterator it = m_addr_regs.begin ();
        it != m_addr_regs.end (); ++it)
     {
-      rtx_insn* last_insn = BB_END (start_bb ());
+      rtx_insn* last_insn = BB_END (bb ());
       reg_mod* last_reg_mod = NULL;
       for (rtx reg = it->first; last_insn != NULL; )
 	{
@@ -3022,7 +3023,7 @@ sh_ams2::sequence::update_insn_stream (void)
   // sequence's BB.
   if (insn_sequence_started)
     {
-      rtx_insn* last_insn = BB_END (start_bb ());
+      rtx_insn* last_insn = BB_END (bb ());
       bool emit_before = control_flow_insn_p (last_insn);
 
       rtx_insn* new_insns = get_insns ();
@@ -3117,33 +3118,6 @@ sh_ams2::sequence::start_insn (void) const
         return e->insn ();
     }
   gcc_unreachable ();
-}
-
-// The basic block of the first insn in the access sequence.
-basic_block
-sh_ams2::sequence::start_bb (void) const
-{
-  for (const_iterator e = begin (); e != end (); ++e)
-    {
-// FIXME: in which cases can an insn in the sequence NOT belong to a basic block?
-// either this check is unnecessary, or add a comment.
-      if (e->insn () && BLOCK_FOR_INSN (e->insn ()))
-        return BLOCK_FOR_INSN (e->insn ());
-    }
-  gcc_unreachable ();
-}
-
-// FIXME:
-// start_bb and start_insn should use this.
-sh_ams2::sequence::const_iterator
-sh_ams2::sequence::start_insn_element (void) const
-{
-  for (const_iterator e = begin (); e != end (); ++e)
-    if (e->insn ())
-      return e;
-
-//  gcc_unreachable ();   FIXME: sure?  always?
-  return end ();
 }
 
 // Insert a new element into the sequence.  Return an iterator pointing
@@ -4585,7 +4559,7 @@ sh_ams2::execute (function* fun)
       log_msg ("finding mem accesses\n");
 
       // Create a new sequence from the mem accesses in this BB.
-      sequences.push_back (sequence (insn_el_map, &next_element_id));
+      sequences.push_back (sequence (bb, insn_el_map, &next_element_id));
       sequence& seq = sequences.back ();
 
       // Add the mem accesses from this BB to the sequence.

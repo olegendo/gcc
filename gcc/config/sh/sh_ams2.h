@@ -598,15 +598,15 @@ public:
     split (std::list<sequence>::iterator seq_it,
            std::list<sequence>& sequences);
 
-    sequence (glob_insn_map& im, unsigned* i)
-    : m_glob_insn_el_map (im), m_next_id (i),
+    sequence (basic_block bb, glob_insn_map& im, unsigned* i)
+    : m_bb (bb), m_glob_insn_el_map (im), m_next_id (i),
       m_substitute_reg (gen_rtx_REG (Pmode, LAST_VIRTUAL_REGISTER + 1)),
       m_original_seq (NULL)
       {
       }
 
     sequence (const sequence& other)
-    : m_glob_insn_el_map (other.m_glob_insn_el_map),
+    : m_bb (other.m_bb), m_glob_insn_el_map (other.m_glob_insn_el_map),
       m_next_id (other.m_next_id), m_substitute_reg (other.m_substitute_reg),
       m_original_seq (other.m_original_seq)
         {
@@ -690,10 +690,12 @@ public:
     // Revert the sequence to a previous state found in PREV_SEQUENCES.
     void revert (std::map<sequence*, sequence>& prev_sequences);
 
-    // The first insn and basic block in the sequence.
+    // The first insn in the sequence.
     const_iterator start_insn_element (void) const;
     rtx_insn* start_insn (void) const;
-    basic_block start_bb (void) const;
+
+    // The basic block of the sequence.
+    basic_block bb (void) const { return m_bb; }
 
     // A map containing all the address regs used in the sequence
     // and the number of elements that use them.
@@ -835,6 +837,7 @@ public:
     // we use a strong reference for those.  Sequence elements are also
     // referenced in other containers but only using weak references.
     std::list<ref_counting_ptr<sequence_element> > m_els;
+    basic_block m_bb;
     addr_reg_map m_addr_regs;
     insn_map m_insn_el_map;
     glob_insn_map& m_glob_insn_el_map;
