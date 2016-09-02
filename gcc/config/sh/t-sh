@@ -33,7 +33,7 @@ sh_optimize_sett_clrt.o: $(srcdir)/config/sh/sh_optimize_sett_clrt.cc \
   $(CONFIG_H) $(SYSTEM_H) $(TREE_H) $(TM_H) $(TM_P_H) coretypes.h
 	$(COMPILER) -c $(ALL_COMPILERFLAGS) $(ALL_CPPFLAGS) $(INCLUDES) $<
 
-sh_ams.o: $(srcdir)/config/sh/sh_ams.cc \
+ams.o: $(srcdir)/ams.cc \
   $(CONFIG_H) $(SYSTEM_H) $(TREE_H) $(TM_H) $(TM_P_H) coretypes.h
 	$(COMPILER) -c $(ALL_COMPILERFLAGS) $(ALL_CPPFLAGS) $(INCLUDES) $<
 

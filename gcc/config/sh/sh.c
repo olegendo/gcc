@@ -102,7 +102,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "builtins.h"
 #include "rtl-iter.h"
 
-#include "sh_ams.h"
+#include "ams.h"
 
 int code_for_indirect_jump_scratch = CODE_FOR_indirect_jump_scratch;
 
@@ -818,29 +818,29 @@ extern opt_pass* make_pass_sh_treg_combine (gcc::context* ctx, bool split_insns,
 extern opt_pass* make_pass_sh_optimize_sett_clrt (gcc::context* ctx,
 						  const char* name);
 
-static struct ams_delegate : public sh_ams::delegate
+static struct ams_delegate : public ams::delegate
 {
   virtual void
-  mem_access_alternatives (sh_ams::alternative_set& alt,
-                           const sh_ams::sequence& seq,
-                           sh_ams::sequence::const_iterator acc,
+  mem_access_alternatives (ams::alternative_set& alt,
+                           const ams::sequence& seq,
+                           ams::sequence::const_iterator acc,
                            bool& validate_alternatives);
   virtual void
-  adjust_alternative_costs (sh_ams::alternative& alt,
-                            const sh_ams::sequence& seq,
-                            sh_ams::sequence::const_iterator acc);
+  adjust_alternative_costs (ams::alternative& alt,
+                            const ams::sequence& seq,
+                            ams::sequence::const_iterator acc);
   virtual int
-  adjust_lookahead_count (const sh_ams::sequence& as,
-                          sh_ams::sequence::const_iterator acc);
+  adjust_lookahead_count (const ams::sequence& as,
+                          ams::sequence::const_iterator acc);
 
   virtual int
   addr_reg_mod_cost (const_rtx reg, const_rtx val,
-                     const sh_ams::sequence& seq,
-                     sh_ams::sequence::const_iterator acc);
+                     const ams::sequence& seq,
+                     ams::sequence::const_iterator acc);
   virtual int
   addr_reg_clone_cost (const_rtx reg,
-                       const sh_ams::sequence& seq,
-                       sh_ams::sequence::const_iterator acc);
+                       const ams::sequence& seq,
+                       ams::sequence::const_iterator acc);
 
   virtual void
   clear_custom_data (void)
@@ -848,7 +848,7 @@ static struct ams_delegate : public sh_ams::delegate
     m_fp_accesses_dominate.clear ();
   }
 
-  std::map<const sh_ams::sequence*, bool> m_fp_accesses_dominate;
+  std::map<const ams::sequence*, bool> m_fp_accesses_dominate;
 
 } g_ams_delegate;
 
@@ -884,9 +884,9 @@ register_sh_passes (void)
 		 PASS_POS_INSERT_BEFORE, "sched2", 1);
 
   /* Add AMS pass after auto-inc-dec.  */
-  if (sh_ams_enable)
-    register_pass (new sh_ams (g, "sh_ams", g_ams_delegate,
-                               sh_ams::options (sh_ams_opt)),
+  if (ams_enable)
+    register_pass (new ams (g, "ams", g_ams_delegate,
+                            ams::options (ams_opt)),
 		   PASS_POS_INSERT_AFTER, "auto_inc_dec", 1);
 
   /* Disable old auto-inc-dec pass.
@@ -894,15 +894,15 @@ register_sh_passes (void)
      the auto-inc-dec pass, but it's controlled by one global
      flag_forward_propagate variable, which also affects other fwprop
      instances ... would need to refactor that pass stuff first.
-  if (sh_ams_enable)
+  if (ams_enable)
     flag_auto_inc_dec = 0;
   */
 
   /* Add another AMS pass after register allocation.  It will be a bit more
      restricted but can improve code around stack frame accesses.  */
-  if (sh_ams_post_ra_enable)
-    register_pass (new sh_ams (g, "sh_ams_postra", g_ams_delegate,
-                               sh_ams::options (sh_ams_postra_opt)),
+  if (ams_post_ra_enable)
+    register_pass (new ams (g, "ams_postra", g_ams_delegate,
+                               ams::options (ams_postra_opt)),
 		   PASS_POS_INSERT_AFTER, "pro_and_epilogue", 1);
 }
 
@@ -13743,27 +13743,27 @@ sh_find_equiv_gbr_addr (rtx_insn* insn, rtx mem)
 // AMS delegate functions
 
 static bool
-is_stack_frame_related_access (sh_ams::sequence::const_iterator acc)
+is_stack_frame_related_access (ams::sequence::const_iterator acc)
 {
   // FIXME: Could also walk the reg values/defs as the SF reg might be
   // indirectly referenced.
-  const sh_ams::addr_expr& addr = acc->effective_addr ();
+  const ams::addr_expr& addr = acc->effective_addr ();
 
-  for (sh_ams::addr_expr::regs_const_iterator i = addr.regs_begin (),
+  for (ams::addr_expr::regs_const_iterator i = addr.regs_begin (),
        i_end = addr.regs_end (); i != i_end; ++i)
-    if (sh_ams::get_regno (*i) == FRAME_POINTER_REGNUM)
+    if (ams::get_regno (*i) == FRAME_POINTER_REGNUM)
       return true;
 
   return false;
 }
 
 static bool
-fp_accesses_dominate (const sh_ams::sequence& seq, ams_delegate& d)
+fp_accesses_dominate (const ams::sequence& seq, ams_delegate& d)
 {
   if (!TARGET_FPU_ANY)
     return false;
 
-  std::map<const sh_ams::sequence*, bool>::iterator found =
+  std::map<const ams::sequence*, bool>::iterator found =
     d.m_fp_accesses_dominate.find (&seq);
   if (found != d.m_fp_accesses_dominate.end ())
     return found->second;
@@ -13771,8 +13771,8 @@ fp_accesses_dominate (const sh_ams::sequence& seq, ams_delegate& d)
   unsigned int total_count = 0;
   unsigned int fp_count = 0;
 
-  for (sh_ams::mem_acc_const_iter i (seq.begin<sh_ams::mem_match> ()),
-       i_end (seq.end<sh_ams::mem_match> ()); i != i_end; ++i)
+  for (ams::mem_acc_const_iter i (seq.begin<ams::mem_match> ()),
+       i_end (seq.end<ams::mem_match> ()); i != i_end; ++i)
     {
       ++total_count;
       enum mode_class mc = GET_MODE_CLASS (i->mach_mode ());
@@ -13788,21 +13788,21 @@ fp_accesses_dominate (const sh_ams::sequence& seq, ams_delegate& d)
 
 // similar to sh_address_cost, but for the AMS pass.
 void ams_delegate::
-mem_access_alternatives (sh_ams::alternative_set& alt,
-			 const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
-			 sh_ams::sequence::const_iterator acc,
+mem_access_alternatives (ams::alternative_set& alt,
+			 const ams::sequence& seq ATTRIBUTE_UNUSED,
+			 ams::sequence::const_iterator acc,
 			 bool& validate_alternatives)
 
 {
-  typedef sh_ams::alternative ams_alt;
-  std::back_insert_iterator <sh_ams::alternative_set> alts (alt);
+  typedef ams::alternative ams_alt;
+  std::back_insert_iterator <ams::alternative_set> alts (alt);
 
   gcc_assert (acc->is_mem_access ());
-  const sh_ams::mem_access* mem_acc = (const sh_ams::mem_access*)&*acc;
+  const ams::mem_access* mem_acc = (const ams::mem_access*)&*acc;
 
   const machine_mode acc_mode = mem_acc->mach_mode ();
   const int acc_size = mem_acc->access_size ();
-  const sh_ams::addr_expr& addr = mem_acc->effective_addr ();
+  const ams::addr_expr& addr = mem_acc->effective_addr ();
 
   validate_alternatives = get_attr_ams_validate_alternatives (acc->insn ())
 			  == AMS_VALIDATE_ALTERNATIVES_YES;
@@ -13834,7 +13834,7 @@ mem_access_alternatives (sh_ams::alternative_set& alt,
   // on pseudos before RA will work.  but when ran after RA, AMS will have to
   // deal with hard-regs and do the checking on register classes + reg numbers.
   // this is some sort of register constraint handling.
-  if (sh_ams::get_regno (addr.base_reg ()) == GBR_REG)
+  if (ams::get_regno (addr.base_reg ()) == GBR_REG)
   {
     // A GBR relative address.  Sticking to the GBR base reg is the cheapest
     // and also allows for the largest displacement.
@@ -13848,7 +13848,7 @@ mem_access_alternatives (sh_ams::alternative_set& alt,
     if (GET_MODE_CLASS (acc_mode) != MODE_FLOAT)
       {
 	const int max_disp = sh_max_gbr_mov_insn_displacement (acc_mode);
-	*alts++ = ams_alt (1, sh_ams::make_disp_addr (get_gbr_reg_rtx (), 0,
+	*alts++ = ams_alt (1, ams::make_disp_addr (get_gbr_reg_rtx (), 0,
                                                       max_disp));
 	gbr_extra_cost = 2;
       }
@@ -13861,7 +13861,7 @@ mem_access_alternatives (sh_ams::alternative_set& alt,
   // Y0, Y1, FPSCR, FPUL.
   // FIXME: also constant pool loads (LABEL_REF?).
   // FIXME: also mac.w and mac.l insns (post-inc loads only).
-  *alts++ = ams_alt (1 + gbr_extra_cost, sh_ams::make_reg_addr ());
+  *alts++ = ams_alt (1 + gbr_extra_cost, ams::make_reg_addr ());
 
   // For QIHImode loads make post-inc/pre-dec loads/stores cheaper if they
   // are part of adjacent chains of 3 or more insns.  This will make AMS
@@ -13883,18 +13883,18 @@ mem_access_alternatives (sh_ams::alternative_set& alt,
                            && !acc->inc_chain ().is_last ())
                           || (acc->inc_chain ().last ()
                               && (acc->inc_chain ().last ()->type ()
-                                  == sh_ams::type_reg_use
+                                  == ams::type_reg_use
                                   || acc->inc_chain ().last ()->type ()
-                                     == sh_ams::type_reg_mod)) ? -2 : 0);
+                                     == ams::type_reg_mod)) ? -2 : 0);
   const int dec_cost = sf_related * 4
 		       + ((acc_size < 4
 		           && acc->dec_chain ().length () >= 3
                            && !acc->dec_chain ().is_last ())
                           || (acc->dec_chain ().last ()
                               && (acc->dec_chain ().last ()->type ()
-                                  == sh_ams::type_reg_use
+                                  == ams::type_reg_use
                                   || acc->dec_chain ().last ()->type ()
-                                     == sh_ams::type_reg_mod)) ? -2 : 0);
+                                     == ams::type_reg_mod)) ? -2 : 0);
 
   // If there is no FPU GP regs will be used for storing FP modes, so we
   // allow normal QIHISImode alternatives also for FP modes.
@@ -13906,15 +13906,15 @@ mem_access_alternatives (sh_ams::alternative_set& alt,
       // SH2A allows pre-dec load to R0 and post-inc store from R0.
       // However, don't use it for DImode since this results in worse code
       // than using displacement modes.
-      if (acc->type () == sh_ams::type_mem_load && TARGET_SH2A
+      if (acc->type () == ams::type_mem_load && TARGET_SH2A
 	  && acc_mode != DImode)
         *alts++ = ams_alt (1 + r0_extra_cost + gbr_extra_cost + dec_cost,
-                            sh_ams::make_pre_dec_addr (acc_mode));
+                            ams::make_pre_dec_addr (acc_mode));
 
-      if (acc->type () == sh_ams::type_mem_store && TARGET_SH2A
+      if (acc->type () == ams::type_mem_store && TARGET_SH2A
 	  && acc_mode != DImode)
         *alts++ = ams_alt (1 + r0_extra_cost + gbr_extra_cost + inc_cost,
-                            sh_ams::make_post_inc_addr (acc_mode));
+                            ams::make_post_inc_addr (acc_mode));
 
       // QImode and HImode accesses with displacements work with R0 only,
       // thus charge extra.
@@ -13922,22 +13922,22 @@ mem_access_alternatives (sh_ams::alternative_set& alt,
 			    + gbr_extra_cost;
       const int max_disp = sh_max_mov_insn_displacement (acc_mode, false);
 
-      *alts++ = ams_alt (disp_cost, sh_ams::make_disp_addr (0, max_disp));
+      *alts++ = ams_alt (disp_cost, ams::make_disp_addr (0, max_disp));
     }
 
   // indexed addressing has to use R0 for either base or index reg.
   // FIXME: may be disallow indexed mode for access size > 4?
   *alts++ = ams_alt (1 + gbr_extra_cost + r0_extra_cost,
-                     sh_ams::make_index_addr ());
+                     ams::make_index_addr ());
 
   // non-SH2A allow post-inc loads only and pre-dec stores only for pretty much
   // everything.
-  if (acc->type () == sh_ams::type_mem_load)
+  if (acc->type () == ams::type_mem_load)
     *alts++ = ams_alt (1 + gbr_extra_cost + inc_cost,
-                       sh_ams::make_post_inc_addr (acc_mode));
-  else if (acc->type () == sh_ams::type_mem_store)
+                       ams::make_post_inc_addr (acc_mode));
+  else if (acc->type () == ams::type_mem_store)
     *alts++ = ams_alt (1 + gbr_extra_cost + dec_cost,
-                       sh_ams::make_pre_dec_addr (acc_mode));
+                       ams::make_pre_dec_addr (acc_mode));
 
   // On SH2A we can do larger displacements and also do FP modes with
   // displacements, but those are 32 bit insns, which we generally try to avoid.
@@ -13947,22 +13947,22 @@ mem_access_alternatives (sh_ams::alternative_set& alt,
     {
       const int max_disp = sh_max_mov_insn_displacement (acc_mode, true);
       *alts++ = ams_alt (3 + gbr_extra_cost,
-                         sh_ams::make_disp_addr (0, max_disp));
+                         ams::make_disp_addr (0, max_disp));
     }
 }
 
 void
 ams_delegate::
-adjust_alternative_costs (sh_ams::alternative& alt ATTRIBUTE_UNUSED,
-                          const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
-                          sh_ams::sequence::const_iterator acc ATTRIBUTE_UNUSED)
+adjust_alternative_costs (ams::alternative& alt ATTRIBUTE_UNUSED,
+                          const ams::sequence& seq ATTRIBUTE_UNUSED,
+                          ams::sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
 }
 
 int
 ams_delegate::
-adjust_lookahead_count (const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
-                        sh_ams::sequence::const_iterator acc)
+adjust_lookahead_count (const ams::sequence& seq ATTRIBUTE_UNUSED,
+                        ams::sequence::const_iterator acc)
 {
   // If the next 2 or more accesses can be reached with post-inc, look
   // a bit further ahead.
@@ -13973,9 +13973,9 @@ adjust_lookahead_count (const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
 }
 
 int
-ams_reg_disp_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams::disp_t disp,
-                   const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
-                   sh_ams::sequence::const_iterator el ATTRIBUTE_UNUSED)
+ams_reg_disp_cost (const_rtx reg ATTRIBUTE_UNUSED, ams::disp_t disp,
+                   const ams::sequence& seq ATTRIBUTE_UNUSED,
+                   ams::sequence::const_iterator el ATTRIBUTE_UNUSED)
 {
   // the costs for adding small constants should be higher than
   // QI/HI displacement mode addresses.
@@ -13991,32 +13991,32 @@ ams_reg_disp_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams::disp_t disp,
 int
 ams_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
                        const_rtx disp_reg ATTRIBUTE_UNUSED,
-                       const sh_ams::sequence& seq,
-                       sh_ams::sequence::const_iterator el)
+                       const ams::sequence& seq,
+                       ams::sequence::const_iterator el)
 {
-  sh_ams::addr_expr ea = el->effective_addr ();
+  ams::addr_expr ea = el->effective_addr ();
 
-  gcc_assert (el->is_mem_access () || el->type () == sh_ams::type_reg_mod
-	      || el->type () == sh_ams::type_reg_use);
+  gcc_assert (el->is_mem_access () || el->type () == ams::type_reg_mod
+	      || el->type () == ams::type_reg_use);
 
   // increase the costs if the next mem access that uses this
   // could also use reg+reg addressing mode instead.
-  sh_ams::sequence::const_iterator next_el = el;
+  ams::sequence::const_iterator next_el = el;
   ++next_el;
 
-  const sh_ams::mem_access* next_acc =
+  const ams::mem_access* next_acc =
 	next_el != seq.end () && next_el->is_mem_access ()
-	? (const sh_ams::mem_access*)&*next_el
+	? (const ams::mem_access*)&*next_el
 	: NULL;
 
   if (next_acc != NULL && next_acc->effective_addr () == ea)
     {
-      for (sh_ams::alternative_set::const_iterator
+      for (ams::alternative_set::const_iterator
 	     alt = next_acc->alternatives ().begin ();
 	   alt != next_acc->alternatives ().end (); ++alt)
 	{
-	  if (alt->address ().base_reg () == sh_ams::any_regno
-	      && alt->address ().index_reg () == sh_ams::any_regno)
+	  if (alt->address ().base_reg () == ams::any_regno
+	      && alt->address ().index_reg () == ams::any_regno)
 	    return 5;
 	}
     }
@@ -14027,9 +14027,9 @@ ams_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
 }
 
 int
-ams_reg_scale_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams::scale_t scale,
-                    const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
-                    sh_ams::sequence::const_iterator el ATTRIBUTE_UNUSED)
+ams_reg_scale_cost (const_rtx reg ATTRIBUTE_UNUSED, ams::scale_t scale,
+                    const ams::sequence& seq ATTRIBUTE_UNUSED,
+                    ams::sequence::const_iterator el ATTRIBUTE_UNUSED)
 {
   // multiplying by powers of 2 can be done cheaper with shifts.
   if ((scale & (scale - 1)) == 0)
@@ -14040,9 +14040,9 @@ ams_reg_scale_cost (const_rtx reg ATTRIBUTE_UNUSED, sh_ams::scale_t scale,
 
 int
 ams_const_load_cost (const_rtx reg ATTRIBUTE_UNUSED,
-                     sh_ams::disp_t value,
-                     const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
-                     sh_ams::sequence::const_iterator el ATTRIBUTE_UNUSED)
+                     ams::disp_t value,
+                     const ams::sequence& seq ATTRIBUTE_UNUSED,
+                     ams::sequence::const_iterator el ATTRIBUTE_UNUSED)
 {
   if (CONST_OK_FOR_I08 (value))
     return 2;
@@ -14053,20 +14053,20 @@ ams_const_load_cost (const_rtx reg ATTRIBUTE_UNUSED,
 int
 ams_delegate::
 addr_reg_mod_cost (const_rtx reg, const_rtx val,
-                   const sh_ams::sequence& seq,
-                   sh_ams::sequence::const_iterator acc)
+                   const ams::sequence& seq,
+                   ams::sequence::const_iterator acc)
 {
   // FIXME: This hack shouldn't be needed.  See also mem_access_alternatives.
   if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq, *this))
     return 12;
 
   // modifying the GBR is impossible.
-  if (sh_ams::get_regno (reg) == GBR_REG)
-    return sh_ams::infinite_costs;
+  if (ams::get_regno (reg) == GBR_REG)
+    return ams::infinite_costs;
 
   enum rtx_code code = GET_CODE (val);
   if ((code == PLUS || code == MULT) && !REG_P (XEXP (val, 0)))
-    return sh_ams::infinite_costs;
+    return ams::infinite_costs;
 
   switch (code)
     {
@@ -14088,14 +14088,14 @@ addr_reg_mod_cost (const_rtx reg, const_rtx val,
       break;
     }
 
-  return sh_ams::infinite_costs;
+  return ams::infinite_costs;
 }
 
 int
 ams_delegate::
 addr_reg_clone_cost (const_rtx reg ATTRIBUTE_UNUSED,
-		     const sh_ams::sequence& seq ATTRIBUTE_UNUSED,
-		     sh_ams::sequence::const_iterator acc ATTRIBUTE_UNUSED)
+		     const ams::sequence& seq ATTRIBUTE_UNUSED,
+		     ams::sequence::const_iterator acc ATTRIBUTE_UNUSED)
 {
   // FIXME: This hack shouldn't be needed.  See also mem_access_alternatives.
   if (is_stack_frame_related_access (acc) && !fp_accesses_dominate (seq, *this))

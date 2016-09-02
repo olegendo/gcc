@@ -57,8 +57,8 @@
 // .. depending on the context.
 
 
-#ifndef includeguard_gcc_sh_ams_includeguard
-#define includeguard_gcc_sh_ams_includeguard
+#ifndef includeguard_gcc_ams_includeguard
+#define includeguard_gcc_ams_includeguard
 
 #include "tree-pass.h"
 #include <limits>
@@ -75,7 +75,7 @@
 #include "ref_counted.h"
 #include "tmp_rtx.h"
 
-class sh_ams : public rtl_opt_pass
+class ams : public rtl_opt_pass
 {
 public:
   struct options
@@ -344,8 +344,8 @@ public:
     // Comparison struct for sets and maps containing address expressions.
     struct compare
     {
-      bool operator () (const sh_ams::addr_expr& a,
-                        const sh_ams::addr_expr& b) const
+      bool operator () (const ams::addr_expr& a,
+                        const ams::addr_expr& b) const
       {
         return a < b;
       }
@@ -1472,10 +1472,10 @@ NOTE:
   // during access sequence splitting.
   class shared_term;
 
-  sh_ams (gcc::context* ctx, const char* name, delegate& dlg,
-	  const options& opt = options ());
+  ams (gcc::context* ctx, const char* name, delegate& dlg,
+       const options& opt = options ());
 
-  virtual ~sh_ams (void);
+  virtual ~ams (void);
   virtual bool gate (function* fun);
   virtual unsigned int execute (function* fun);
 
@@ -1540,8 +1540,8 @@ private:
 
 // ---------------------------------------------------------------------------
 
-inline sh_ams::regno_t
-sh_ams::get_regno (const_rtx x)
+inline ams::regno_t
+ams::get_regno (const_rtx x)
 {
   if (x == NULL)
     return -1;
@@ -1550,79 +1550,79 @@ sh_ams::get_regno (const_rtx x)
   return REGNO (x);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_reg_addr (rtx base_reg)
+inline ams::addr_expr
+ams::make_reg_addr (rtx base_reg)
 {
   return non_mod_addr (base_reg, invalid_regno, 0, 0, 0, 0, 0, 0);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_disp_addr (disp_t disp_min, disp_t disp_max)
+inline ams::addr_expr
+ams::make_disp_addr (disp_t disp_min, disp_t disp_max)
 {
   return non_mod_addr (any_regno, invalid_regno, 0, 0, 0, 0, disp_min, disp_max);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max)
+inline ams::addr_expr
+ams::make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max)
 {
   return non_mod_addr (base_reg, invalid_regno, 0, 0, 0, 0, disp_min, disp_max);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_const_addr (disp_t disp)
+inline ams::addr_expr
+ams::make_const_addr (disp_t disp)
 {
   return non_mod_addr (invalid_regno, invalid_regno, 0, 0, 0, disp, disp, disp);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_const_addr (rtx disp)
+inline ams::addr_expr
+ams::make_const_addr (rtx disp)
 {
   gcc_assert (CONST_INT_P (disp));
   return make_const_addr (INTVAL (disp));
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_index_addr (scale_t scale_min, scale_t scale_max)
+inline ams::addr_expr
+ams::make_index_addr (scale_t scale_min, scale_t scale_max)
 {
   return non_mod_addr (any_regno, any_regno, 1, scale_min, scale_max, 0, 0, 0);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_index_addr (void)
+inline ams::addr_expr
+ams::make_index_addr (void)
 {
   return make_index_addr (1, 1);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_post_inc_addr (machine_mode mode, rtx base_reg)
+inline ams::addr_expr
+ams::make_post_inc_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = GET_MODE_SIZE (mode);
   return post_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_post_dec_addr (machine_mode mode, rtx base_reg)
+inline ams::addr_expr
+ams::make_post_dec_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = -GET_MODE_SIZE (mode);
   return post_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_pre_inc_addr (machine_mode mode, rtx base_reg)
+inline ams::addr_expr
+ams::make_pre_inc_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = GET_MODE_SIZE (mode);
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
-inline sh_ams::addr_expr
-sh_ams::make_pre_dec_addr (machine_mode mode, rtx base_reg)
+inline ams::addr_expr
+ams::make_pre_dec_addr (machine_mode mode, rtx base_reg)
 {
   const int mode_sz = -GET_MODE_SIZE (mode);
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
 inline bool
-sh_ams::addr_expr::operator == (const addr_expr& other) const
+ams::addr_expr::operator == (const addr_expr& other) const
 {
   if (is_invalid () || other.is_invalid ())
     return is_invalid () && other.is_invalid ();
@@ -1634,13 +1634,13 @@ sh_ams::addr_expr::operator == (const addr_expr& other) const
 }
 
 inline bool
-sh_ams::addr_expr::operator != (const addr_expr& other) const
+ams::addr_expr::operator != (const addr_expr& other) const
 {
   return !addr_expr::operator == (other);
 }
 
 inline bool
-sh_ams::addr_expr::operator < (const addr_expr& other) const
+ams::addr_expr::operator < (const addr_expr& other) const
 {
   if (is_invalid () && other.is_invalid ())
     return false;
@@ -1665,8 +1665,8 @@ sh_ams::addr_expr::operator < (const addr_expr& other) const
   return disp () > other.disp ();
 }
 
-inline std::pair<sh_ams::disp_t, bool>
-sh_ams::addr_expr::operator - (const addr_expr& other) const
+inline std::pair<ams::disp_t, bool>
+ams::addr_expr::operator - (const addr_expr& other) const
 {
   if (regs_equal (base_reg (), other.base_reg ())
       && regs_equal (index_reg (), other.index_reg ())
@@ -1676,7 +1676,7 @@ sh_ams::addr_expr::operator - (const addr_expr& other) const
   return std::make_pair (0, false);
 }
 
-inline sh_ams::non_mod_addr
+inline ams::non_mod_addr
 ::non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale,
 		scale_t scale_min, scale_t scale_max,
 		disp_t disp, disp_t disp_min, disp_t disp_max)
@@ -1694,7 +1694,7 @@ inline sh_ams::non_mod_addr
   m_scale_max = scale_max;
 }
 
-inline sh_ams::non_mod_addr
+inline ams::non_mod_addr
 ::non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp)
 {
   m_type = non_mod;
@@ -1710,7 +1710,7 @@ inline sh_ams::non_mod_addr
   m_scale_max = scale;
 }
 
-inline sh_ams::pre_mod_addr
+inline ams::pre_mod_addr
 ::pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
 {
   m_type = pre_mod;
@@ -1722,7 +1722,7 @@ inline sh_ams::pre_mod_addr
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
-inline sh_ams::pre_mod_addr
+inline ams::pre_mod_addr
 ::pre_mod_addr (rtx base_reg, disp_t disp)
 {
   m_type = pre_mod;
@@ -1734,7 +1734,7 @@ inline sh_ams::pre_mod_addr
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
-inline sh_ams::post_mod_addr
+inline ams::post_mod_addr
 ::post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
 {
   m_type = post_mod;
@@ -1746,7 +1746,7 @@ inline sh_ams::post_mod_addr
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
-inline sh_ams::post_mod_addr
+inline ams::post_mod_addr
 ::post_mod_addr (rtx base_reg, disp_t disp)
 {
   m_type = post_mod;
@@ -1758,4 +1758,4 @@ inline sh_ams::post_mod_addr
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
-#endif // includeguard_gcc_sh_ams_includeguard
+#endif // includeguard_gcc_ams_includeguard
