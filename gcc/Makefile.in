@@ -1173,6 +1173,7 @@ OBJS = \
 	ggc-page.o \
 	alias.o \
 	alloc-pool.o \
+	ams.o \
 	auto-inc-dec.o \
 	auto-profile.o \
 	bb-reorder.o \

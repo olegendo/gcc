@@ -60,9 +60,6 @@
 #include <cstdlib>
 
 #include "ams.h"
-
-#include "config/sh/sh-protos.h"
-
 #include "tmp_rtx.h"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -528,6 +525,33 @@ T make_of_type (const T&, const A0& a0, const A1& a1, const A2& a2)
 {
   return T (a0, a1, a2);
 }
+
+/* Given an insn check if it contains any post/pre inc/dec mem operands and
+   add the REG_INC notes accordingly.
+   FIXME: Copy pasted from config/sh/sh.c.  Move to rtl utilities.  */
+rtx_insn*
+check_add_incdec_notes (rtx_insn* i)
+{
+  struct for_each_inc_dec_clb
+  {
+    static int func (rtx mem ATTRIBUTE_UNUSED, rtx op ATTRIBUTE_UNUSED,
+		     rtx dest, rtx src ATTRIBUTE_UNUSED,
+		     rtx srcoff ATTRIBUTE_UNUSED, void* arg)
+    {
+      gcc_assert (REG_P (dest));
+
+      rtx_insn* i = (rtx_insn*)arg;
+      if (find_regno_note (i, REG_INC, REGNO (dest)) == NULL)
+	add_reg_note (i, REG_INC, dest);
+
+      return 0;
+    }
+  };
+
+  for_each_inc_dec (PATTERN (i), for_each_inc_dec_clb::func, i);
+  return i;
+}
+
 
 } // anonymous namespace
 
@@ -3756,7 +3780,7 @@ ams::mem_access::generate_new_insns (bool insn_sequence_started)
       abort ();
     }
 
-  sh_check_add_incdec_notes (insn ());
+  check_add_incdec_notes (insn ());
   return insn_sequence_started;
 }
 
@@ -5035,7 +5059,7 @@ ams::execute (function* fun)
 	        continue;
 
 	      remove_incdec_notes (i);
-	      sh_check_add_incdec_notes (i);
+	      check_add_incdec_notes (i);
 	    }
 	}
     }
