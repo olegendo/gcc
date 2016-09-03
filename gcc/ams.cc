@@ -1600,7 +1600,7 @@ ams::sequence::find_addr_reg_mods (void)
           if (prev.rm != NULL)
             {
               new_reg_mod = prev.rm;
-              last_insn = NULL;
+              last_insn = prev_nonnote_insn_bb (prev.rm->insn ());
             }
           else
             {
