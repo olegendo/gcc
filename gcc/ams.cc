@@ -1586,12 +1586,15 @@ ams::sequence::sort_found_mems (const std::pair<rtx*, element_type>& a,
 void
 ams::sequence::find_addr_reg_mods (void)
 {
+  basic_block seq_bb = bb ();
+  std::set<rtx, cmp_by_regno> regs_to_skip;
   for (addr_reg_map::iterator it = m_addr_regs.begin ();
        it != m_addr_regs.end (); ++it)
     {
-      rtx_insn* last_insn = BB_END (bb ());
+      rtx_insn* last_insn = BB_END (seq_bb);
       reg_mod* last_reg_mod = NULL;
-      for (rtx reg = it->first; last_insn != NULL; )
+      rtx reg = it->first;
+      while (1)
 	{
           reg_mod* new_reg_mod;
 	  const find_reg_value_result prev =
@@ -1620,9 +1623,15 @@ ams::sequence::find_addr_reg_mods (void)
                   addr_expr reg_effective_addr;
                   if (prev.value != NULL_RTX && REG_P (prev.value)
                       && regs_equal (prev.value, reg))
-                    reg_effective_addr = rtx_to_addr_expr (
-                      prev.value, prev.is_auto_mod ? prev.acc_mode  : Pmode,
-                      this, last_insn);
+                    {
+                      if (single_pred_p (seq_bb))
+                        // Trace back the reg's value through the previous BB.
+                        reg_effective_addr = rtx_to_addr_expr (
+                          prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
+                          this, BB_END (single_pred (seq_bb)));
+                      else
+                        reg_effective_addr = make_reg_addr (reg);
+                    }
                   else
                     {
                       reg_effective_addr = rtx_to_addr_expr (
@@ -1640,9 +1649,14 @@ ams::sequence::find_addr_reg_mods (void)
                   && regs_equal (prev.value, reg))
                 {
                   // If this reg's value was traced back across BBs and
-                  // found invalid, discard it.
+                  // found invalid, discard it.  Elements that use this reg
+                  // can't be optimized because we don't know which value
+                  // the reg holds.
                   if (new_reg_mod->effective_addr ().is_invalid ())
-                    remove_element (inserted);
+                    {
+                      regs_to_skip.insert (reg);
+                      remove_element (inserted);
+                    }
 
                   break;
                 }
@@ -1655,6 +1669,23 @@ ams::sequence::find_addr_reg_mods (void)
             }
 	  last_reg_mod = new_reg_mod;
 	}
+    }
+
+  // Don't optimize elements that use regs from REGS_TO_SKIP.
+  typedef filter_iterator<iterator, element_to_optimize> el_opt_iter;
+  for (el_opt_iter el = begin<element_to_optimize> (),
+       els_end = end<element_to_optimize> (); el != els_end; ++el)
+    {
+      for (addr_expr::regs_const_iterator ri =
+             el->effective_addr ().regs_begin ();
+           ri != el->effective_addr ().regs_end (); ++ri)
+        {
+          if (regs_to_skip.find (*ri) != regs_to_skip.end ())
+            {
+              el->set_optimization_disabled ();
+              break;
+            }
+        }
     }
 }
 
