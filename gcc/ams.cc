@@ -2014,20 +2014,30 @@ ams::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
   // If a reg has been set more than once, skip the elements that use
   // that reg since we don't know which value they use.
   // FIXME: Find a way to tell apart different versions of the same register.
-  std::map<rtx, int, cmp_by_regno> reg_set_count;
+  std::map<rtx, int, cmp_by_regno> reg_set_count, reg_use_count;
   for (iterator el = begin (); el != end (); ++el)
     {
+      rtx reg_set = NULL;
       if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
         {
+          reg_set = rm->reg ();
           // Count only those reg-mods that won't be removed.
           if (rm->insn () == NULL || !rm->can_be_optimized ())
-	    ++reg_set_count[rm->reg ()];
+            {
+              // Don't count multiple sets if the reg hasn't been used yet.
+              if (reg_use_count[rm->reg ()] == 0)
+                reg_set_count[rm->reg ()] = 1;
+              else
+                ++reg_set_count[rm->reg ()];
+            }
         }
 
       for (addr_expr::regs_const_iterator ri =
 	     el->effective_addr ().regs_begin ();
 	   ri != el->effective_addr ().regs_end (); ++ri)
         {
+          if (!regs_equal (reg_set, *ri))
+            ++reg_use_count[*ri];
           std::map<rtx, int, cmp_by_regno>::iterator found =
             reg_set_count.find (*ri);
           if (found != reg_set_count.end () && found->second > 1)
