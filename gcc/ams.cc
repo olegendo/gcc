@@ -1405,8 +1405,7 @@ ams::sequence::split (std::list<sequence>::iterator seq_it,
               {
                 term.set_new_seq (
                   &(*sequences.insert (
-                    seq_it, sequence (seq.bb (), seq.g_insn_el_map (),
-                                      seq.next_id ()))));
+                    seq_it, sequence (seq, false))));
                 new_seqs.push_back (term.new_seq ());
               }
 	    element_new_seqs[*el] = term.new_seq ();
@@ -1587,7 +1586,6 @@ void
 ams::sequence::find_addr_reg_mods (void)
 {
   basic_block seq_bb = bb ();
-  std::set<rtx, cmp_by_regno> regs_to_skip;
   for (addr_reg_map::iterator it = m_addr_regs.begin ();
        it != m_addr_regs.end (); ++it)
     {
@@ -1654,7 +1652,7 @@ ams::sequence::find_addr_reg_mods (void)
                   // the reg holds.
                   if (new_reg_mod->effective_addr ().is_invalid ())
                     {
-                      regs_to_skip.insert (reg);
+                      m_regs_to_skip.insert (reg);
                       remove_element (inserted);
                     }
 
@@ -1669,23 +1667,6 @@ ams::sequence::find_addr_reg_mods (void)
             }
 	  last_reg_mod = new_reg_mod;
 	}
-    }
-
-  // Don't optimize elements that use regs from REGS_TO_SKIP.
-  typedef filter_iterator<iterator, element_to_optimize> el_opt_iter;
-  for (el_opt_iter el = begin<element_to_optimize> (),
-       els_end = end<element_to_optimize> (); el != els_end; ++el)
-    {
-      for (addr_expr::regs_const_iterator ri =
-             el->effective_addr ().regs_begin ();
-           ri != el->effective_addr ().regs_end (); ++ri)
-        {
-          if (regs_to_skip.find (*ri) != regs_to_skip.end ())
-            {
-              el->set_optimization_disabled ();
-              break;
-            }
-        }
     }
 }
 
@@ -2045,8 +2026,21 @@ ams::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
               el->set_optimization_disabled ();
               break;
             }
+
+          // Don't optimize elements that use regs from M_REGS_TO_SKIP.
+          if (m_regs_to_skip.find (*ri) != m_regs_to_skip.end ())
+            {
+              el->set_optimization_disabled ();
+              break;
+            }
         }
 
+      // Don't optimize reg-uses that use registers from M_REGS_TO_SKIP.
+      if (reg_use* ru = dyn_cast<reg_use*> (&*el))
+        {
+          if (m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ())
+            el->set_optimization_disabled ();
+        }
       // Don't optimize those accesses that use regs with
       // a different machine mode.
       machine_mode acc_mode;

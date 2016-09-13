@@ -605,13 +605,15 @@ public:
       {
       }
 
-    sequence (const sequence& other)
-    : m_bb (other.m_bb), m_glob_insn_el_map (other.m_glob_insn_el_map),
+    sequence (const sequence& other, bool clone_elements=true)
+    : m_bb (other.m_bb), m_regs_to_skip (other.m_regs_to_skip),
+      m_glob_insn_el_map (other.m_glob_insn_el_map),
       m_next_id (other.m_next_id), m_substitute_reg (other.m_substitute_reg),
-      m_original_seq (other.m_original_seq)
+      m_original_seq (clone_elements? other.m_original_seq : NULL)
         {
-          for (const_iterator els = other.begin (); els != other.end (); ++els)
-            insert_element (*els.base (), end ());
+          if (clone_elements)
+            for (const_iterator els = other.begin (); els != other.end (); ++els)
+              insert_element (*els.base (), end ());
         }
 
     ~sequence (void)
@@ -839,6 +841,10 @@ public:
     std::list<ref_counting_ptr<sequence_element> > m_els;
     basic_block m_bb;
     addr_reg_map m_addr_regs;
+
+    // Elements that use registers from this set won't be optimized.
+    std::set<rtx, cmp_by_regno> m_regs_to_skip;
+
     insn_map m_insn_el_map;
     glob_insn_map& m_glob_insn_el_map;
     unsigned* m_next_id;
