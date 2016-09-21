@@ -1992,86 +1992,6 @@ ams::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 {
   bool success = true;
 
-  // If a reg has been set more than once, skip the elements that use
-  // that reg since we don't know which value they use.
-  // FIXME: Find a way to tell apart different versions of the same register.
-  std::map<rtx, int, cmp_by_regno> reg_set_count, reg_use_count;
-  for (iterator el = begin (); el != end (); ++el)
-    {
-      rtx reg_set = NULL;
-      if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
-        {
-          reg_set = rm->reg ();
-          // Count only those reg-mods that won't be removed.
-          if (rm->insn () == NULL || !rm->can_be_optimized ())
-            {
-              // Don't count multiple sets if the reg hasn't been used yet.
-              if (reg_use_count[rm->reg ()] == 0)
-                reg_set_count[rm->reg ()] = 1;
-              else
-                ++reg_set_count[rm->reg ()];
-            }
-        }
-
-      for (addr_expr::regs_const_iterator ri =
-	     el->effective_addr ().regs_begin ();
-	   ri != el->effective_addr ().regs_end (); ++ri)
-        {
-          if (!regs_equal (reg_set, *ri))
-            ++reg_use_count[*ri];
-          std::map<rtx, int, cmp_by_regno>::iterator found =
-            reg_set_count.find (*ri);
-          if (found != reg_set_count.end () && found->second > 1)
-            {
-              el->set_optimization_disabled ();
-              break;
-            }
-
-          // Don't optimize elements that use regs from M_REGS_TO_SKIP.
-          if (m_regs_to_skip.find (*ri) != m_regs_to_skip.end ())
-            {
-              el->set_optimization_disabled ();
-              break;
-            }
-        }
-
-      // Don't optimize reg-uses that use registers from M_REGS_TO_SKIP.
-      if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-        {
-          if (m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ())
-            el->set_optimization_disabled ();
-        }
-      // Don't optimize those accesses that use regs with
-      // a different machine mode.
-      machine_mode acc_mode;
-      if (el->is_mem_access ())
-        acc_mode = Pmode;
-      else if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
-        acc_mode = GET_MODE (rm->reg ());
-      else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-        acc_mode = GET_MODE (ru->reg ());
-      else
-        continue;
-
-      for (sequence_element::dependency_set::iterator deps =
-             el->dependencies ().begin ();
-           deps != el->dependencies ().end (); ++deps)
-        {
-          if (reg_mod* rm = dyn_cast<reg_mod*> (*deps))
-            {
-              if (GET_MODE (rm->reg ()) != acc_mode)
-                {
-                  el->set_optimization_disabled ();
-                  std::for_each (
-                    el->dependent_els ().begin (), el->dependent_els ().end (),
-                    std::mem_fun (&sequence_element
-                                  ::set_optimization_disabled));
-                  break;
-                }
-            }
-        }
-    }
-
   // Remove the sequence's original reg-mods.
   for (reg_mod_iter rm (begin<reg_mod_match> ()),
        rm_end (end<reg_mod_match> ()); rm != rm_end; )
@@ -2939,6 +2859,93 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
     }
 
   return found_addr;
+}
+
+// Search for elements that can't be optimized by AMS and mark them so.
+void ams::sequence::
+find_unoptimizable_elements (void)
+{
+  // If a reg has been set more than once, don't try to optimize the elements
+  // that use that reg since we don't know which value they use.
+  // FIXME: Find a way to tell apart different versions of the same register.
+  std::map<rtx, int, cmp_by_regno> reg_set_count, reg_use_count;
+  for (iterator el = begin (); el != end (); ++el)
+    {
+      rtx reg_set = NULL;
+      if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
+        {
+          reg_set = rm->reg ();
+          // Count only those reg-mods that won't be removed during
+          // address mod generation.
+          if (rm->insn () == NULL || !rm->can_be_optimized ())
+            {
+              // Don't count multiple sets if the reg hasn't been used yet.
+              if (reg_use_count[rm->reg ()] == 0)
+                reg_set_count[rm->reg ()] = 1;
+              else
+                ++reg_set_count[rm->reg ()];
+            }
+        }
+
+      for (addr_expr::regs_const_iterator ri =
+	     el->effective_addr ().regs_begin ();
+	   ri != el->effective_addr ().regs_end (); ++ri)
+        {
+          if (!regs_equal (reg_set, *ri))
+            ++reg_use_count[*ri];
+          std::map<rtx, int, cmp_by_regno>::iterator found =
+            reg_set_count.find (*ri);
+          if (found != reg_set_count.end () && found->second > 1)
+            {
+              el->set_optimization_disabled ();
+              break;
+            }
+
+          // Don't optimize elements that use regs from M_REGS_TO_SKIP.
+          if (m_regs_to_skip.find (*ri) != m_regs_to_skip.end ())
+            {
+              el->set_optimization_disabled ();
+              break;
+            }
+        }
+
+      // Don't optimize reg-uses that use registers from M_REGS_TO_SKIP.
+      if (reg_use* ru = dyn_cast<reg_use*> (&*el))
+        {
+          if (m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ())
+            el->set_optimization_disabled ();
+        }
+
+      // Don't optimize those accesses that use regs with
+      // a different machine mode.
+      machine_mode acc_mode;
+      if (el->is_mem_access ())
+        acc_mode = Pmode;
+      else if (reg_mod* rm = dyn_cast<reg_mod*> (&*el))
+        acc_mode = GET_MODE (rm->reg ());
+      else if (reg_use* ru = dyn_cast<reg_use*> (&*el))
+        acc_mode = GET_MODE (ru->reg ());
+      else
+        continue;
+
+      for (sequence_element::dependency_set::iterator deps =
+             el->dependencies ().begin ();
+           deps != el->dependencies ().end (); ++deps)
+        {
+          if (reg_mod* rm = dyn_cast<reg_mod*> (*deps))
+            {
+              if (GET_MODE (rm->reg ()) != acc_mode)
+                {
+                  el->set_optimization_disabled ();
+                  std::for_each (
+                    el->dependent_els ().begin (), el->dependent_els ().end (),
+                    std::mem_fun (&sequence_element
+                                  ::set_optimization_disabled));
+                  break;
+                }
+            }
+        }
+    }
 }
 
 // Used for keeping track of register copying reg-mods.
@@ -4781,6 +4788,8 @@ ams::execute (function* fun)
 
 	  log_msg ("continuing anyway\n");
         }
+
+      seq.find_unoptimizable_elements ();
     }
 
   // running this pass after register allocation doesn't work yet.
