@@ -4784,12 +4784,18 @@ ams::execute (function* fun)
           log_msg ("costs are already minimal\n");
 
 	  if (m_options.check_minimal_cost)
-	    continue;
+            {
+              seqs_to_skip.insert (&seq);
+              continue;
+            }
 
 	  log_msg ("continuing anyway\n");
         }
 
+      log_msg ("find_unptimizable_elements\n");
       seq.find_unoptimizable_elements ();
+      log_sequence (seq, false);
+      log_msg ("\n\n");
     }
 
   // running this pass after register allocation doesn't work yet.
@@ -4821,6 +4827,10 @@ ams::execute (function* fun)
        it != sequences.end (); ++it)
     {
       sequence& seq = *it;
+
+      if (seqs_to_skip.find (&seq) != seqs_to_skip.end ())
+        continue;
+
       int original_cost = seq.cost ();
 
       log_sequence (seq, true);
