@@ -4786,6 +4786,8 @@ ams::execute (function* fun)
 	  if (m_options.check_minimal_cost)
             {
               seqs_to_skip.insert (&seq);
+              std::for_each (seq.begin (), seq.end (), std::mem_fun_ref (
+                &sequence_element::set_optimization_disabled));
               continue;
             }
 
