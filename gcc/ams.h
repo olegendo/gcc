@@ -644,7 +644,8 @@ public:
     void find_addr_reg_uses (void);
 
     // Search for elements that can't be optimized by AMS and mark them so.
-    void find_unoptimizable_elements (void);
+    // Return the number of new unoptimizable elements found.
+    unsigned find_unoptimizable_elements (void);
 
     // Generate the address modifications needed to arrive at the
     // addresses in the sequence.

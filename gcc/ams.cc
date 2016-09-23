@@ -2328,7 +2328,6 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el, rtx addr_reg,
       if (visited_addr == visited_reg_mods.end ()
           || visited_addr->second != *addrs)
         continue;
-
       mod_addr_result result =
         try_insert_address_mods (*addrs, end_addr, min_disp, max_disp,
                                  addr_type, acc_mode, el, tracker,
@@ -2862,9 +2861,11 @@ find_start_addr_for_reg (rtx reg, std::set<reg_mod*>& used_reg_mods,
 }
 
 // Search for elements that can't be optimized by AMS and mark them so.
-void ams::sequence::
+// Return the number of new unoptimizable elements found.
+unsigned ams::sequence::
 find_unoptimizable_elements (void)
 {
+  unsigned found = 0;
   // If a reg has been set more than once, don't try to optimize the elements
   // that use that reg since we don't know which value they use.
   // FIXME: Find a way to tell apart different versions of the same register.
@@ -2897,14 +2898,22 @@ find_unoptimizable_elements (void)
             reg_set_count.find (*ri);
           if (found != reg_set_count.end () && found->second > 1)
             {
-              el->set_optimization_disabled ();
+              if (el->optimization_enabled ())
+                {
+                  el->set_optimization_disabled ();
+                  ++found;
+                }
               break;
             }
 
           // Don't optimize elements that use regs from M_REGS_TO_SKIP.
           if (m_regs_to_skip.find (*ri) != m_regs_to_skip.end ())
             {
-              el->set_optimization_disabled ();
+              if (el->optimization_enabled ())
+                {
+                  el->set_optimization_disabled ();
+                  ++found;
+                }
               break;
             }
         }
@@ -2912,8 +2921,12 @@ find_unoptimizable_elements (void)
       // Don't optimize reg-uses that use registers from M_REGS_TO_SKIP.
       if (reg_use* ru = dyn_cast<reg_use*> (&*el))
         {
-          if (m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ())
-            el->set_optimization_disabled ();
+          if (m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ()
+              && el->optimization_enabled ())
+            {
+              el->set_optimization_disabled ();
+              ++found;
+            }
         }
 
       // Don't optimize those accesses that use regs with
@@ -2936,16 +2949,25 @@ find_unoptimizable_elements (void)
             {
               if (GET_MODE (rm->reg ()) != acc_mode)
                 {
-                  el->set_optimization_disabled ();
-                  std::for_each (
-                    el->dependent_els ().begin (), el->dependent_els ().end (),
-                    std::mem_fun (&sequence_element
-                                  ::set_optimization_disabled));
+                  if (el->optimization_enabled ())
+                    {
+                      el->set_optimization_disabled ();
+                      ++found;
+                    }
+                  for (sequence_element::dependency_set::iterator dep_els =
+                         el->dependent_els ().begin ();
+                       dep_els != el->dependent_els ().end (); ++dep_els)
+                    if ((*dep_els)->optimization_enabled ())
+                      {
+                        (*dep_els)->set_optimization_disabled ();
+                        ++found;
+                      }
                   break;
                 }
             }
         }
     }
+  return found;
 }
 
 // Used for keeping track of register copying reg-mods.
@@ -4793,12 +4815,25 @@ ams::execute (function* fun)
 
 	  log_msg ("continuing anyway\n");
         }
-
-      log_msg ("find_unptimizable_elements\n");
-      seq.find_unoptimizable_elements ();
-      log_sequence (seq, false);
-      log_msg ("\n\n");
     }
+
+  log_msg ("marking unoptimizable elements\n");
+  unsigned found;
+  do
+    {
+      found = 0;
+      for (std::list<sequence>::iterator it = sequences.begin ();
+           it != sequences.end (); ++it)
+        {
+          sequence& seq = *it;
+
+          log_msg ("find_unoptimizable_elements\n");
+          found += seq.find_unoptimizable_elements ();
+          log_sequence (seq, false);
+          log_msg ("\n\n");
+        }
+    }
+  while (found > 0);
 
   // running this pass after register allocation doesn't work yet.
   // stop here before making any modifications.
