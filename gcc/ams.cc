@@ -1704,7 +1704,8 @@ ams::sequence::find_addr_reg_uses (void)
 
           // If no refs were found and the reg is used by a funcall,
           // create an unspecified reg use.
-          if (reg_use_refs.empty () && CALL_P (i))
+          if (reg_use_refs.empty () && CALL_P (i)
+              && live_addr_regs.find (*regs) != live_addr_regs.end ())
             {
               // Check if the reg is used directly.
               if (find_reg_fusage (i, USE, *regs))
@@ -1743,7 +1744,7 @@ ams::sequence::find_addr_reg_uses (void)
                   reg_use* new_reg_use = as_a<reg_use*> (&*insert_unique (
                     make_ref_counted<reg_use> (i, *regs)));
                   std::map<rtx, reg_mod*, cmp_by_regno>::iterator found =
-                    live_addr_regs.find(*regs);
+                    live_addr_regs.find (*regs);
                   if (found != live_addr_regs.end ())
                     {
                       reg_mod* rm = found->second;
@@ -1792,7 +1793,7 @@ ams::sequence::find_addr_reg_uses (void)
       for (std::map<rtx, reg_mod*, cmp_by_regno>::iterator it =
 	     live_addr_regs.begin (); it != live_addr_regs.end ();)
 	{
-	  if (find_reg_note (i, REG_DEAD, it->first))
+	  if (find_regno_note (i, REG_DEAD, REGNO (it->first)))
 	    live_addr_regs.erase (it++);
 	  else
 	    ++it;
