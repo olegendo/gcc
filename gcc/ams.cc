@@ -2894,38 +2894,36 @@ find_unoptimizable_elements (void)
         {
           if (!regs_equal (reg_set, *ri))
             ++reg_use_count[*ri];
+
+          if (!el->optimization_enabled ())
+            continue;
+
+          // Don't optimize elements that use regs from M_REGS_TO_SKIP
+          // or ones that have been set multiple times.
           std::map<rtx, int, cmp_by_regno>::iterator found =
             reg_set_count.find (*ri);
-          if (found != reg_set_count.end () && found->second > 1)
-            {
-              if (el->optimization_enabled ())
-                {
-                  el->set_optimization_disabled ();
-                  ++found;
-                }
-              break;
-            }
-
-          // Don't optimize elements that use regs from M_REGS_TO_SKIP.
-          if (m_regs_to_skip.find (*ri) != m_regs_to_skip.end ())
-            {
-              if (el->optimization_enabled ())
-                {
-                  el->set_optimization_disabled ();
-                  ++found;
-                }
-              break;
-            }
-        }
-
-      // Don't optimize reg-uses that use registers from M_REGS_TO_SKIP.
-      if (reg_use* ru = dyn_cast<reg_use*> (&*el))
-        {
-          if (m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ()
-              && el->optimization_enabled ())
+          if ((found != reg_set_count.end () && found->second > 1)
+              || m_regs_to_skip.find (*ri) != m_regs_to_skip.end ())
             {
               el->set_optimization_disabled ();
               ++found;
+            }
+        }
+
+      // For reg-uses, check the used register too.
+      if (reg_use* ru = dyn_cast<reg_use*> (&*el))
+        {
+          if (el->optimization_enabled ())
+            {
+              std::map<rtx, int, cmp_by_regno>::iterator found =
+                reg_set_count.find (ru->reg ());
+
+              if ((found != reg_set_count.end () && found->second > 1)
+                  || m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ())
+                {
+                  el->set_optimization_disabled ();
+                  ++found;
+                }
             }
         }
 
