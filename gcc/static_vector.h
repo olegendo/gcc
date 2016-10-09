@@ -1,17 +1,18 @@
 #ifndef includeguard_gcc_sh_static_vector_includeguard
 #define includeguard_gcc_sh_static_vector_includeguard
 
-template <typename value_type, std::size_t max_data_size>
+template <typename val_type, std::size_t max_data_size>
 class static_vector
 {
  public:
   // copied from std::array
-  typedef value_type*			      pointer;
-  typedef const value_type*                       const_pointer;
-  typedef value_type&                   	      reference;
-  typedef const value_type&             	      const_reference;
-  typedef value_type*          		      iterator;
-  typedef const value_type*			      const_iterator;
+  typedef val_type value_type;
+  typedef val_type*			      pointer;
+  typedef const val_type*                       const_pointer;
+  typedef val_type&                   	      reference;
+  typedef const val_type&             	      const_reference;
+  typedef val_type*          		      iterator;
+  typedef const val_type*			      const_iterator;
   typedef unsigned int                    	      size_type;
   typedef std::ptrdiff_t                   	      difference_type;
   typedef std::reverse_iterator<iterator>	      reverse_iterator;
@@ -64,7 +65,7 @@ class static_vector
   size_type capacity (void) const { return max_data_size; }
 
   void clear (void) { m_size = 0; }
-  void push_back (const value_type& v)
+  void push_back (const val_type& v)
   {
     gcc_assert (size () < max_size ());
     m_data[m_size++] = v;
@@ -74,7 +75,7 @@ class static_vector
  private:
 
   size_type m_size;
-  value_type m_data[max_data_size];
+  val_type m_data[max_data_size];
 };
 
 #endif // includeguard_gcc_sh_static_vector_includeguard
