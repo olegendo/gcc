@@ -1626,7 +1626,8 @@ ams::sequence::find_addr_reg_mods (void)
                         // Trace back the reg's value through the previous BB.
                         reg_effective_addr = rtx_to_addr_expr (
                           prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
-                          this, BB_END (single_pred (seq_bb)));
+                          this, BB_END (single_pred (seq_bb)),
+                          single_pred (seq_bb));
                       else
                         reg_effective_addr = make_reg_addr (reg);
                     }
@@ -4279,7 +4280,7 @@ ams::addr_expr
 ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                        ams::sequence* seq,
                        ams::sequence_element* el,
-                       rtx_insn* curr_insn)
+                       rtx_insn* curr_insn, basic_block curr_bb)
 {
   const bool trace_back_addr = seq != NULL && (el != NULL || curr_insn != NULL);
 
@@ -4298,14 +4299,17 @@ ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
   // from its operands. These will later be combined into a single ADDR_EXPR.
   if (code == PLUS || code == MINUS || code == MULT || code == ASHIFT)
     {
-      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el, curr_insn);
-      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mode, seq, el, curr_insn);
+      op0 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el,
+                              curr_insn, curr_bb);
+      op1 = rtx_to_addr_expr (XEXP (x, 1), mem_mode, seq, el,
+                              curr_insn, curr_bb);
       if (op0.is_invalid () || op1.is_invalid ())
         return addr_expr ();
     }
   else if (code == NEG)
     {
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el, curr_insn);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el,
+                              curr_insn, curr_bb);
       if (op1.is_invalid ())
         return addr_expr ();
     }
@@ -4337,14 +4341,15 @@ ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
         case POST_MODIFY:
           {
             addr_expr a = rtx_to_addr_expr (XEXP (x, apply_post_disp ? 1 : 0),
-                                            mem_mode, seq, el, curr_insn);
+                                            mem_mode, seq, el,
+                                            curr_insn, curr_bb);
 	    return a.is_invalid () ? addr_expr ()
 				   : post_mod_addr (a.base_reg (), a.disp ());
           }
         case PRE_MODIFY:
           {
             addr_expr a = rtx_to_addr_expr (XEXP (x, 1), mem_mode, seq,
-                                            el, curr_insn);
+                                            el, curr_insn, curr_bb);
 	    return a.is_invalid () ? addr_expr ()
 				   : pre_mod_addr (a.base_reg (), a.disp ());
           }
@@ -4353,7 +4358,8 @@ ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
           return addr_expr ();
         }
 
-      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el, curr_insn);
+      op1 = rtx_to_addr_expr (XEXP (x, 0), mem_mode, seq, el,
+                              curr_insn, curr_bb);
       if (op1.is_invalid ())
         return op1;
 
@@ -4382,7 +4388,8 @@ ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
           // Find the expression that the register was last set to
           // and convert it to an addr_expr.
 	  find_reg_value_result prev_val =
-            find_reg_value (x, prev_nonnote_insn_bb (curr_insn),
+            find_reg_value (x,
+                            el ? prev_nonnote_insn_bb (el->insn ()) : curr_insn,
                             seq->g_insn_el_map ());
 
           // If the found reg modification already has a sequence element,
@@ -4410,14 +4417,14 @@ ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
               // If the current BB has only one predecessor BB, trace back
               // the reg's effective address through that BB.
               addr_expr reg_effective_addr = make_reg_addr (x);
-              if (single_pred_p (BLOCK_FOR_INSN (curr_insn)))
+              if (single_pred_p (curr_bb))
                 {
                   basic_block prev_bb =
-                    single_pred (BLOCK_FOR_INSN (curr_insn));
+                    single_pred (curr_bb);
                   reg_effective_addr =
                     rtx_to_addr_expr (
                       x, prev_val.is_auto_mod ? prev_val.acc_mode : mem_mode,
-                      seq, BB_END (prev_bb));
+                      seq, BB_END (prev_bb), prev_bb);
 
                   // Use the unexpanded reg if the traced-back value is
                   // too complex.
@@ -4459,7 +4466,7 @@ ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 	  // Expand the register's value further.
 	  addr_expr reg_effective_addr = rtx_to_addr_expr (
 		value, prev_val.is_auto_mod ? prev_val.acc_mode : mem_mode,
-		seq, new_reg_mod, mod_insn);
+		seq, new_reg_mod, prev_nonnote_insn_bb (mod_insn), curr_bb);
 
           if (el != NULL)
             {

@@ -1498,34 +1498,37 @@ NOTE:
   // CURR_INSN, but don't add reg-mods to the sequence.
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
                                      sequence* seq, sequence_element* el,
-                                     rtx_insn* curr_insn);
+                                     rtx_insn* curr_insn, basic_block curr_bb);
 
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 				     sequence* seq, sequence_element& el)
   {
-    return rtx_to_addr_expr (x, mem_mode, seq, &el, el.insn ());
+    return rtx_to_addr_expr (x, mem_mode, seq, &el, NULL,
+                             BLOCK_FOR_INSN (el.insn ()));
   }
 
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 				     sequence* seq, sequence_element* el)
   {
-    return rtx_to_addr_expr (x, mem_mode, seq, el, el->insn ());
+    return rtx_to_addr_expr (x, mem_mode, seq, el, NULL,
+                             BLOCK_FOR_INSN (el->insn ()));
   }
 
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode,
-                                     sequence* seq, rtx_insn* curr_insn)
+                                     sequence* seq, rtx_insn* curr_insn,
+                                     basic_block curr_bb)
   {
-    return rtx_to_addr_expr (x, mem_mode, seq, NULL, curr_insn);
+    return rtx_to_addr_expr (x, mem_mode, seq, NULL, curr_insn, curr_bb);
   }
 
   static addr_expr rtx_to_addr_expr (rtx x, machine_mode mem_mode)
   {
-    return rtx_to_addr_expr(x, mem_mode, NULL, NULL, NULL);
+    return rtx_to_addr_expr(x, mem_mode, NULL, NULL, NULL, NULL);
   }
 
   static addr_expr rtx_to_addr_expr (rtx x)
   {
-    return rtx_to_addr_expr(x, Pmode, NULL, NULL, NULL);
+    return rtx_to_addr_expr(x, Pmode, NULL, NULL, NULL, NULL);
   }
 
   // Find the value that REG was last set to, starting the search from
