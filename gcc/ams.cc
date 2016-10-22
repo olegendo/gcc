@@ -3171,7 +3171,7 @@ ams::sequence::update_insn_stream (void)
 // sub-rtxes of X should be traversed.
 template <typename OutputIterator> void
 ams::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out,
-                                         bool check_every_rtx)
+                                     bool check_every_rtx)
 {
   switch (GET_CODE (x))
     {
@@ -3188,7 +3188,7 @@ ams::sequence::find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out,
     case UNSPEC:
     case UNSPEC_VOLATILE:
       for (int i = 0; i < XVECLEN (x, 0); i++)
-	find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out, check_every_rtx);
+        find_addr_reg_uses_1 (reg, XVECEXP (x, 0, i), out, check_every_rtx);
       break;
 
     case SET:
@@ -4645,7 +4645,18 @@ ams::rtx_to_addr_expr (rtx x, machine_mode mem_mode,
 
       return check_make_non_mod_addr (invalid_regno, index_reg,
                                       scale, op0.disp () * op1.disp ());
+
     default:
+      // Any other kind of expression is too complex to be represented by an
+      // addr_expr. For these expressions, we still have go through the
+      // sub-expressions in order to find the dependencies.
+      if (trace_back_addr && (UNARY_P (x) || ARITHMETIC_P (x)))
+        {
+          for (int i = 0; i < GET_RTX_LENGTH (code); i++)
+            if (!MEM_P (XEXP (x, i)))
+              rtx_to_addr_expr (XEXP (x, i), mem_mode, seq, el,
+                                curr_insn, curr_bb);
+        }
       break;
     }
   return addr_expr ();
