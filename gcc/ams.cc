@@ -3326,25 +3326,40 @@ ams::sequence::insert_unique (const ref_counting_ptr<sequence_element>& el)
         }
     }
 
-  // If the sequence element's insn contains other elements, insert
-  // the element after them.
+  // Check for duplicates.
   std::pair<insn_map::iterator, insn_map::iterator>
     els_in_insn = elements_in_insn (el->insn ());
-
-  // Check for duplicates.
   for (insn_map::iterator i = els_in_insn.first; i != els_in_insn.second; ++i)
     if (*el == *i->second)
       return i->second;
 
+  // If the new element isn't a reg-mod, insert it before the first
+  // reg-mod belonging to the same insn.
+  if (el->type () != type_reg_mod)
+    {
+      for (insn_map::iterator i = els_in_insn.first;
+           i != els_in_insn.second; ++i)
+        {
+          iterator insert_before = i->second;
+          if (insert_before->type () == type_reg_mod
+              && (insert_before == begin ()
+                  || stdx::prev (insert_before)->type () != type_reg_mod
+                  || stdx::prev (insert_before)->insn () != el->insn ()))
+            return insert_element (el, insert_before);
+        }
+    }
+
+  // Otherwise, insert it after the last element from the same insn.
   for (insn_map::iterator i = els_in_insn.first; i != els_in_insn.second; ++i)
     {
       iterator insert_after = i->second;
       if (stdx::next (insert_after) == end ()
 	  || stdx::next (insert_after)->insn () != insert_after->insn ())
-	return insert_element (el, stdx::next (insert_after));
+        return insert_element (el, stdx::next (insert_after));
     }
 
-  // Otherwise, insert it before the next insn's elements.
+  // If there are no existing elements sharing the same insn,
+  // insert the new element before the next insn's elements.
   for (rtx_insn* i = NEXT_INSN (el->insn ()); ; i = NEXT_INSN (i))
     {
       els_in_insn = elements_in_insn (i);
