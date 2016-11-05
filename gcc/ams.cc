@@ -1614,31 +1614,27 @@ ams::sequence::find_addr_reg_mods (void)
                                            reg_current_addr));
               new_reg_mod = as_a<reg_mod*> (&*inserted);
 
-              // Find the reg-mod's effective address if it wan't already
-              // in the sequence,
-              if (new_reg_mod->effective_addr ().is_invalid ())
+              // Find the reg-mod's effective address.
+              addr_expr reg_effective_addr;
+              if (prev.value != NULL_RTX && REG_P (prev.value)
+                  && regs_equal (prev.value, reg))
                 {
-                  addr_expr reg_effective_addr;
-                  if (prev.value != NULL_RTX && REG_P (prev.value)
-                      && regs_equal (prev.value, reg))
-                    {
-                      if (single_pred_p (seq_bb))
-                        // Trace back the reg's value through the previous BB.
-                        reg_effective_addr = rtx_to_addr_expr (
-                          prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
-                          this, BB_END (single_pred (seq_bb)),
-                          single_pred (seq_bb));
-                      else
-                        reg_effective_addr = make_reg_addr (reg);
-                    }
+                  if (single_pred_p (seq_bb))
+                    // Trace back the reg's value through the previous BB.
+                    reg_effective_addr = rtx_to_addr_expr (
+                      prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
+                      this, BB_END (single_pred (seq_bb)),
+                      single_pred (seq_bb));
                   else
-                    {
-                      reg_effective_addr = rtx_to_addr_expr (
-                        prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
-                        this, new_reg_mod);
-                      new_reg_mod->set_auto_mod_acc (prev.acc);
-                    }
-
+                    reg_effective_addr = make_reg_addr (reg);
+                  new_reg_mod->set_effective_addr (reg_effective_addr);
+                }
+              else if (new_reg_mod->effective_addr ().is_invalid ())
+                {
+                  reg_effective_addr = rtx_to_addr_expr (
+                    prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
+                    this, new_reg_mod);
+                  new_reg_mod->set_auto_mod_acc (prev.acc);
                   new_reg_mod->set_effective_addr (reg_effective_addr);
                 }
 
@@ -1647,15 +1643,12 @@ ams::sequence::find_addr_reg_mods (void)
               if (prev.value != NULL_RTX && REG_P (prev.value)
                   && regs_equal (prev.value, reg))
                 {
-                  // If this reg's value was traced back across BBs and
-                  // found invalid, discard it.  Elements that use this reg
-                  // can't be optimized because we don't know which value
-                  // the reg holds.
+                  // If this reg's value couldn't be traced back across BBs
+                  // completely, then elements that use this register can't be
+                  // optimized because we don't know which value their register
+                  // holds.
                   if (new_reg_mod->effective_addr ().is_invalid ())
-                    {
-                      m_regs_to_skip.insert (reg);
-                      remove_element (inserted);
-                    }
+                    m_regs_to_skip.insert (reg);
 
                   break;
                 }
