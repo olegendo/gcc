@@ -1614,44 +1614,44 @@ ams::sequence::find_addr_reg_mods (void)
                                            reg_current_addr));
               new_reg_mod = as_a<reg_mod*> (&*inserted);
 
-              // Find the reg-mod's effective address.
-              addr_expr reg_effective_addr;
-              if (prev.value != NULL_RTX && REG_P (prev.value)
-                  && regs_equal (prev.value, reg))
+              if (new_reg_mod->effective_addr ().is_invalid ())
                 {
-                  if (single_pred_p (seq_bb))
-                    // Trace back the reg's value through the previous BB.
-                    reg_effective_addr = rtx_to_addr_expr (
-                      prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
-                      this, BB_END (single_pred (seq_bb)),
-                      single_pred (seq_bb));
+                  // Find the reg-mod's effective address.
+
+                  addr_expr reg_effective_addr;
+                  if (prev.value != NULL_RTX && REG_P (prev.value)
+                      && regs_equal (prev.value, reg))
+                    {
+                      if (single_pred_p (seq_bb))
+                        {
+                          // Trace back the reg's value through the previous BB.
+                          reg_effective_addr = rtx_to_addr_expr (
+                            prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
+                            this, BB_END (single_pred (seq_bb)),
+                            single_pred (seq_bb));
+                          if (reg_effective_addr.is_invalid ())
+                            reg_effective_addr = make_reg_addr (reg);
+                        }
+                      else
+                        reg_effective_addr = make_reg_addr (reg);
+
+                      new_reg_mod->set_effective_addr (reg_effective_addr);
+                    }
                   else
-                    reg_effective_addr = make_reg_addr (reg);
-                  new_reg_mod->set_effective_addr (reg_effective_addr);
-                }
-              else if (new_reg_mod->effective_addr ().is_invalid ())
-                {
-                  reg_effective_addr = rtx_to_addr_expr (
-                    prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
-                    this, new_reg_mod);
-                  new_reg_mod->set_auto_mod_acc (prev.acc);
-                  new_reg_mod->set_effective_addr (reg_effective_addr);
+                    {
+                      reg_effective_addr = rtx_to_addr_expr (
+                        prev.value, prev.is_auto_mod ? prev.acc_mode : Pmode,
+                        this, new_reg_mod);
+                      new_reg_mod->set_auto_mod_acc (prev.acc);
+                      new_reg_mod->set_effective_addr (reg_effective_addr);
+                    }
                 }
 
               last_insn = prev_nonnote_insn_bb (prev.insn);
 
               if (prev.value != NULL_RTX && REG_P (prev.value)
                   && regs_equal (prev.value, reg))
-                {
-                  // If this reg's value couldn't be traced back across BBs
-                  // completely, then elements that use this register can't be
-                  // optimized because we don't know which value their register
-                  // holds.
-                  if (new_reg_mod->effective_addr ().is_invalid ())
-                    m_regs_to_skip.insert (reg);
-
-                  break;
-                }
+                break;
             }
 
           if (last_reg_mod != NULL)
@@ -2893,12 +2893,10 @@ find_unoptimizable_elements (void)
           if (!el->optimization_enabled ())
             continue;
 
-          // Don't optimize elements that use regs from M_REGS_TO_SKIP
-          // or ones that have been set multiple times.
+          // Don't optimize elements that have been set multiple times.
           std::map<rtx, int, cmp_by_regno>::iterator found =
             reg_set_count.find (*ri);
-          if ((found != reg_set_count.end () && found->second > 1)
-              || m_regs_to_skip.find (*ri) != m_regs_to_skip.end ())
+          if (found != reg_set_count.end () && found->second > 1)
             {
               el->set_optimization_disabled ();
               ++found;
@@ -2913,8 +2911,7 @@ find_unoptimizable_elements (void)
               std::map<rtx, int, cmp_by_regno>::iterator found =
                 reg_set_count.find (ru->reg ());
 
-              if ((found != reg_set_count.end () && found->second > 1)
-                  || m_regs_to_skip.find (ru->reg ()) != m_regs_to_skip.end ())
+              if (found != reg_set_count.end () && found->second > 1)
                 {
                   el->set_optimization_disabled ();
                   ++found;
