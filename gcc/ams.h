@@ -149,12 +149,16 @@ public:
     infinite_costs = INT_MAX// std::numeric_limits<int>::max ();
   };
 
-  static const rtx invalid_regno;
-  static const rtx any_regno;
-
   class sequence_element;
   class sequence;
   class addr_expr;
+  class addr_reg;
+
+  static const rtx invalid_regno;
+  static const rtx any_regno;
+
+  static const addr_reg invalid_reg;
+  static const addr_reg any_reg;
 
  private:
   class mod_tracker;
@@ -163,39 +167,123 @@ public:
   class reg_copy;
 
  public:
-  static regno_t get_regno (const_rtx x);
+  // An address register is defined by its regno. Those address registers that
+  // get set to an unknown value (or a value that is too complex for AMS to
+  // handle) are also defined by the insn where the value setting happened. This
+  // means that two registers with the same regno but different (unknown)
+  // values are considered different address regs. This distinction is needed
+  // to avoid confusion in situations where a reg gets clobbered multiple times.
 
-  // Comparison struct for sets and maps containing reg rtx-es.
-  struct cmp_by_regno
+  class addr_reg
   {
-    bool operator () (const rtx a, const rtx b) const
+  public:
+    addr_reg (void)
+    : m_rtx (NULL), m_insn (NULL)
     {
-      return REGNO (a) < REGNO (b);
     }
+
+    addr_reg (rtx r)
+    : m_rtx (r), m_insn (NULL)
+    {
+    }
+
+    addr_reg (rtx r, rtx_insn* i)
+    : m_rtx (r), m_insn (i)
+    {
+    }
+
+    // The actual reg RTX. Might also be any_regno to represent
+    // all registers in an access alternative, or NULL to represent
+    // invalid registers.
+    rtx reg_rtx (void) const { return m_rtx; }
+    void set_reg_rtx (rtx reg_rtx) { m_rtx = reg_rtx; }
+
+    // The number of the address reg.
+    regno_t regno (void) const
+    {
+      if (m_rtx == NULL)
+        return -1;
+      if (m_rtx == any_regno)
+        return -2;
+      return REGNO (m_rtx);
+    }
+
+    // The machine mode of the reg.
+    machine_mode mode (void) const
+    {
+      if (m_rtx == NULL || m_rtx == any_regno)
+        return Pmode;
+      return GET_MODE (m_rtx);
+    }
+
+    // The insn where this address reg gets clobbered. Can be NULL
+    // if the reg hasn't been directly set to an unknown value.
+    rtx_insn* insn (void) const { return m_insn; }
+
+    // The UID of the clobbering insn, or -1 if there's no such insn.
+    int insn_uid (void) const
+    {
+      if (m_insn == NULL)
+        return -1;
+      return INSN_UID (m_insn);
+    }
+
+    bool operator == (const addr_reg& other) const
+    {
+      return regno () == other.regno () && m_insn == other.insn ();
+    }
+
+    bool operator != (const addr_reg& other) const
+    {
+      return !addr_reg::operator == (other);
+    }
+
+    bool operator == (const rtx other) const
+    {
+      return regno () == REGNO (other);
+    }
+
+    bool operator != (const rtx other) const
+    {
+      return !addr_reg::operator == (other);
+    }
+
+    bool operator == (const tmp_rtx<REG>& other) const
+    {
+      return regno () == REGNO (other);
+    }
+
+    bool operator != (const tmp_rtx<REG>& other) const
+    {
+      return !addr_reg::operator == (other);
+    }
+
+    bool operator < (const addr_reg& other) const
+    {
+      if (regno () == other.regno ())
+        return insn_uid () < other.insn_uid ();
+      return regno () < other.regno ();
+    }
+
+    // Same as the == operator except that this will also return true if an
+    // any_reg placeholder is compared to a valid register.
+    bool matches (const addr_reg& other) const
+    {
+      if (reg_rtx () == invalid_regno || other.reg_rtx () == invalid_regno)
+        return false;
+
+      if (reg_rtx () == any_regno || other.reg_rtx () == any_regno)
+        return true;
+
+      return regno () == other.regno ();
+    }
+
+
+  private:
+    rtx m_rtx;
+    rtx_insn* m_insn;
+
   };
-
-  // Return true if R1 and R2 is the same reg, or if both are NULL.
-  static bool
-  regs_equal (const rtx r1, const rtx r2)
-  {
-    if (!r1 && !r2)
-      return true;
-    if (!r1 || !r2)
-      return false;
-    return REGNO (r1) == REGNO (r2);
-  }
-
-  static bool
-  regs_match (const rtx r1, const rtx r2)
-  {
-    if (r1 == invalid_regno || r2 == invalid_regno)
-      return false;
-
-    if (r1 == any_regno || r2 == any_regno)
-      return true;
-
-    return REGNO (r1) == REGNO (r2);
-  }
 
   // the most complex non modifying address is of the form
   // 'base_reg + index_reg*scale + disp'.
@@ -216,13 +304,16 @@ public:
   class addr_expr
   {
   public:
-    struct is_valid_regno
+    struct is_valid_reg
     {
-      bool operator () (const rtx x) const { return x != invalid_regno; }
+      bool operator () (const addr_reg& x) const
+      {
+        return x != invalid_reg;
+      }
     };
 
-    typedef filter_iterator<rtx*, is_valid_regno> regs_iterator;
-    typedef filter_iterator<const rtx*, is_valid_regno> regs_const_iterator;
+    typedef filter_iterator<addr_reg*, is_valid_reg> regs_iterator;
+    typedef filter_iterator<const addr_reg*, is_valid_reg> regs_const_iterator;
 
     addr_expr (void)
     : m_type (invalid_addr_expr), m_base_index_reg (), m_disp (0),
@@ -254,7 +345,7 @@ public:
 
     bool regs_empty (void) const { return regs_begin () == regs_end (); }
 
-    rtx base_reg (void) const
+    const addr_reg& base_reg (void) const
     {
       gcc_assert (is_valid ());
       return m_base_index_reg[0];
@@ -263,7 +354,7 @@ public:
     bool has_base_reg (void) const
     {
       gcc_assert (is_valid ());
-      return base_reg () != invalid_regno;
+      return base_reg () != invalid_reg;
     }
 
     bool has_no_base_reg (void) const { return !has_base_reg (); }
@@ -274,7 +365,7 @@ public:
     bool has_disp (void) const { return disp () != 0; }
     bool has_no_disp (void) const { return !has_disp (); }
 
-    rtx index_reg (void) const
+    const addr_reg& index_reg (void) const
     {
       gcc_assert (is_valid ());
       return m_base_index_reg[1];
@@ -283,7 +374,7 @@ public:
     bool has_index_reg (void) const
     {
       gcc_assert (is_valid ());
-      return index_reg () != invalid_regno;
+      return index_reg () != invalid_reg;
     }
 
     bool has_no_index_reg (void) const { return !has_index_reg (); }
@@ -336,8 +427,8 @@ public:
     get_subterms (OutputIterator out) const;
 
     // Mutating functions.
-    void set_base_reg (rtx val);
-    void set_index_reg (rtx val);
+    void set_base_reg (addr_reg val);
+    void set_index_reg (addr_reg val);
     void set_disp (disp_t val);
     void set_scale (scale_t val);
 
@@ -359,7 +450,7 @@ public:
     // the value of the base register will be e.g. a constant label_ref.
     // currently we can't deal with those.
 
-    rtx m_base_index_reg[2];
+    addr_reg m_base_index_reg[2];
     disp_t m_disp;
     disp_t m_disp_min;
     disp_t m_disp_max;
@@ -372,37 +463,40 @@ public:
   class non_mod_addr : public addr_expr
   {
   public:
-    non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale,
+    non_mod_addr (addr_reg base_reg, addr_reg index_reg, scale_t scale,
                   scale_t scale_min, scale_t scale_max,
                   disp_t disp, disp_t disp_min, disp_t disp_max);
 
-    non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp);
+    non_mod_addr (addr_reg base_reg, addr_reg index_reg,
+                  scale_t scale, disp_t disp);
   };
 
   class pre_mod_addr : public addr_expr
   {
   public:
-    pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max);
-    pre_mod_addr (rtx base_reg, disp_t disp);
+    pre_mod_addr (addr_reg base_reg, disp_t disp,
+                  disp_t disp_min, disp_t disp_max);
+    pre_mod_addr (addr_reg base_reg, disp_t disp);
   };
 
   class post_mod_addr : public addr_expr
   {
   public:
-    post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max);
-    post_mod_addr (rtx base_reg, disp_t disp);
+    post_mod_addr (addr_reg base_reg, disp_t disp,
+                   disp_t disp_min, disp_t disp_max);
+    post_mod_addr (addr_reg base_reg, disp_t disp);
   };
 
 
   // helper functions to create a particular type of address expression.
   static addr_expr
-  make_reg_addr (rtx base_reg = any_regno);
+  make_reg_addr (addr_reg base_reg = any_reg);
 
   static addr_expr
   make_disp_addr (disp_t disp_min, disp_t disp_max);
 
   static addr_expr
-  make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max);
+  make_disp_addr (addr_reg base_reg, disp_t disp_min, disp_t disp_max);
 
   static addr_expr
   make_const_addr (disp_t disp);
@@ -417,20 +511,20 @@ public:
   make_index_addr (void);
 
   static addr_expr
-  check_make_non_mod_addr (rtx base_reg, rtx index_reg,
+  check_make_non_mod_addr (addr_reg base_reg, addr_reg index_reg,
                            HOST_WIDE_INT scale, HOST_WIDE_INT disp);
 
   static addr_expr
-  make_post_inc_addr (machine_mode mode, rtx base_rtx = any_regno);
+  make_post_inc_addr (machine_mode mode, addr_reg base_reg = any_reg);
 
   static addr_expr
-  make_post_dec_addr (machine_mode mode, rtx base_reg = any_regno);
+  make_post_dec_addr (machine_mode mode, addr_reg base_reg = any_reg);
 
   static addr_expr
-  make_pre_inc_addr (machine_mode mode, rtx base_reg = any_regno);
+  make_pre_inc_addr (machine_mode mode, addr_reg base_reg = any_reg);
 
   static addr_expr
-  make_pre_dec_addr (machine_mode mode, rtx base_reg = any_regno);
+  make_pre_dec_addr (machine_mode mode, addr_reg base_reg = any_reg);
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // An alternative for an address mode.  These are usually provided
@@ -466,8 +560,8 @@ public:
     int m_cost;
 
     // The address expression for this alternative, which might contain
-    // the "any_regno" placeholder for registers.  The placeholders are
-    // then substituted with register numbers by AMS when it decides to
+    // the "any_reg" placeholder for registers.  The placeholders are
+    // then substituted with actual registers by AMS when it decides to
     // use that alternative.
     addr_expr m_addr_expr;
   };
@@ -526,7 +620,7 @@ public:
   class reg_barrier;
   class reg_use;
 
-  typedef std::map<rtx, unsigned, cmp_by_regno> addr_reg_map;
+  typedef std::map<addr_reg, unsigned> addr_reg_map;
 
   // A structure used to store the address regs that can be used as a starting
   // point to arrive at another address during address mod generation.
@@ -535,7 +629,7 @@ public:
   public:
 
     typedef std::list<reg_mod*>::iterator iterator;
-    typedef std::multimap<rtx, reg_mod*, cmp_by_regno> reg_map;
+    typedef std::multimap<addr_reg, reg_mod*> reg_map;
     template <typename OutputIterator> void
     get_relevant_addresses (const addr_expr& end_addr, OutputIterator out);
 
@@ -600,7 +694,7 @@ public:
 
     sequence (basic_block bb, glob_insn_map& im, unsigned* i)
     : m_bb (bb), m_glob_insn_el_map (im), m_next_id (i),
-      m_substitute_reg (gen_rtx_REG (Pmode, LAST_VIRTUAL_REGISTER + 1)),
+      m_substitute_reg (addr_reg (gen_rtx_REG (Pmode, LAST_VIRTUAL_REGISTER + 1))),
       m_original_seq (NULL)
       {
       }
@@ -785,18 +879,18 @@ public:
     int gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
                            delegate& dlg,
                            std::set<reg_mod*>& used_reg_mods,
-                           std::map<rtx, reg_mod*, cmp_by_regno>&
+                           std::map<addr_reg, reg_mod*>&
                              visited_reg_mods, unsigned* next_tmp_regno,
                            int lookahead_num, bool record_in_sequence = true);
 
     std::pair<int, reg_mod*>
     find_cheapest_start_addr (const addr_expr& end_addr,
-                              iterator el, rtx addr_reg,
+                              iterator el, const addr_reg& reg,
                               disp_t min_disp, disp_t max_disp,
                               addr_type_t addr_type,
                               delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                              std::map<rtx, reg_mod*, cmp_by_regno>&
-                                visited_reg_mods, unsigned* next_tmp_regno);
+                              std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                              unsigned* next_tmp_regno);
 
     bool insert_address_mods (alternative_set::const_iterator alt,
                               reg_mod* base_start_addr,
@@ -805,8 +899,7 @@ public:
                               const addr_expr& index_end_addr,
                               iterator el, mod_tracker& tracker,
                               std::set<reg_mod*>& used_reg_mods,
-                              std::map<rtx, reg_mod*, cmp_by_regno>&
-                                visited_reg_mods,
+                              std::map<addr_reg, reg_mod*>& visited_reg_mods,
                               delegate& dlg, unsigned* next_tmp_regno);
 
     mod_addr_result
@@ -815,8 +908,7 @@ public:
                              addr_type_t addr_type, machine_mode acc_mode,
                              iterator el, mod_tracker& tracker,
                              std::set<reg_mod*>& used_reg_mods,
-                             std::map<rtx, reg_mod*, cmp_by_regno>&
-                               visited_reg_mods,
+                             std::map<addr_reg, reg_mod*>& visited_reg_mods,
                              delegate& dlg, unsigned* next_tmp_regno);
 
     reg_mod*
@@ -825,11 +917,12 @@ public:
                      const addr_expr& effective_addr,
                      iterator el, mod_tracker& tracker,
                      std::set<reg_mod*>& used_reg_mods,
-                     delegate& dlg, unsigned* next_tmp_regno);
+                     delegate& dlg, unsigned* next_tmp_regno,
+                     bool insert_after = false);
 
     reg_mod* find_start_addr_for_reg (
-      rtx reg, std::set<reg_mod*>& used_reg_mods,
-      std::map<rtx, reg_mod*, cmp_by_regno>& visited_reg_mods);
+      const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
+      std::map<addr_reg, reg_mod*>* visited_reg_mods);
 
     template <typename OutputIterator> void
     find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out,
@@ -852,7 +945,7 @@ public:
 
     // Used in address validating functions instead of real regs
     // to avoid generating many RTXes.
-    rtx m_substitute_reg;
+    addr_reg m_substitute_reg;
 
     start_addr_list m_start_addr_list;
     const sequence* m_original_seq;
@@ -906,7 +999,7 @@ public:
     update_cost (delegate& d ATTRIBUTE_UNUSED, sequence& seq ATTRIBUTE_UNUSED,
                  sequence::iterator el_it ATTRIBUTE_UNUSED) { }
     virtual void
-    add_cloning_cost (rtx reused_reg, delegate& d, sequence& seq,
+    add_cloning_cost (const addr_reg& reused_reg, delegate& d, sequence& seq,
                       sequence::iterator el_it);
 
     // The insn rtx of this element.  Maybe null if it has been inserted
@@ -1273,7 +1366,8 @@ NOTE:
   class reg_mod : public sequence_element
   {
   public:
-    reg_mod (rtx_insn* i, rtx r, rtx v, const addr_expr& a = addr_expr (),
+    reg_mod (rtx_insn* i, const addr_reg& r, rtx v,
+             const addr_expr& a = addr_expr (),
 	     const addr_expr& ea = addr_expr (), mem_access* ma = NULL)
       : sequence_element (type_reg_mod, i, a, ea), m_tmp_reg (Pmode, ~0u),
       m_reg (r), m_value (v), m_auto_mod_acc (ma)
@@ -1283,8 +1377,9 @@ NOTE:
     reg_mod (rtx_insn* i, unsigned tmp_regno, machine_mode tmp_mode, rtx v,
              const addr_expr& a = addr_expr (),
 	     const addr_expr& ea = addr_expr (), mem_access* ma = NULL)
-      : sequence_element (type_reg_mod, i, a, ea), m_tmp_reg (tmp_mode, tmp_regno),
-      m_reg (m_tmp_reg), m_value (v), m_auto_mod_acc (ma)
+      : sequence_element (type_reg_mod, i, a, ea),
+      m_tmp_reg (tmp_mode, tmp_regno), m_reg (addr_reg (m_tmp_reg)),
+      m_value (v), m_auto_mod_acc (ma)
     {
     }
 
@@ -1297,8 +1392,9 @@ NOTE:
     const tmp_rtx<REG>& tmp_reg (void) const { return m_tmp_reg; }
 
     // The address reg that is being modified / defined.
-    rtx reg (void) const { return m_reg; }
-    void set_reg (const rtx reg) { m_reg = reg; }
+    addr_reg reg (void) const { return m_reg; }
+    void set_reg (const addr_reg& reg) { m_reg = reg; }
+    void set_reg_rtx (rtx reg) { m_reg.set_reg_rtx (reg); }
 
     // The rtx the reg is being set to.
     rtx value (void) const { return m_value; }
@@ -1314,7 +1410,7 @@ NOTE:
 
   private:
     tmp_rtx<REG> m_tmp_reg;
-    rtx m_reg;
+    addr_reg m_reg;
     rtx m_value;
     mem_access* m_auto_mod_acc;
   };
@@ -1337,10 +1433,10 @@ NOTE:
     virtual bool operator == (const sequence_element& other) const;
 
     // The address reg which is being referenced by this barrier.
-    rtx reg (void) const { return m_reg; }
+    const addr_reg& reg (void) const { return m_reg; }
 
   private:
-    rtx m_reg;
+    addr_reg m_reg;
   };
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1366,12 +1462,12 @@ NOTE:
   class reg_use : public sequence_element
   {
   public:
-    reg_use (rtx_insn* i, rtx reg)
+    reg_use (rtx_insn* i, addr_reg reg)
     : sequence_element (type_reg_use, i), m_reg (reg), m_reg_ref (NULL)
     {
     }
 
-    reg_use (rtx_insn* i, rtx reg, rtx* ref, const addr_expr& a,
+    reg_use (rtx_insn* i, addr_reg reg, rtx* ref, const addr_expr& a,
              const addr_expr& ea = addr_expr ())
     : sequence_element (type_reg_use, i, a, ea), m_reg (reg), m_reg_ref (ref)
     {
@@ -1392,8 +1488,8 @@ NOTE:
     set_dec_chain (const adjacent_chain_info& c) { m_dec_chain = c; }
 
     // The reg that is being used.
-    rtx reg (void) const { return m_reg; }
-    void set_reg (const rtx reg) { m_reg = reg; }
+    const addr_reg& reg (void) const { return m_reg; }
+    void set_reg (const addr_reg& reg) { m_reg = reg; }
 
     // The reg rtx inside the insn. Can also be a (PLUS reg const_int)
     // expression. If NULL, the reg use is unspecified.
@@ -1412,7 +1508,7 @@ NOTE:
     // an insn that AMS understands.  in this case AMS can optimize it away.
     // ref_counted_ptr<sequence_element> m_original;
 
-    rtx m_reg;
+    addr_reg m_reg;
     rtx* m_reg_ref;
 
     adjacent_chain_info m_inc_chain;
@@ -1530,7 +1626,8 @@ NOTE:
 
   // Find the value that REG was last set to, starting the search from
   // START_INSN.
-  static find_reg_value_result find_reg_value (rtx reg, rtx_insn* start_insn,
+  static find_reg_value_result find_reg_value (rtx reg,
+                                               rtx_insn* start_insn,
                                                sequence::glob_insn_map&
                                                insn_el_map);
 
@@ -1550,38 +1647,28 @@ private:
 
 // ---------------------------------------------------------------------------
 
-inline ams::regno_t
-ams::get_regno (const_rtx x)
-{
-  if (x == NULL)
-    return -1;
-  if (x == any_regno)
-    return -2;
-  return REGNO (x);
-}
-
 inline ams::addr_expr
-ams::make_reg_addr (rtx base_reg)
+ams::make_reg_addr (addr_reg base_reg)
 {
-  return non_mod_addr (base_reg, invalid_regno, 0, 0, 0, 0, 0, 0);
+  return non_mod_addr (base_reg, invalid_reg, 0, 0, 0, 0, 0, 0);
 }
 
 inline ams::addr_expr
 ams::make_disp_addr (disp_t disp_min, disp_t disp_max)
 {
-  return non_mod_addr (any_regno, invalid_regno, 0, 0, 0, 0, disp_min, disp_max);
+  return non_mod_addr (any_reg, invalid_reg, 0, 0, 0, 0, disp_min, disp_max);
 }
 
 inline ams::addr_expr
-ams::make_disp_addr (rtx base_reg, disp_t disp_min, disp_t disp_max)
+ams::make_disp_addr (addr_reg base_reg, disp_t disp_min, disp_t disp_max)
 {
-  return non_mod_addr (base_reg, invalid_regno, 0, 0, 0, 0, disp_min, disp_max);
+  return non_mod_addr (base_reg, invalid_reg, 0, 0, 0, 0, disp_min, disp_max);
 }
 
 inline ams::addr_expr
 ams::make_const_addr (disp_t disp)
 {
-  return non_mod_addr (invalid_regno, invalid_regno, 0, 0, 0, disp, disp, disp);
+  return non_mod_addr (invalid_reg, invalid_reg, 0, 0, 0, disp, disp, disp);
 }
 
 inline ams::addr_expr
@@ -1594,7 +1681,7 @@ ams::make_const_addr (rtx disp)
 inline ams::addr_expr
 ams::make_index_addr (scale_t scale_min, scale_t scale_max)
 {
-  return non_mod_addr (any_regno, any_regno, 1, scale_min, scale_max, 0, 0, 0);
+  return non_mod_addr (any_reg, any_reg, 1, scale_min, scale_max, 0, 0, 0);
 }
 
 inline ams::addr_expr
@@ -1604,28 +1691,28 @@ ams::make_index_addr (void)
 }
 
 inline ams::addr_expr
-ams::make_post_inc_addr (machine_mode mode, rtx base_reg)
+ams::make_post_inc_addr (machine_mode mode, addr_reg base_reg)
 {
   const int mode_sz = GET_MODE_SIZE (mode);
   return post_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
 inline ams::addr_expr
-ams::make_post_dec_addr (machine_mode mode, rtx base_reg)
+ams::make_post_dec_addr (machine_mode mode, addr_reg base_reg)
 {
   const int mode_sz = -GET_MODE_SIZE (mode);
   return post_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
 inline ams::addr_expr
-ams::make_pre_inc_addr (machine_mode mode, rtx base_reg)
+ams::make_pre_inc_addr (machine_mode mode, addr_reg base_reg)
 {
   const int mode_sz = GET_MODE_SIZE (mode);
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
 }
 
 inline ams::addr_expr
-ams::make_pre_dec_addr (machine_mode mode, rtx base_reg)
+ams::make_pre_dec_addr (machine_mode mode, addr_reg base_reg)
 {
   const int mode_sz = -GET_MODE_SIZE (mode);
   return pre_mod_addr (base_reg, mode_sz, mode_sz, mode_sz);
@@ -1637,8 +1724,8 @@ ams::addr_expr::operator == (const addr_expr& other) const
   if (is_invalid () || other.is_invalid ())
     return is_invalid () && other.is_invalid ();
 
-  return regs_equal (base_reg (), other.base_reg ())
-         && regs_equal (index_reg (), other.index_reg ())
+  return base_reg () == other.base_reg ()
+         && index_reg () == other.index_reg ()
          && scale () == other.scale ()
          && disp () == other.disp ();
 }
@@ -1657,11 +1744,11 @@ ams::addr_expr::operator < (const addr_expr& other) const
   if (is_invalid () || other.is_invalid ())
     return is_invalid ();
 
-  regno_t br0 = get_regno (base_reg ()), br1 = get_regno (other.base_reg ());
+  regno_t br0 = base_reg ().regno (), br1 = other.base_reg ().regno ();
   if (br0 != br1)
     return br0 > br1;
 
-  regno_t ir0 = get_regno (index_reg ()), ir1 = get_regno (other.index_reg ());
+  regno_t ir0 = index_reg ().regno (), ir1 = other.index_reg ().regno ();
   if (ir0 != ir1)
     return ir0 > ir1;
 
@@ -1678,8 +1765,8 @@ ams::addr_expr::operator < (const addr_expr& other) const
 inline std::pair<ams::disp_t, bool>
 ams::addr_expr::operator - (const addr_expr& other) const
 {
-  if (regs_equal (base_reg (), other.base_reg ())
-      && regs_equal (index_reg (), other.index_reg ())
+  if (base_reg () == other.base_reg ()
+      && index_reg () == other.index_reg ()
       && (scale () == other.scale () || has_no_index_reg ()))
     return std::make_pair (disp () - other.disp (), true);
 
@@ -1687,7 +1774,7 @@ ams::addr_expr::operator - (const addr_expr& other) const
 }
 
 inline ams::non_mod_addr
-::non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale,
+::non_mod_addr (addr_reg base_reg, addr_reg index_reg, scale_t scale,
 		scale_t scale_min, scale_t scale_max,
 		disp_t disp, disp_t disp_min, disp_t disp_max)
 {
@@ -1699,13 +1786,14 @@ inline ams::non_mod_addr
   m_base_index_reg[1] = index_reg;
   m_scale = scale;
   if (m_scale == 0)
-    m_base_index_reg[1] = invalid_regno;
+    m_base_index_reg[1] = invalid_reg;
   m_scale_min = scale_min;
   m_scale_max = scale_max;
 }
 
 inline ams::non_mod_addr
-::non_mod_addr (rtx base_reg, rtx index_reg, scale_t scale, disp_t disp)
+::non_mod_addr (addr_reg base_reg, addr_reg index_reg,
+                scale_t scale, disp_t disp)
 {
   m_type = non_mod;
   m_base_index_reg[0] = base_reg;
@@ -1715,56 +1803,58 @@ inline ams::non_mod_addr
   m_base_index_reg[1] = index_reg;
   m_scale = scale;
   if (m_scale == 0)
-    m_base_index_reg[1] = invalid_regno;
+    m_base_index_reg[1] = invalid_reg;
   m_scale_min = scale;
   m_scale_max = scale;
 }
 
 inline ams::pre_mod_addr
-::pre_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
+::pre_mod_addr (addr_reg base_reg, disp_t disp,
+                disp_t disp_min, disp_t disp_max)
 {
   m_type = pre_mod;
   m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp_min;
   m_disp_max = disp_max;
-  m_base_index_reg[1] = invalid_regno;
+  m_base_index_reg[1] = invalid_reg;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
 inline ams::pre_mod_addr
-::pre_mod_addr (rtx base_reg, disp_t disp)
+::pre_mod_addr (addr_reg base_reg, disp_t disp)
 {
   m_type = pre_mod;
   m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp;
   m_disp_max = disp;
-  m_base_index_reg[1] = invalid_regno;
+  m_base_index_reg[1] = invalid_reg;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
 inline ams::post_mod_addr
-::post_mod_addr (rtx base_reg, disp_t disp, disp_t disp_min, disp_t disp_max)
+::post_mod_addr (addr_reg base_reg, disp_t disp,
+                 disp_t disp_min, disp_t disp_max)
 {
   m_type = post_mod;
   m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp_min;
   m_disp_max = disp_max;
-  m_base_index_reg[1] = invalid_regno;
+  m_base_index_reg[1] = invalid_reg;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 
 inline ams::post_mod_addr
-::post_mod_addr (rtx base_reg, disp_t disp)
+::post_mod_addr (addr_reg base_reg, disp_t disp)
 {
   m_type = post_mod;
   m_base_index_reg[0] = base_reg;
   m_disp = disp;
   m_disp_min = disp;
   m_disp_max = disp;
-  m_base_index_reg[1] = invalid_regno;
+  m_base_index_reg[1] = invalid_reg;
   m_scale = m_scale_min = m_scale_max = 0;
 }
 

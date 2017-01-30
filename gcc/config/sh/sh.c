@@ -13751,7 +13751,7 @@ is_stack_frame_related_access (ams::sequence::const_iterator acc)
 
   for (ams::addr_expr::regs_const_iterator i = addr.regs_begin (),
        i_end = addr.regs_end (); i != i_end; ++i)
-    if (ams::get_regno (*i) == FRAME_POINTER_REGNUM)
+    if (i->regno () == FRAME_POINTER_REGNUM)
       return true;
 
   return false;
@@ -13834,7 +13834,7 @@ mem_access_alternatives (ams::alternative_set& alt,
   // on pseudos before RA will work.  but when ran after RA, AMS will have to
   // deal with hard-regs and do the checking on register classes + reg numbers.
   // this is some sort of register constraint handling.
-  if (ams::get_regno (addr.base_reg ()) == GBR_REG)
+  if (addr.base_reg ().regno () == GBR_REG)
   {
     // A GBR relative address.  Sticking to the GBR base reg is the cheapest
     // and also allows for the largest displacement.
@@ -14015,8 +14015,8 @@ ams_reg_plus_reg_cost (const_rtx reg ATTRIBUTE_UNUSED,
 	     alt = next_acc->alternatives ().begin ();
 	   alt != next_acc->alternatives ().end (); ++alt)
 	{
-	  if (alt->address ().base_reg () == ams::any_regno
-	      && alt->address ().index_reg () == ams::any_regno)
+	  if (alt->address ().base_reg () == ams::any_reg
+	      && alt->address ().index_reg () == ams::any_reg)
 	    return 10;
 	}
     }
@@ -14061,7 +14061,7 @@ addr_reg_mod_cost (const_rtx reg, const_rtx val,
     return 24;
 
   // modifying the GBR is impossible.
-  if (ams::get_regno (reg) == GBR_REG)
+  if (REGNO (reg) == GBR_REG)
     return ams::infinite_costs;
 
   enum rtx_code code = GET_CODE (val);
