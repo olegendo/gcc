@@ -627,19 +627,21 @@ public:
   class start_addr_list
   {
   public:
+    typedef trv_iterator<deref<std::list<ref_counting_ptr<sequence_element> >
+                               ::iterator> > sequence_iterator;
 
-    typedef std::list<reg_mod*>::iterator iterator;
-    typedef std::multimap<addr_reg, reg_mod*> reg_map;
+    typedef std::list<sequence_iterator>::iterator iterator;
+    typedef std::multimap<addr_reg, sequence_iterator> reg_map;
     template <typename OutputIterator> void
     get_relevant_addresses (const addr_expr& end_addr, OutputIterator out);
 
-    void add (reg_mod* start_addr);
-    void remove (reg_mod* start_addr);
+    void add (sequence_iterator start_addr);
+    void remove (sequence_iterator start_addr);
 
   private:
 
     // List of addresses that only have a constant displacement.
-    std::list<reg_mod*> m_const_addresses;
+    std::list<sequence_iterator> m_const_addresses;
 
     // A map for storing addresses that have a base and/or index reg.
     // The key of each stored address is its base or index reg (the
@@ -883,7 +885,7 @@ public:
                              visited_reg_mods, unsigned* next_tmp_regno,
                            int lookahead_num, bool record_in_sequence = true);
 
-    std::pair<int, reg_mod*>
+    std::pair<int, iterator>
     find_cheapest_start_addr (const addr_expr& end_addr,
                               iterator el, const addr_reg& reg,
                               disp_t min_disp, disp_t max_disp,
@@ -893,8 +895,8 @@ public:
                               unsigned* next_tmp_regno);
 
     bool insert_address_mods (alternative_set::const_iterator alt,
-                              reg_mod* base_start_addr,
-                              reg_mod* index_start_addr,
+                              iterator base_start_addr,
+                              iterator index_start_addr,
                               const addr_expr& base_end_addr,
                               const addr_expr& index_end_addr,
                               iterator el, mod_tracker& tracker,
@@ -903,7 +905,7 @@ public:
                               delegate& dlg, unsigned* next_tmp_regno);
 
     mod_addr_result
-    try_insert_address_mods (reg_mod* start_addr, const addr_expr& end_addr,
+    try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
                              disp_t min_disp, disp_t max_disp,
                              addr_type_t addr_type, machine_mode acc_mode,
                              iterator el, mod_tracker& tracker,
@@ -920,7 +922,7 @@ public:
                      delegate& dlg, unsigned* next_tmp_regno,
                      bool insert_after = false);
 
-    reg_mod* find_start_addr_for_reg (
+    iterator find_start_addr_for_reg (
       const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
       std::map<addr_reg, reg_mod*>* visited_reg_mods);
 
