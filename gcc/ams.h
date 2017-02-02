@@ -161,6 +161,7 @@ public:
   static const addr_reg any_reg;
 
  private:
+  class visited_element_list;
   class mod_tracker;
   class mod_addr_result;
   class find_reg_value_result;
@@ -881,8 +882,8 @@ public:
     int gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
                            delegate& dlg,
                            std::set<reg_mod*>& used_reg_mods,
-                           std::map<addr_reg, reg_mod*>&
-                             visited_reg_mods, unsigned* next_tmp_regno,
+                           visited_element_list& visited_reg_mods,
+                           unsigned* next_tmp_regno,
                            int lookahead_num, bool record_in_sequence = true);
 
     std::pair<int, iterator>
@@ -891,7 +892,7 @@ public:
                               disp_t min_disp, disp_t max_disp,
                               addr_type_t addr_type,
                               delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                              std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                              visited_element_list& visited_reg_mods,
                               unsigned* next_tmp_regno);
 
     bool insert_address_mods (alternative_set::const_iterator alt,
@@ -901,7 +902,7 @@ public:
                               const addr_expr& index_end_addr,
                               iterator el, mod_tracker& tracker,
                               std::set<reg_mod*>& used_reg_mods,
-                              std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                              visited_element_list& visited_reg_mods,
                               delegate& dlg, unsigned* next_tmp_regno);
 
     mod_addr_result
@@ -910,7 +911,7 @@ public:
                              addr_type_t addr_type, machine_mode acc_mode,
                              iterator el, mod_tracker& tracker,
                              std::set<reg_mod*>& used_reg_mods,
-                             std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                             visited_element_list& visited_reg_mods,
                              delegate& dlg, unsigned* next_tmp_regno);
 
     reg_mod*
@@ -924,7 +925,7 @@ public:
 
     iterator find_start_addr_for_reg (
       const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
-      std::map<addr_reg, reg_mod*>* visited_reg_mods);
+      visited_element_list& visited_reg_mods, bool most_recent_only=true);
 
     template <typename OutputIterator> void
     find_addr_reg_uses_1 (rtx reg, rtx& x, OutputIterator out,

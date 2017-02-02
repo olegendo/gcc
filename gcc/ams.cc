@@ -1847,6 +1847,37 @@ ams::sequence::find_addr_reg_uses (void)
     }
 }
 
+// A structure used for storing which elements have been visited and which
+// reg-mods last updated a register.
+class ams::visited_element_list
+{
+public:
+
+  visited_element_list (void) { }
+
+  bool is_visited (sequence_element* el)
+  {
+    return m_visited_elements.find (el) != m_visited_elements.end ();
+  }
+
+  // Tells whether RM is the last reg-mod that modified its register.
+  bool is_most_recent (reg_mod* rm)
+  {
+    return is_visited (rm) && m_last_visited_reg_mods[rm->reg ()] == rm;
+  }
+
+  // Visit the element EL.
+  void visit_reg_mod (sequence_element* el)
+  {
+    m_visited_elements.insert (el);
+    if (reg_mod* rm = dyn_cast<reg_mod*> (el))
+      m_last_visited_reg_mods[rm->reg ()] = rm;
+  }
+
+  std::map<addr_reg, reg_mod*> m_last_visited_reg_mods;
+  std::set<sequence_element*> m_visited_elements;
+};
+
 // A structure used for tracking and reverting modifications
 // to access sequences.
 class ams::mod_tracker
@@ -1857,7 +1888,7 @@ public:
                                            alternative_set::const_iterator> > >
     addr_changed_list;
   mod_tracker (sequence& seq, std::set<reg_mod*>& used_reg_mods,
-               std::map<addr_reg, reg_mod*>& visited_reg_mods)
+               visited_element_list& visited_reg_mods)
     : m_seq (seq), m_used_reg_mods (used_reg_mods),
       m_visited_reg_mods (visited_reg_mods)
   {
@@ -1865,6 +1896,7 @@ public:
     m_inserted_reg_mods.reserve (8);
     m_use_changed_reg_mods.reserve (4);
     m_visited_changed_reg_mods.reserve (4);
+    m_last_visited_changed_reg_mods.reserve (4);
     m_addr_changed_els.reserve (4);
   }
 
@@ -1898,11 +1930,11 @@ private:
   std::vector<std::pair<sequence_element*,
                         sequence_element*> > m_dependent_els;
   std::vector<sequence::iterator> m_inserted_reg_mods;
-  std::vector<reg_mod*> m_use_changed_reg_mods;
-  std::vector<std::pair<addr_reg, reg_mod*> >  m_visited_changed_reg_mods;
+  std::vector<reg_mod*> m_use_changed_reg_mods, m_visited_changed_reg_mods;
+  std::vector<std::pair<addr_reg, reg_mod*> >  m_last_visited_changed_reg_mods;
   addr_changed_list m_addr_changed_els;
   std::set<reg_mod*>& m_used_reg_mods;
-  std::map<addr_reg, reg_mod*>& m_visited_reg_mods;
+  visited_element_list& m_visited_reg_mods;
 };
 
 // Undo all the changes that were recorded.
@@ -1921,14 +1953,19 @@ void ams::mod_tracker::reset_changes (void)
        it != m_use_changed_reg_mods.rend (); ++it)
     m_used_reg_mods.erase (*it);
 
-  for (std::vector<std::pair<addr_reg, reg_mod*> >::reverse_iterator
-         it = m_visited_changed_reg_mods.rbegin ();
+  for (std::vector<reg_mod*>::reverse_iterator it =
+         m_visited_changed_reg_mods.rbegin ();
        it != m_visited_changed_reg_mods.rend (); ++it)
+    m_visited_reg_mods.m_visited_elements.erase (*it);
+
+  for (std::vector<std::pair<addr_reg, reg_mod*> >::reverse_iterator
+         it = m_last_visited_changed_reg_mods.rbegin ();
+       it != m_last_visited_changed_reg_mods.rend (); ++it)
     {
       if (it->second == NULL)
-        m_visited_reg_mods.erase (it->first);
+        m_visited_reg_mods.m_last_visited_reg_mods.erase (it->first);
       else
-        m_visited_reg_mods[it->first] = it->second;
+        m_visited_reg_mods.m_last_visited_reg_mods[it->first] = it->second;
     }
 
   for (addr_changed_list::reverse_iterator it = m_addr_changed_els.rbegin ();
@@ -1963,18 +2000,24 @@ void ams::mod_tracker::reset_changes (void)
 // Mark RM as visited.
 void ams::mod_tracker::visit_reg_mod (reg_mod* rm)
 {
-  std::map<addr_reg, reg_mod*>::iterator prev =
-    m_visited_reg_mods.find (rm->reg ());
-
-  if (prev == m_visited_reg_mods.end ())
+  if (!m_visited_reg_mods.is_visited (rm))
     {
-      m_visited_changed_reg_mods.push_back (
+      m_visited_reg_mods.m_visited_elements.insert (rm);
+      m_visited_changed_reg_mods.push_back (rm);
+    }
+
+  std::map<addr_reg, reg_mod*>::iterator prev =
+    m_visited_reg_mods.m_last_visited_reg_mods.find (rm->reg ());
+
+  if (prev == m_visited_reg_mods.m_last_visited_reg_mods.end ())
+    {
+      m_last_visited_changed_reg_mods.push_back (
         std::make_pair (rm->reg (), (reg_mod*)NULL));
-      m_visited_reg_mods[rm->reg ()] = rm;
+      m_visited_reg_mods.m_last_visited_reg_mods[rm->reg ()] = rm;
     }
   else
     {
-      m_visited_changed_reg_mods.push_back (
+      m_last_visited_changed_reg_mods.push_back (
         std::make_pair (rm->reg (), prev->second));
       prev->second = rm;
     }
@@ -2014,6 +2057,7 @@ void ams::mod_tracker::clear (void)
   m_dependent_els.clear ();
   m_use_changed_reg_mods.clear ();
   m_visited_changed_reg_mods.clear ();
+  m_last_visited_changed_reg_mods.clear ();
   m_addr_changed_els.clear ();
   m_inserted_reg_mods.clear ();
 }
@@ -2045,7 +2089,7 @@ ams::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 
   // FIXME: use linear allocator to avoid allocations for temporary set.
   std::set<reg_mod*> used_reg_mods;
-  std::map<addr_reg, reg_mod*> visited_reg_mods;
+  visited_element_list visited_reg_mods;
   typedef filter_iterator<iterator, element_to_optimize> el_opt_iter;
   iterator prev_el = begin ();
   unsigned next_tmp_regno = max_reg_num ();
@@ -2056,7 +2100,7 @@ ams::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
       // Mark the reg-mods before the current element as visited.
       for (iterator it = prev_el; it != els; ++it)
         if (reg_mod* rm = dyn_cast<reg_mod*> (&*it))
-          visited_reg_mods[rm->reg ()] = rm;
+          visited_reg_mods.visit_reg_mod (rm);
 
       prev_el = els;
 
@@ -2131,7 +2175,7 @@ ams::sequence::gen_address_mod (delegate& dlg, int base_lookahead)
 int ams::sequence::
 gen_address_mod_1 (filter_iterator<iterator, element_to_optimize> el,
                    delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                   std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                   visited_element_list& visited_reg_mods,
                    unsigned* next_tmp_regno, int lookahead_num,
                    bool record_in_sequence)
 {
@@ -2336,7 +2380,7 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el,
                           disp_t min_disp, disp_t max_disp,
                           addr_type_t addr_type,
                           delegate& dlg, std::set<reg_mod*>& used_reg_mods,
-                          std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                          visited_element_list& visited_reg_mods,
                           unsigned* next_tmp_regno)
 {
   int min_cost = infinite_costs;
@@ -2354,9 +2398,7 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el,
   for (std::vector<sequence::iterator>::iterator addrs = start_addrs.begin ();
        addrs != start_addrs.end (); ++addrs)
     {
-      std::map<addr_reg, reg_mod*>::iterator visited_addr =
-        visited_reg_mods.find (dyn_cast<reg_mod*> (&**addrs)->reg ());
-      if (visited_addr == visited_reg_mods.end ())
+      if (!visited_reg_mods.is_visited (&**addrs))
         continue;
 
       mod_addr_result result =
@@ -2385,6 +2427,7 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el,
 				   make_const_addr (end_addr.disp ())),
 	begin ());
       reg_mod* const_load_rm = as_a<reg_mod*> (&*const_load);
+      tracker.visit_reg_mod (const_load_rm);
 
       int cost = try_insert_address_mods (const_load, end_addr,
                                           min_disp, max_disp,
@@ -2427,7 +2470,7 @@ insert_address_mods (alternative_set::const_iterator alt,
                      const addr_expr& index_end_addr,
                      iterator el, mod_tracker& tracker,
                      std::set<reg_mod*>& used_reg_mods,
-                     std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                     visited_element_list& visited_reg_mods,
                      delegate& dlg, unsigned* next_tmp_regno)
 {
   machine_mode acc_mode;
@@ -2556,7 +2599,7 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
                          addr_type_t addr_type, machine_mode acc_mode,
                          iterator el, mod_tracker& tracker,
                          std::set<reg_mod*>& used_reg_mods,
-                         std::map<addr_reg, reg_mod*>& visited_reg_mods,
+                         visited_element_list& visited_reg_mods,
                          delegate& dlg, unsigned* next_tmp_regno)
 {
   reg_mod* curr_addr = as_a<reg_mod*> (&*start_addr);
@@ -2569,19 +2612,17 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
   // If the register holding the start address has alerady been overwritten
   // by something else, emit a reg copy after the insn where it got its
   // previous value and use the copied reg as the start address.
-  std::map<addr_reg, reg_mod*>::iterator visited_addr =
-    visited_reg_mods.find (curr_addr->reg ());
-  if (visited_addr != visited_reg_mods.end ()
-      && visited_addr->second != curr_addr)
+  if (!visited_reg_mods.is_most_recent (curr_addr))
     {
       curr_addr = insert_addr_mod (curr_addr, acc_mode,
                                    curr_addr->reg ().reg_rtx (),
-                                   curr_addr->current_addr (),
+                                   make_reg_addr (curr_addr->reg ()),
                                    curr_addr->effective_addr (),
                                    start_addr,
                                    tracker, used_reg_mods, dlg,
                                    next_tmp_regno, true);
-      curr_addr->adjust_cost (clone_cost);
+      curr_addr->adjust_cost (dlg.addr_reg_clone_cost (
+        curr_addr->reg ().reg_rtx (), *this, el));
       clone_cost = 0;
       total_cost += curr_addr->cost ();
     }
@@ -2694,7 +2735,7 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
     {
       iterator index_reg_addr
         = find_start_addr_for_reg (c_end_addr.index_reg (),
-                                   used_reg_mods, &visited_reg_mods);
+                                   used_reg_mods, visited_reg_mods);
 
       bool prev_index_reg = false;
       if (index_reg_addr == end ())
@@ -2703,7 +2744,8 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
           // whose previous value could be used.
           prev_index_reg = true;
           index_reg_addr = find_start_addr_for_reg (c_end_addr.index_reg (),
-                                                    used_reg_mods, NULL);
+                                                    used_reg_mods,
+                                                    visited_reg_mods, false);
           if (index_reg_addr == end ())
             {
               // If there are no suitable previous index regs either, give up.
@@ -2733,9 +2775,9 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
       // copied reg instead.
       if (prev_index_reg)
         {
-          rtx reg_rtx = c_end_addr.index_reg ().reg_rtx ();
+          rtx reg_rtx = index_reg_rm->reg ().reg_rtx ();
           used_rm = insert_addr_mod (index_reg_rm, acc_mode, reg_rtx,
-                                     index_reg_rm->current_addr (),
+                                     make_reg_addr (index_reg_rm->reg ()),
                                      index_reg_rm->effective_addr (),
                                      index_reg_addr,
                                      tracker, used_reg_mods, dlg,
@@ -2780,7 +2822,7 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
     {
       iterator base_reg_addr
         = find_start_addr_for_reg (c_end_addr.base_reg (),
-                                   used_reg_mods, &visited_reg_mods);
+                                   used_reg_mods, visited_reg_mods);
       bool prev_base_reg = false;
       if (base_reg_addr == end ())
         {
@@ -2788,7 +2830,8 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
           // whose previous value could be used.
           prev_base_reg = true;
           base_reg_addr = find_start_addr_for_reg (c_end_addr.base_reg (),
-                                                   used_reg_mods, NULL);
+                                                   used_reg_mods,
+                                                   visited_reg_mods, false);
           if (base_reg_addr == end ())
             {
               // If there are no suitable previous base regs either, give up.
@@ -2811,9 +2854,9 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
       // copied reg instead.
       if (prev_base_reg)
         {
-          rtx reg_rtx = c_end_addr.base_reg ().reg_rtx ();
+          rtx reg_rtx = base_reg_rm->reg ().reg_rtx ();
           used_rm = insert_addr_mod (base_reg_rm, acc_mode, reg_rtx,
-                                     base_reg_rm->current_addr (),
+                                     make_reg_addr (base_reg_rm->reg ()),
                                      base_reg_rm->effective_addr (),
                                      base_reg_addr,
                                      tracker, used_reg_mods, dlg,
@@ -2960,7 +3003,8 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
 // the address regs.
 ams::sequence::iterator ams::sequence::
 find_start_addr_for_reg (const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
-                         std::map<addr_reg, reg_mod*>* visited_reg_mods)
+                         visited_element_list& visited_reg_mods,
+                         bool most_recent_only)
 {
   std::vector<iterator> start_addrs;
   addr_expr end_addr = make_reg_addr (reg);
@@ -2972,14 +3016,13 @@ find_start_addr_for_reg (const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
        addrs != start_addrs.end (); ++addrs)
     {
       reg_mod* rm = as_a<reg_mod*> (&**addrs);
-      if (visited_reg_mods)
+      if (most_recent_only)
         {
-          std::map<addr_reg, reg_mod*>::iterator visited_addr =
-            visited_reg_mods->find (rm->reg ());
-          if (visited_addr == visited_reg_mods->end ()
-              || visited_addr->second != rm )
+          if (!visited_reg_mods.is_most_recent (rm))
             continue;
         }
+      else if (!visited_reg_mods.is_visited (rm))
+        continue;
 
       const addr_expr &ae = rm->effective_addr ().is_invalid ()
                             ? make_reg_addr (rm->reg ())
