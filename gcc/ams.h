@@ -393,6 +393,7 @@ public:
     bool operator < (const addr_expr& other) const;
 
     std::pair<disp_t, bool> operator - (const addr_expr& other) const;
+    addr_expr operator + (const addr_expr& other) const;
 
     // tells if this address expression is valid or not.
     bool is_invalid (void) const { return type () == invalid_addr_expr; }
@@ -914,6 +915,15 @@ public:
                              visited_element_list& visited_reg_mods,
                              delegate& dlg, unsigned* next_tmp_regno);
 
+    mod_addr_result
+    try_insert_address_mods_1 (addr_expr addr_to_add, reg_mod* curr_addr,
+                               int clone_cost, machine_mode acc_mode,
+                               iterator el, mod_tracker& tracker,
+                               std::set<reg_mod*>& used_reg_mods,
+                               visited_element_list& visited_reg_mods,
+                               delegate& dlg, unsigned* next_tmp_regno,
+                               bool subtract = false);
+
     reg_mod*
     insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
                      rtx curr_addr_rtx, const addr_expr& curr_addr,
@@ -923,8 +933,8 @@ public:
                      delegate& dlg, unsigned* next_tmp_regno,
                      bool insert_after = false);
 
-    iterator find_start_addr_for_reg (
-      const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
+    iterator find_start_reg_for_addr (
+      const addr_expr& addr, std::set<reg_mod*>& used_reg_mods,
       visited_element_list& visited_reg_mods, bool most_recent_only=true);
 
     template <typename OutputIterator> void

@@ -852,6 +852,76 @@ struct ams::alternative_invalid
   bool operator () (const alternative& a) const { return !a.valid (); }
 };
 
+
+// Produce a new addr_expr whose address is the sum of the current addr_expr
+// and OTHER.
+ams::addr_expr
+ams::addr_expr::operator + (const addr_expr& other) const
+{
+  // Find the registers that will be present in the sum.
+  addr_reg regs[2];
+  regs[0] = regs[1] = invalid_reg;
+
+  addr_expr::regs_const_iterator ri = this->regs_begin ();
+  while (true)
+    {
+      if (ri == this->regs_end ())
+        ri = other.regs_begin ();
+      if (ri == other.regs_end ())
+        break;
+
+      if (*ri != regs[0] && *ri != regs[1])
+        {
+          // Record the new reg in a free space.
+          if (regs[0] == invalid_reg)
+            regs[0] = *ri;
+          else if (regs[1] == invalid_reg)
+            regs[1] = *ri;
+          else
+            // We can only reach this branch if there are 3 or more different
+            // registers, in which case the sum won't fit into an addr_expr.
+            gcc_unreachable ();
+        }
+      ++ri;
+    }
+
+  // Find the scale of the registers
+  scale_t reg_scales[2];
+  reg_scales[0] = reg_scales[1] = 0;
+  for (unsigned i = 0; i < 2; ++i)
+    {
+      if (base_reg () == regs[i])
+        reg_scales[i] += 1;
+      if (index_reg () == regs[i])
+        reg_scales[i] += scale ();
+      if (other.base_reg () == regs[i])
+        reg_scales[i] += 1;
+      if (other.index_reg () == regs[i])
+        reg_scales[i] += scale ();
+    }
+
+  // Make sure that only one of the regs needs to be scaled.
+  gcc_assert ((reg_scales[0] <= 1) || (reg_scales[1] <= 1));
+
+  addr_reg base, index;
+  scale_t scale;
+  disp_t disp = this->disp () + other.disp ();
+  if (reg_scales[0] > 1)
+    {
+      base = regs[1];
+      index = regs[0];
+      scale = reg_scales[0];
+    }
+  else
+    {
+      base = regs[0];
+      index = regs[1];
+      scale = reg_scales[1];
+    }
+
+  return non_mod_addr (base, index, scale, disp);
+}
+
 // Get all sub-expressions that are contained inside the addr_expr.
 // For an addr_expr of the form base+index*scale+disp, the following
 // sub-expressions are returned:
@@ -2394,7 +2464,6 @@ find_cheapest_start_addr (const addr_expr& end_addr, iterator el,
   std::vector<sequence::iterator> start_addrs;
   start_addresses ().get_relevant_addresses (end_addr,
                                              std::back_inserter (start_addrs));
-
   for (std::vector<sequence::iterator>::iterator addrs = start_addrs.begin ();
        addrs != start_addrs.end (); ++addrs)
     {
@@ -2733,167 +2802,35 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
       && c_curr_addr.scale () == 1
       && c_end_addr.scale () == -1)
     {
-      iterator index_reg_addr
-        = find_start_addr_for_reg (c_end_addr.index_reg (),
-                                   used_reg_mods, visited_reg_mods);
+      mod_addr_result add_result = try_insert_address_mods_1 (
+        make_reg_addr (c_end_addr.index_reg ()), curr_addr,
+        clone_cost, acc_mode, el, tracker, used_reg_mods, visited_reg_mods,
+        dlg, next_tmp_regno, true);
 
-      bool prev_index_reg = false;
-      if (index_reg_addr == end ())
-        {
-          // If no suitable index reg is found, check if there's a register
-          // whose previous value could be used.
-          prev_index_reg = true;
-          index_reg_addr = find_start_addr_for_reg (c_end_addr.index_reg (),
-                                                    used_reg_mods,
-                                                    visited_reg_mods, false);
-          if (index_reg_addr == end ())
-            {
-              // If there are no suitable previous index regs either, give up.
-              tracker.reset_changes ();
-              return mod_addr_result (infinite_costs);
-            }
-        }
+      if (add_result.cost == infinite_costs)
+        return mod_addr_result (infinite_costs);
 
-      if (index_reg_addr == end ())
-        {
-          tracker.reset_changes ();
-          return mod_addr_result (infinite_costs);
-        }
-
-      reg_mod* index_reg_rm = as_a<reg_mod*> (&*index_reg_addr);
-
-      disp_t index_disp = index_reg_rm->effective_addr ().is_valid () ?
-        index_reg_rm->effective_addr ().disp () : 0;
-
-      bool index_reg_used
-        = used_reg_mods.find (index_reg_rm) != used_reg_mods.end ();
-
-      reg_mod* used_rm;
-
-      // If the index reg's value has been changed, emit a reg copy
-      // after the insn where it got its previous value and use the
-      // copied reg instead.
-      if (prev_index_reg)
-        {
-          rtx reg_rtx = index_reg_rm->reg ().reg_rtx ();
-          used_rm = insert_addr_mod (index_reg_rm, acc_mode, reg_rtx,
-                                     make_reg_addr (index_reg_rm->reg ()),
-                                     index_reg_rm->effective_addr (),
-                                     index_reg_addr,
-                                     tracker, used_reg_mods, dlg,
-                                     next_tmp_regno, true);
-          used_rm->adjust_cost (dlg.addr_reg_clone_cost (reg_rtx, *this, el));
-          total_cost += used_rm->cost ();
-        }
-      else
-        used_rm = index_reg_rm;
-
-      reg_mod* new_addr
-      = insert_addr_mod (used_rm, acc_mode,
-                           tmp_rtx<PLUS> (acc_mode,
-                                          curr_addr->reg ().reg_rtx (),
-                                          used_rm->reg ().reg_rtx ()),
-                           non_mod_addr (curr_addr->reg (),
-                                         used_rm->reg (),
-                                         -1, 0),
-                           non_mod_addr (c_curr_addr.index_reg (),
-                                         c_end_addr.index_reg (),
-                                         -1, c_curr_addr.disp ()-index_disp),
-                           el, tracker, used_reg_mods, dlg, next_tmp_regno);
-      tracker.create_dependency (curr_addr, new_addr);
-      curr_addr = new_addr;
+      total_cost += add_result.cost;
+      curr_addr = add_result.final_addr;
       c_curr_addr = curr_addr->effective_addr ();
-      curr_addr->adjust_cost (clone_cost);
       clone_cost = 0;
-
-      if (index_reg_used)
-        {
-          // Take into account the cloning costs of the index reg.
-          int extra_cost = dlg.addr_reg_clone_cost (
-            index_reg_rm->reg ().reg_rtx (), *this, el);
-          curr_addr->adjust_cost (extra_cost);
-        }
-
-      total_cost += curr_addr->cost ();
     }
 
   // Add missing base reg.
   if (c_curr_addr.has_no_base_reg () && c_end_addr.has_base_reg ())
     {
-      iterator base_reg_addr
-        = find_start_addr_for_reg (c_end_addr.base_reg (),
-                                   used_reg_mods, visited_reg_mods);
-      bool prev_base_reg = false;
-      if (base_reg_addr == end ())
-        {
-          // If no suitable base reg is found, check if there's a register
-          // whose previous value could be used.
-          prev_base_reg = true;
-          base_reg_addr = find_start_addr_for_reg (c_end_addr.base_reg (),
-                                                   used_reg_mods,
-                                                   visited_reg_mods, false);
-          if (base_reg_addr == end ())
-            {
-              // If there are no suitable previous base regs either, give up.
-              tracker.reset_changes ();
-              return mod_addr_result (infinite_costs);
-            }
-        }
-      reg_mod* base_reg_rm = as_a<reg_mod*> (&*base_reg_addr);
+      mod_addr_result add_result = try_insert_address_mods_1 (
+        make_reg_addr (c_end_addr.base_reg ()), curr_addr,
+        clone_cost, acc_mode, el, tracker, used_reg_mods, visited_reg_mods,
+        dlg, next_tmp_regno);
 
-      disp_t base_disp = base_reg_rm->effective_addr ().is_valid () ?
-        base_reg_rm->effective_addr ().disp () : 0;
+      if (add_result.cost == infinite_costs)
+        return mod_addr_result (infinite_costs);
 
-      bool base_reg_used
-        = used_reg_mods.find (base_reg_rm) != used_reg_mods.end ();
-
-      reg_mod* used_rm;
-
-      // If the base reg's value has been changed, emit a reg copy
-      // after the insn where it got its previous value and use the
-      // copied reg instead.
-      if (prev_base_reg)
-        {
-          rtx reg_rtx = base_reg_rm->reg ().reg_rtx ();
-          used_rm = insert_addr_mod (base_reg_rm, acc_mode, reg_rtx,
-                                     make_reg_addr (base_reg_rm->reg ()),
-                                     base_reg_rm->effective_addr (),
-                                     base_reg_addr,
-                                     tracker, used_reg_mods, dlg,
-                                     next_tmp_regno, true);
-          used_rm->adjust_cost (dlg.addr_reg_clone_cost (reg_rtx, *this, el));
-          total_cost += used_rm->cost ();
-        }
-      else
-        used_rm = base_reg_rm;
-
-      reg_mod* new_addr
-      = insert_addr_mod (used_rm, acc_mode,
-                         tmp_rtx<PLUS> (acc_mode,
-                                        used_rm->reg ().reg_rtx (),
-                                        curr_addr->reg ().reg_rtx ()),
-                         non_mod_addr (used_rm->reg (),
-                                       curr_addr->reg (), 1, 0),
-                         non_mod_addr (c_end_addr.base_reg (),
-                                       c_curr_addr.index_reg (),
-                                       c_curr_addr.scale (),
-                                       c_curr_addr.disp () + base_disp),
-                         el, tracker, used_reg_mods, dlg, next_tmp_regno);
-      tracker.create_dependency (curr_addr, new_addr);
-      curr_addr = new_addr;
+      total_cost += add_result.cost;
+      curr_addr = add_result.final_addr;
       c_curr_addr = curr_addr->effective_addr ();
-      curr_addr->adjust_cost (clone_cost);
       clone_cost = 0;
-
-      if (base_reg_used)
-        {
-          // Take into account the cloning costs of the base reg.
-          int extra_cost = dlg.addr_reg_clone_cost (
-            base_reg_rm->reg ().reg_rtx (), *this, el);
-          curr_addr->adjust_cost (extra_cost);
-        }
-
-      total_cost += curr_addr->cost ();
     }
 
   // Set auto-inc/dec displacement that's added to the base reg.
@@ -2967,6 +2904,118 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
   return mod_addr_result (total_cost, curr_addr, c_curr_addr.disp ());
 }
 
+// Internal function of try_insert_address_mods. Find a register that
+// contains ADDR_TO_ADD and emit a reg-mod that adds it to CURR_ADDR.
+// If SUBTRACT is true, subtract the register instead of adding it.
+// If the address was found, return the register of the new address and
+// the cost of the modifications. If a suitable register couldn't be found,
+// return infinite_costs.
+ams::mod_addr_result ams::sequence::
+try_insert_address_mods_1 (addr_expr addr_to_add, reg_mod* curr_addr,
+                           int clone_cost, machine_mode acc_mode,
+                           iterator el, mod_tracker& tracker,
+                           std::set<reg_mod*>& used_reg_mods,
+                           visited_element_list& visited_reg_mods,
+                           delegate& dlg, unsigned* next_tmp_regno,
+                           bool subtract)
+{
+  int total_cost = 0;
+  iterator reused_el
+    = find_start_reg_for_addr (addr_to_add, used_reg_mods, visited_reg_mods);
+  bool using_prev_value = false;
+  if (reused_el == end ())
+    {
+      // If no suitable reg is found, check if there's a register
+      // whose previous value could be used.
+      using_prev_value = true;
+      reused_el = find_start_reg_for_addr (addr_to_add, used_reg_mods,
+                                           visited_reg_mods, false);
+      if (reused_el == end ())
+        {
+          // If there are no suitable previous regs either, give up.
+          tracker.reset_changes ();
+          return mod_addr_result (infinite_costs);
+        }
+    }
+  reg_mod* reused_rm = as_a<reg_mod*> (&*reused_el);
+
+  bool reg_used
+    = used_reg_mods.find (reused_rm) != used_reg_mods.end ();
+
+  reg_mod* used_rm;
+
+  // If the reg's value has been changed, emit a reg copy
+  // after the insn where it got its previous value and use the
+  // copied reg instead.
+  if (using_prev_value)
+    {
+      rtx reg_rtx = reused_rm->reg ().reg_rtx ();
+      used_rm = insert_addr_mod (reused_rm, acc_mode, reg_rtx,
+                                 make_reg_addr (reused_rm->reg ()),
+                                 reused_rm->effective_addr (),
+                                 reused_el,
+                                 tracker, used_reg_mods, dlg,
+                                 next_tmp_regno, true);
+      used_rm->adjust_cost (dlg.addr_reg_clone_cost (reg_rtx, *this, el));
+      total_cost += used_rm->cost ();
+    }
+  else
+    used_rm = reused_rm;
+
+
+  addr_expr new_curr_addr, new_effective_addr;
+  if (subtract)
+    {
+      // Invert ADDR_TO_ADD so that it will get subtracted instead of added.
+      gcc_assert (addr_to_add.base_reg () == invalid_reg
+                  || addr_to_add.index_reg () == invalid_reg);
+
+      if (addr_to_add.base_reg () == invalid_reg)
+        addr_to_add = non_mod_addr (invalid_reg, addr_to_add.index_reg (),
+                                    -addr_to_add.scale (),
+                                    -addr_to_add.disp ());
+      else
+        addr_to_add = non_mod_addr (invalid_reg, addr_to_add.base_reg (),
+                                    -1, -addr_to_add.disp ());
+
+      new_curr_addr = non_mod_addr (curr_addr->reg (), used_rm->reg (), -1, 0);
+      new_effective_addr = curr_addr->effective_addr () + addr_to_add;
+    }
+  else
+    {
+      new_curr_addr = non_mod_addr (used_rm->reg (), curr_addr->reg (), 1, 0);
+      new_effective_addr = curr_addr->effective_addr () + addr_to_add;
+    }
+
+  reg_mod* new_addr
+    = insert_addr_mod (used_rm, acc_mode,
+                       tmp_rtx<PLUS> (acc_mode,
+                                      used_rm->reg ().reg_rtx (),
+                                      curr_addr->reg ().reg_rtx ()),
+                       new_curr_addr,
+                       new_effective_addr,
+                       el, tracker, used_reg_mods, dlg, next_tmp_regno);
+  tracker.create_dependency (curr_addr, new_addr);
+  curr_addr = new_addr;
+  curr_addr->adjust_cost (clone_cost);
+
+  if (reg_used)
+    {
+      // Take into account the cloning costs of the reg.
+      int extra_cost = dlg.addr_reg_clone_cost (
+        reused_rm->reg ().reg_rtx (), *this, el);
+      curr_addr->adjust_cost (extra_cost);
+    }
+  const_iterator next_el = el;
+  ++next_el;
+  const mem_access* next_acc =
+    next_el != end () && next_el->is_mem_access ()
+    ? (const mem_access*)&*next_el : NULL;
+
+  total_cost += curr_addr->cost ();
+  return mod_addr_result (total_cost, curr_addr, 0);
+}
+
 // Internal function of try_insert_address_mods.  Inserts a reg-mod with
 // mode and addresses specified by ACC_MODE, CURR_ADDR_RTX, CURR_ADDR and
 // EFFECTIVE_ADDR before EL in the sequence.  This reg-mod will depend
@@ -2995,20 +3044,19 @@ insert_addr_mod (reg_mod* used_rm, machine_mode acc_mode,
   return ii;
 }
 
-// Find a starting address whose effective address is the single base reg REG.
+// Find a visited reg-mod whose registers' effective address is ADDR.
 // If there are multiple such addresses, try to return one that wasn't used
 // before (so that there's no cloning cost when using it).
-// Return NULL if no such address was found.
 // If VISITED_REG_MODS is not NULL, search only in the last visited values of
 // the address regs.
 ams::sequence::iterator ams::sequence::
-find_start_addr_for_reg (const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
+find_start_reg_for_addr (const addr_expr& addr,
+                         std::set<reg_mod*>& used_reg_mods,
                          visited_element_list& visited_reg_mods,
                          bool most_recent_only)
 {
   std::vector<iterator> start_addrs;
-  addr_expr end_addr = make_reg_addr (reg);
-  start_addresses ().get_relevant_addresses (end_addr,
+  start_addresses ().get_relevant_addresses (addr,
                                              std::back_inserter (start_addrs));
   iterator found_addr = end ();
 
@@ -3027,7 +3075,11 @@ find_start_addr_for_reg (const addr_reg& reg, std::set<reg_mod*>& used_reg_mods,
       const addr_expr &ae = rm->effective_addr ().is_invalid ()
                             ? make_reg_addr (rm->reg ())
                             : rm->effective_addr ();
-      if (ae.has_no_index_reg () && ae.base_reg () == reg)
+
+      // Make sure that the reg-mod's address only differs in the
+      // constant displacement.
+      std::pair<ams::disp_t, bool> sub_result = addr - ae;
+      if (sub_result.second)
         {
           found_addr = *addrs;
           if (used_reg_mods.find (rm) == used_reg_mods.end ())
