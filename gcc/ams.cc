@@ -897,16 +897,17 @@ ams::addr_expr::operator + (const addr_expr& other) const
       if (other.base_reg () == regs[i])
         reg_scales[i] += 1;
       if (other.index_reg () == regs[i])
-        reg_scales[i] += scale ();
+        reg_scales[i] += other.scale ();
     }
 
   // Make sure that only one of the regs needs to be scaled.
-  gcc_assert ((reg_scales[0] <= 1) || (reg_scales[1] <= 1));
+  gcc_assert (regs[0] == invalid_reg || reg_scales[0] == 1
+              || regs[1] == invalid_reg || reg_scales[1] == 1);
 
   addr_reg base, index;
   scale_t scale;
   disp_t disp = this->disp () + other.disp ();
-  if (reg_scales[0] > 1)
+  if (regs[0] != invalid_reg && reg_scales[0] != 1)
     {
       base = regs[1];
       index = regs[0];
@@ -2758,41 +2759,61 @@ try_insert_address_mods (iterator start_addr, const addr_expr& end_addr,
       && c_curr_addr.index_reg () == c_end_addr.index_reg ()
       && c_curr_addr.scale () != c_end_addr.scale ())
     {
-      // We can't scale if the address has a base reg.
+      // If the address has a base reg, we can't scale directly by multiplying,
+      // but we can try adding a register to increase the index reg's scale.
       if (c_curr_addr.has_base_reg ())
-        return mod_addr_result (infinite_costs);
+        {
+          addr_expr reg_to_add
+            = non_mod_addr (invalid_reg, c_curr_addr.index_reg (),
+                            c_end_addr.scale () - c_curr_addr.scale (), 0);
+          mod_addr_result add_result = try_insert_address_mods_1 (
+            reg_to_add, curr_addr,
+            clone_cost, acc_mode, el, tracker, used_reg_mods, visited_reg_mods,
+            dlg, next_tmp_regno);
 
-      // We can only scale by integers.
-      gcc_assert (c_curr_addr.scale () != 0);
-      std::div_t sr = std::div (c_end_addr.scale (), c_curr_addr.scale ());
+          if (add_result.cost == infinite_costs)
+            return mod_addr_result (infinite_costs);
 
-      if (sr.rem != 0)
-        return mod_addr_result (infinite_costs);
+          total_cost += add_result.cost;
+          curr_addr = add_result.final_addr;
+          c_curr_addr = curr_addr->effective_addr ();
+          clone_cost = 0;
+        }
+      else
+        {
+          // We can only scale by integers.
+          gcc_assert (c_curr_addr.scale () != 0);
+          std::div_t sr = std::div (c_end_addr.scale (), c_curr_addr.scale ());
 
-      scale_t scale = sr.quot;
+          if (sr.rem != 0)
+            return mod_addr_result (infinite_costs);
 
-      // The scaled displacement shouldn't overflow.
-      if (sext_hwi (c_curr_addr.disp ()*scale, GET_MODE_PRECISION (Pmode)) !=
-          c_curr_addr.disp ()*scale)
-        return mod_addr_result (infinite_costs);
+          scale_t scale = sr.quot;
 
-      curr_addr = insert_addr_mod (curr_addr, acc_mode,
-                                   tmp_rtx<MULT> (acc_mode,
-                                                  curr_addr->reg ().reg_rtx (),
-                                                  tmp_rtx<CONST_INT> (scale)),
-                                   non_mod_addr (invalid_reg,
-                                                 curr_addr->reg (),
-                                                 scale, 0),
-                                   non_mod_addr (invalid_reg,
-                                                 c_curr_addr.index_reg (),
-                                                 c_end_addr.scale (),
-                                                 c_curr_addr.disp ()*scale),
-                                   el, tracker,
-                                   used_reg_mods, dlg, next_tmp_regno);
-      c_curr_addr = curr_addr->effective_addr ();
-      curr_addr->adjust_cost (clone_cost);
-      clone_cost = 0;
-      total_cost += curr_addr->cost ();
+          // The scaled displacement shouldn't overflow.
+          if (sext_hwi (c_curr_addr.disp ()*scale,
+                        GET_MODE_PRECISION (Pmode)) !=
+              c_curr_addr.disp ()*scale)
+            return mod_addr_result (infinite_costs);
+
+          curr_addr = insert_addr_mod (curr_addr, acc_mode,
+                                       tmp_rtx<MULT> (
+                                         acc_mode, curr_addr->reg ().reg_rtx (),
+                                         tmp_rtx<CONST_INT> (scale)),
+                                       non_mod_addr (invalid_reg,
+                                                     curr_addr->reg (),
+                                                     scale, 0),
+                                       non_mod_addr (invalid_reg,
+                                                     c_curr_addr.index_reg (),
+                                                     c_end_addr.scale (),
+                                                     c_curr_addr.disp ()*scale),
+                                       el, tracker,
+                                       used_reg_mods, dlg, next_tmp_regno);
+          c_curr_addr = curr_addr->effective_addr ();
+          curr_addr->adjust_cost (clone_cost);
+          clone_cost = 0;
+          total_cost += curr_addr->cost ();
+        }
     }
 
   // Try subtracting regs.
