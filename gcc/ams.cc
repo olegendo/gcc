@@ -2983,6 +2983,7 @@ try_insert_address_mods_1 (addr_expr addr_to_add, reg_mod* curr_addr,
   else
     used_rm = reused_rm;
 
+  addr_to_add = used_rm->effective_addr ();
 
   addr_expr new_curr_addr, new_effective_addr;
   if (subtract)
