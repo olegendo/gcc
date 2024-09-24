@@ -11483,6 +11483,26 @@ sh_movsf_ie_y_split_p (rtx op0, rtx op1)
   return false;
 }
 
+/* Return true if it moves reg from/to subreg of multiword mode.  */
+bool
+sh_movsf_ie_subreg_multiword_p (rtx op0, rtx op1)
+{
+  if (REG_P (op0)
+      && (SUBREG_P (op1)
+	  && (GET_MODE (SUBREG_REG (op1)) == SCmode
+	      || GET_MODE (SUBREG_REG (op1)) == DImode
+	      || GET_MODE (SUBREG_REG (op1)) == TImode)))
+    return true;
+  if (REG_P (op1)
+      && (SUBREG_P (op0)
+	  && (GET_MODE (SUBREG_REG (op0)) == SCmode
+	      || GET_MODE (SUBREG_REG (op0)) == DImode
+	      || GET_MODE (SUBREG_REG (op0)) == TImode)))
+    return true;
+
+  return false;
+}
+
 static void
 sh_conditional_register_usage (void)
 {

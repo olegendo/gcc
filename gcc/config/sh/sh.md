@@ -6200,6 +6200,7 @@
 				" f,r,G,H,m,f,FQ,m,r,y,f,>,y,r,y,>,y"))
    (use (reg:SI FPSCR_MODES_REG))]
   "TARGET_SH2E && sh_lra_p ()
+   && ! sh_movsf_ie_y_split_p (operands[0], operands[1])
    && (arith_reg_operand (operands[0], SFmode)
        || fpul_operand (operands[0], SFmode)
        || arith_reg_operand (operands[1], SFmode)
@@ -6269,6 +6270,35 @@
       (const_string "none")
       (const_string "none")])])
 
+(define_insn_and_split "movsf_ie_rffr"
+  [(set (match_operand:SF 0 "arith_reg_dest" "=f,r,rf")
+	(match_operand:SF 1 "arith_reg_operand" "f,r,fr"))
+   (use (reg:SI FPSCR_MODES_REG))
+   (clobber (match_scratch:SF 2 "=X,X,y"))]
+  "TARGET_SH2E && sh_lra_p ()"
+  "@
+	fmov	%1,%0
+	mov	%1,%0
+	#"
+  "reload_completed
+   && (FP_REGISTER_P (REGNO (operands[0]))
+       != FP_REGISTER_P (REGNO (operands[1])))"
+  [(const_int 0)]
+{
+  emit_insn (gen_movsf_ie_ra (operands[2], operands[1]));
+  emit_insn (gen_movsf_ie_ra (operands[0], operands[2]));
+}
+  [(set_attr "type" "fmove,move,*")
+   (set_attr_alternative "length"
+     [(const_int 2)
+      (const_int 2)
+      (const_int 4)])
+   (set_attr_alternative "fp_mode"
+     [(if_then_else (eq_attr "fmovd" "yes")
+		    (const_string "single") (const_string "none"))
+      (const_string "none")
+      (const_string "none")])])
+
 (define_insn "movsf_ie_F_z"
   [(set (match_operand:SF 0 "fp_arith_reg_operand" "=f")
 	(match_operand:SF 1 "const_double_operand" "F"))
@@ -6327,6 +6357,16 @@
 	{
 	  if (GET_CODE (operands[0]) == SCRATCH)
 	    DONE;
+	  /* reg from/to multiword subreg may be splitted to several reg from/to
+	     subreg of SImode by subreg1 pass.  This confuses our splitted
+	     movsf logic for LRA and will end up in bad code or ICE.  Use a special
+	     pattern so that LRA can optimize this case.  */
+	  if (! lra_in_progress && ! reload_completed
+	      && sh_movsf_ie_subreg_multiword_p (operands[0], operands[1]))
+	    {
+	      emit_insn (gen_movsf_ie_rffr (operands[0], operands[1]));
+	      DONE;
+	    }
 	  if (GET_CODE (operands[1]) == CONST_DOUBLE
 	      &&  ! satisfies_constraint_G (operands[1])
 	      &&  ! satisfies_constraint_H (operands[1])
@@ -6336,7 +6376,12 @@
 		   && satisfies_constraint_Q (operands[1]))
 	    emit_insn (gen_movsf_ie_Q_z (operands[0], operands[1]));
 	  else if (sh_movsf_ie_y_split_p (operands[0], operands[1]))
-	    emit_insn (gen_movsf_ie_y (operands[0], operands[1]));
+	    {
+	      if (lra_in_progress)
+		emit_insn (gen_movsf_ie (operands[0], operands[1]));
+	      else
+		emit_insn (gen_movsf_ie_y (operands[0], operands[1]));
+	    }
 	  else
 	    emit_insn (gen_movsf_ie_ra (operands[0], operands[1]));
 	  DONE;
